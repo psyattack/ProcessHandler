@@ -3,7 +3,7 @@
 //! and process details.
 
 use egui::{
-    CornerRadius, Id, Order, Rect, Sense, Stroke, Ui, emath::easing, pos2, vec2,
+    CornerRadius, Id, LayerId, Order, Pos2, Rect, Sense, Stroke, Ui, emath::easing, pos2, vec2,
 };
 use crate::gui::components::widgets::{self, Glyph, Kind};
 use crate::gui::state::GuiState;
@@ -150,6 +150,7 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
             // 2. Scrollable Body with strictly pinned width
             ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
             egui::ScrollArea::vertical()
+                .id_salt("inspector_scroll_area")
                 .max_width(width)
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
@@ -354,37 +355,28 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
             };
             widgets::eyebrow(ui, "03", action_header);
 
-            let mut remove_action_idx = None;
-            for (idx, action) in rule.actions.iter_mut().enumerate() {
-                if render_action_card(ui, state, action, idx, t, false) {
-                    remove_action_idx = Some(idx);
-                }
-            }
-
-            if let Some(idx) = remove_action_idx {
-                rule.actions.remove(idx);
-            }
-
-            // Add action step selector
-            render_add_action_button(ui, &mut rule.actions, "add_action_drawer", "+ ADD ACTION...");
+            render_actions_pipeline(
+                ui,
+                state,
+                &mut rule.actions,
+                "main_actions",
+                false,
+                t,
+            );
 
             // 3. Actions on Process Exit
             if is_process_trigger {
                 widgets::hrule(ui);
                 widgets::eyebrow(ui, "04", "ACTIONS ON PROCESS TERMINATION");
 
-                let mut remove_exit_idx = None;
-                for (idx, action) in rule.on_exit_actions.iter_mut().enumerate() {
-                    if render_action_card(ui, state, action, idx, t, true) {
-                        remove_exit_idx = Some(idx);
-                    }
-                }
-
-                if let Some(idx) = remove_exit_idx {
-                    rule.on_exit_actions.remove(idx);
-                }
-
-                render_add_action_button(ui, &mut rule.on_exit_actions, "add_exit_action_drawer", "+ ADD ACTION...");
+                render_actions_pipeline(
+                    ui,
+                    state,
+                    &mut rule.on_exit_actions,
+                    "exit_actions",
+                    true,
+                    t,
+                );
             }
 
             widgets::hrule(ui);
@@ -485,19 +477,494 @@ fn render_add_action_button(ui: &mut Ui, actions: &mut Vec<Action>, combo_id: &s
         });
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct DndDragSession {
+    source_idx: usize,
+    target_idx: usize,
+    card_width: f32,
+}
+
+fn action_type_badge(action: &Action) -> &'static str {
+    match action {
+        Action::StartProcess { close_on_exit, .. } => {
+            if *close_on_exit {
+                "LAUNCH COMPANION"
+            } else {
+                "LAUNCH PROCESS"
+            }
+        }
+        Action::KillProcess { .. } => "KILL PROCESS",
+        Action::PowerShell { .. } => "POWERSHELL",
+        Action::Cmd { .. } => "CMD",
+        Action::Notification { .. } => "NOTIFICATION",
+        Action::Sound { .. } => "AUDIO / VOLUME",
+        Action::ProcessAudio { .. } => "PROCESS AUDIO",
+        Action::SystemPower { .. } => "SYSTEM POWER",
+        Action::Delay { .. } => "DELAY",
+        Action::HttpWebhook { .. } => "WEBHOOK",
+    }
+}
+
+fn action_summary_preview(action: &Action) -> String {
+    match action {
+        Action::StartProcess { file_path, .. } => {
+            let name = std::path::Path::new(file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(file_path);
+            if name.is_empty() {
+                "Launch executable".to_string()
+            } else {
+                format!("Launch {}", name)
+            }
+        }
+        Action::KillProcess { process_name, .. } => format!("Kill {}", process_name),
+        Action::PowerShell { script, .. } => {
+            let first_line = script.lines().next().unwrap_or("PowerShell script").trim();
+            if first_line.is_empty() {
+                "PowerShell script".to_string()
+            } else {
+                first_line.chars().take(40).collect()
+            }
+        }
+        Action::Cmd { command, .. } => {
+            let c = command.trim();
+            if c.is_empty() {
+                "Command prompt".to_string()
+            } else {
+                c.chars().take(40).collect()
+            }
+        }
+        Action::Notification { title, .. } => {
+            if title.is_empty() {
+                "Notification toast".to_string()
+            } else {
+                format!("Notify \"{}\"", title)
+            }
+        }
+        Action::Sound { sound_type, volume_level } => match sound_type {
+            SoundActionType::PlayBeep => "Play System Beep".into(),
+            SoundActionType::Mute => "Mute Master Audio".into(),
+            SoundActionType::Unmute => "Unmute Master Audio".into(),
+            SoundActionType::ToggleMute => "Toggle Master Mute".into(),
+            SoundActionType::SetVolume => format!("Master Volume {}%", volume_level),
+        },
+        Action::ProcessAudio {
+            process_name,
+            action_type,
+            volume_level,
+        } => match action_type {
+            ProcessAudioActionType::Mute => format!("Mute {}", process_name),
+            ProcessAudioActionType::Unmute => format!("Unmute {}", process_name),
+            ProcessAudioActionType::ToggleMute => format!("Toggle mute {}", process_name),
+            ProcessAudioActionType::SetVolume => format!("Volume {}% {}", volume_level, process_name),
+        },
+        Action::SystemPower { power_type } => format!("Power: {:?}", power_type),
+        Action::Delay { seconds } => format!("Wait {:.1} seconds", seconds),
+        Action::HttpWebhook { url, method, .. } => {
+            if url.is_empty() {
+                "HTTP Webhook".to_string()
+            } else {
+                format!("{} {}", method, url)
+            }
+        }
+    }
+}
+
+fn render_drop_slot(
+    ui: &mut Ui,
+    slot_idx: usize,
+    active_dst: Option<usize>,
+    active_src: Option<usize>,
+    pipeline_id: &str,
+    is_exit_pipeline: bool,
+    t: &Tokens,
+) {
+    let is_targeted = if let (Some(dst), Some(src)) = (active_dst, active_src) {
+        dst == slot_idx && slot_idx != src && slot_idx != src + 1
+    } else {
+        false
+    };
+
+    let anim_id = ui.id().with(("slot_anim", pipeline_id, slot_idx));
+    let anim = ui.ctx().animate_bool_with_time_and_easing(anim_id, is_targeted, 0.18, easing::cubic_out);
+
+    if anim > 0.001 {
+        let slot_h = 22.0 * anim;
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), slot_h), Sense::hover());
+        let p = ui.painter();
+        let mid_y = rect.center().y;
+
+        // Background subtle accent tint
+        p.rect_filled(
+            rect,
+            CornerRadius::same(2),
+            t.accent_ink.gamma_multiply(0.08 * anim),
+        );
+
+        // Glowing laser line
+        let line_stroke = Stroke::new(1.8 * anim, t.accent_ink.gamma_multiply(anim));
+        p.hline(rect.left() + 24.0..=rect.right() - 8.0, mid_y, line_stroke);
+
+        // Left indicator bead with halo
+        let bead_pos = pos2(rect.left() + 12.0, mid_y);
+        p.circle_filled(bead_pos, 3.5 * anim, t.accent_ink.gamma_multiply(anim));
+        p.circle_stroke(
+            bead_pos,
+            5.5 * anim,
+            Stroke::new(1.0, t.accent_ink.gamma_multiply(0.4 * anim)),
+        );
+
+        // Step number label at the right of the drop line
+        let prefix = if is_exit_pipeline { "EXIT" } else { "STEP" };
+        let step_num = if let Some(src) = active_src {
+            if slot_idx > src {
+                slot_idx
+            } else {
+                slot_idx + 1
+            }
+        } else {
+            slot_idx + 1
+        };
+        let label = format!("{} {:02}", prefix, step_num);
+        let text_color = t.accent_ink.gamma_multiply(anim);
+        let galley = widgets::caps(ui, &label, 9.0, theme::mono_bold(), 1.0, text_color);
+        let text_pos = pos2(rect.right() - galley.size().x - 12.0, mid_y - galley.size().y * 0.5);
+        p.galley_with_override_text_color(text_pos, galley, text_color);
+    }
+}
+
+fn render_floating_drag_preview(
+    ui: &Ui,
+    action: &Action,
+    session: DndDragSession,
+    pointer_pos: Option<Pos2>,
+    is_exit_pipeline: bool,
+    pipeline_id: &str,
+    t: &Tokens,
+) {
+    let Some(pointer) = pointer_pos else { return };
+
+    let card_w = session.card_width.clamp(280.0, 520.0);
+    let card_h = 56.0;
+    let preview_pos = pos2(
+        pointer.x - card_w * 0.5,
+        pointer.y - card_h * 0.5,
+    );
+    let preview_rect = Rect::from_min_size(preview_pos, vec2(card_w, card_h));
+
+    let painter = ui.ctx().layer_painter(LayerId::new(Order::Tooltip, Id::new(("dnd_float_preview", pipeline_id))));
+
+    // Elevated drop shadow
+    painter.add(theme::shadow(t).as_shape(preview_rect, CornerRadius::same(2)));
+
+    // Card background & vibrant border
+    painter.rect_filled(preview_rect, CornerRadius::same(2), t.bg);
+    painter.rect_stroke(
+        preview_rect,
+        CornerRadius::same(2),
+        Stroke::new(1.5, t.accent_ink),
+        egui::StrokeKind::Inside,
+    );
+
+    // Top accent stripe
+    painter.hline(preview_rect.x_range(), preview_rect.top() + 1.0, Stroke::new(2.0, t.accent_ink));
+
+    // Grip dots on the left of floating card
+    let grip_m = pos2(preview_rect.left() + 14.0, preview_rect.center().y);
+    for x in [-2.8, 2.8] {
+        for y in [-4.0, 0.0, 4.0] {
+            painter.circle_filled(grip_m + vec2(x, y), 1.2, t.accent_ink);
+        }
+    }
+
+    // Step indicator: "STEP 01"
+    let prefix = if is_exit_pipeline { "EXIT" } else { "STEP" };
+    let step_txt = format!("{} {:02}", prefix, session.source_idx + 1);
+    let step_galley = widgets::caps(ui, &step_txt, 11.0, theme::mono_bold(), 1.0, t.accent_ink);
+    painter.galley_with_override_text_color(
+        pos2(preview_rect.left() + 26.0, preview_rect.top() + 8.0),
+        step_galley,
+        t.accent_ink,
+    );
+
+    // Type badge
+    let type_badge = action_type_badge(action);
+    let badge_galley = widgets::caps(ui, type_badge, 10.0, theme::mono(), 1.0, t.ink_strong);
+    let badge_rect = Rect::from_min_size(
+        pos2(preview_rect.left() + 84.0, preview_rect.top() + 7.0),
+        vec2(badge_galley.size().x + 10.0, 18.0),
+    );
+    painter.rect_filled(badge_rect, CornerRadius::ZERO, t.sunken);
+    painter.rect_stroke(badge_rect, CornerRadius::ZERO, t.hairline(), egui::StrokeKind::Inside);
+    painter.galley_with_override_text_color(
+        badge_rect.center() - badge_galley.size() * 0.5,
+        badge_galley,
+        t.ink_strong,
+    );
+
+    // Live destination indicator on far right: "➜ STEP 02"
+    let dest_num = if session.target_idx > session.source_idx {
+        session.target_idx
+    } else {
+        session.target_idx + 1
+    };
+    let dest_txt = format!("➜ {} {:02}", prefix, dest_num);
+    let dest_galley = widgets::caps(ui, &dest_txt, 10.0, theme::mono_bold(), 1.0, t.accent_ink);
+    painter.galley_with_override_text_color(
+        pos2(preview_rect.right() - dest_galley.size().x - 12.0, preview_rect.top() + 9.0),
+        dest_galley,
+        t.accent_ink,
+    );
+
+    // Action summary line
+    let summary = action_summary_preview(action);
+    let summary_galley = ui.painter().layout_no_wrap(
+        summary,
+        egui::FontId::new(11.0, theme::mono()),
+        t.muted,
+    );
+    painter.galley_with_override_text_color(
+        pos2(preview_rect.left() + 26.0, preview_rect.top() + 32.0),
+        summary_galley,
+        t.muted,
+    );
+}
+
+fn render_actions_pipeline(
+    ui: &mut Ui,
+    state: &mut GuiState,
+    actions: &mut Vec<Action>,
+    pipeline_id: &str,
+    is_exit_pipeline: bool,
+    t: &Tokens,
+) {
+    let dnd_id = ui.id().with(("action_pipeline_dnd", pipeline_id));
+
+    let mut dnd_session: Option<DndDragSession> = ui.data_mut(|d| d.get_temp(dnd_id));
+
+    // Cancel on Escape key
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        dnd_session = None;
+        ui.data_mut(|d| d.remove_temp::<DndDragSession>(dnd_id));
+    }
+
+    let pointer_released = ui.input(|i| i.pointer.any_released());
+    let pointer_pos = ui.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
+
+    // When dragging: handle mouse wheel scrolling and edge auto-scrolling
+    if dnd_session.is_some() {
+        // 1. Mouse wheel scrolling while holding drag
+        let wheel_delta_y = ui.input(|i| i.smooth_scroll_delta.y);
+        if wheel_delta_y != 0.0 {
+            ui.scroll_with_delta(vec2(0.0, wheel_delta_y * 1.5));
+            ui.ctx().request_repaint();
+        }
+
+        // 2. Edge auto-scrolling when pointer is near top or bottom of viewport
+        if let Some(pointer) = pointer_pos {
+            let viewport = ui.clip_rect();
+            // Check if pointer is horizontally within or near the drawer column
+            if pointer.x >= viewport.left() - 60.0 && pointer.x <= viewport.right() + 60.0 {
+                let edge_zone = 90.0;
+                let view_top = viewport.top();
+                let view_bottom = viewport.bottom();
+
+                // Near top edge: auto-scroll up
+                if pointer.y < view_top + edge_zone {
+                    let factor = ((view_top + edge_zone - pointer.y) / edge_zone).clamp(0.1, 3.0);
+                    let scroll_speed = 8.0 + 26.0 * factor;
+                    ui.scroll_with_delta(vec2(0.0, scroll_speed));
+                    ui.ctx().request_repaint();
+                }
+                // Near bottom edge: auto-scroll down
+                else if pointer.y > view_bottom - edge_zone {
+                    let factor = ((pointer.y - (view_bottom - edge_zone)) / edge_zone).clamp(0.1, 3.0);
+                    let scroll_speed = 8.0 + 26.0 * factor;
+                    ui.scroll_with_delta(vec2(0.0, -scroll_speed));
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
+    }
+
+    let active_src = dnd_session.as_ref().map(|s| s.source_idx);
+    let active_dst = dnd_session.as_ref().map(|s| s.target_idx);
+
+    let mut remove_idx = None;
+    let mut move_up_idx = None;
+    let mut move_down_idx = None;
+    let mut drag_started_idx = None;
+    let mut current_centers = Vec::with_capacity(actions.len());
+
+    let total = actions.len();
+    for (idx, action) in actions.iter_mut().enumerate() {
+        // Render drop slot BEFORE card idx
+        render_drop_slot(ui, idx, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
+
+        // Render card idx
+        let is_ghost = active_src == Some(idx);
+        let resp = render_action_card(
+            ui,
+            state,
+            action,
+            idx,
+            total,
+            t,
+            is_exit_pipeline,
+            is_ghost,
+        );
+
+        current_centers.push(resp.card_rect.center().y);
+
+        if resp.remove_clicked {
+            remove_idx = Some(idx);
+        }
+        if resp.move_up_clicked {
+            move_up_idx = Some(idx);
+        }
+        if resp.move_down_clicked {
+            move_down_idx = Some(idx);
+        }
+        if resp.drag_started {
+            drag_started_idx = Some(idx);
+        }
+    }
+
+    // Render trailing drop slot (after last card)
+    if total > 0 {
+        render_drop_slot(ui, total, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
+    }
+
+    // Update target_idx using fresh current_centers from this exact frame
+    if let (Some(session), Some(pointer)) = (&mut dnd_session, pointer_pos) {
+        let n = current_centers.len();
+        if n > 0 {
+            if pointer.y < current_centers[0] {
+                session.target_idx = 0;
+            } else if pointer.y >= current_centers[n - 1] {
+                session.target_idx = n;
+            } else {
+                for i in 0..(n - 1) {
+                    if pointer.y >= current_centers[i] && pointer.y < current_centers[i + 1] {
+                        session.target_idx = i + 1;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Commit reorder on mouse release
+    if pointer_released {
+        if let Some(session) = dnd_session {
+            let src = session.source_idx;
+            let dst = session.target_idx;
+            if src < actions.len() && dst <= actions.len() {
+                if dst < src {
+                    let item = actions.remove(src);
+                    actions.insert(dst, item);
+                } else if dst > src + 1 {
+                    let item = actions.remove(src);
+                    actions.insert(dst - 1, item);
+                }
+            }
+            dnd_session = None;
+            ui.data_mut(|d| d.remove_temp::<DndDragSession>(dnd_id));
+        }
+    }
+
+    // Handle button moves
+    if let Some(idx) = move_up_idx {
+        if idx > 0 && idx < actions.len() {
+            actions.swap(idx, idx - 1);
+        }
+    }
+    if let Some(idx) = move_down_idx {
+        if idx + 1 < actions.len() {
+            actions.swap(idx, idx + 1);
+        }
+    }
+    if let Some(idx) = remove_idx {
+        if idx < actions.len() {
+            actions.remove(idx);
+        }
+    }
+
+    // Handle newly started drag
+    if let Some(src_idx) = drag_started_idx {
+        dnd_session = Some(DndDragSession {
+            source_idx: src_idx,
+            target_idx: src_idx,
+            card_width: ui.available_width(),
+        });
+    }
+
+    // Save or clear dnd_session
+    if let Some(session) = dnd_session {
+        ui.data_mut(|d| d.insert_temp(dnd_id, session));
+        ui.ctx().request_repaint();
+
+        // Render floating drag preview card!
+        render_floating_drag_preview(
+            ui,
+            &actions[session.source_idx],
+            session,
+            pointer_pos,
+            is_exit_pipeline,
+            pipeline_id,
+            t,
+        );
+    }
+
+    // Add action button at the bottom of the pipeline
+    render_add_action_button(
+        ui,
+        actions,
+        &format!("add_action_{}", pipeline_id),
+        "+ ADD ACTION...",
+    );
+}
+
+struct ActionCardResponse {
+    pub remove_clicked: bool,
+    pub move_up_clicked: bool,
+    pub move_down_clicked: bool,
+    pub drag_started: bool,
+    pub card_rect: Rect,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_action_card(
     ui: &mut Ui,
     state: &GuiState,
     action: &mut Action,
     idx: usize,
+    total_count: usize,
     t: &Tokens,
     is_exit_pipeline: bool,
-) -> bool {
+    is_being_dragged: bool,
+) -> ActionCardResponse {
     let mut remove_clicked = false;
+    let mut move_up_clicked = false;
+    let mut move_down_clicked = false;
+    let mut drag_started = false;
 
-    egui::Frame::new()
-        .fill(t.sunken)
-        .stroke(t.hairline())
+    let ghost_id = ui.id().with(("card_ghost", is_exit_pipeline, idx));
+    let ghost_anim = ui.ctx().animate_bool_with_time_and_easing(ghost_id, is_being_dragged, 0.15, easing::cubic_out);
+
+    let (fill, stroke) = if ghost_anim > 0.001 {
+        (
+            t.sunken,
+            Stroke::new(1.0, t.accent_ink.gamma_multiply(0.45 * ghost_anim)),
+        )
+    } else {
+        (t.sunken, t.hairline())
+    };
+
+    let card_response = egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
         .corner_radius(CornerRadius::ZERO)
         .inner_margin(egui::Margin::symmetric(14, 12))
         .show(ui, |ui| {
@@ -511,29 +978,48 @@ fn render_action_card(
                 // 1. CARD TOP STRIP: Step number + Type badge on left; Close button exclusively on far right
                 ui.horizontal(|ui| {
                     ui.set_width(ui.available_width());
+
+                    // Drag grip handle on far left
+                    let grip_resp = widgets::drag_handle(ui, "Drag to reorder step");
+                    if grip_resp.drag_started() {
+                        drag_started = true;
+                    }
+
                     let prefix = if is_exit_pipeline { "EXIT" } else { "STEP" };
                     widgets::hud(ui, &format!("{} {:02}", prefix, idx + 1), t.accent_ink);
 
-                    let type_badge = match action {
-                        Action::StartProcess { close_on_exit, .. } => {
-                            if *close_on_exit { "LAUNCH COMPANION" } else { "LAUNCH PROCESS" }
-                        }
-                        Action::KillProcess { .. } => "KILL PROCESS",
-                        Action::PowerShell { .. } => "POWERSHELL",
-                        Action::Cmd { .. } => "CMD",
-                        Action::Notification { .. } => "NOTIFICATION",
-                        Action::Sound { .. } => "AUDIO / VOLUME",
-                        Action::ProcessAudio { .. } => "PROCESS AUDIO",
-                        Action::SystemPower { .. } => "SYSTEM POWER",
-                        Action::Delay { .. } => "DELAY",
-                        Action::HttpWebhook { .. } => "WEBHOOK",
-                    };
-                    widgets::badge(ui, type_badge, t.muted);
+                    let type_badge = action_type_badge(action);
+                    if is_being_dragged {
+                        widgets::badge(ui, "MOVING STEP...", t.accent_ink);
+                    } else {
+                        widgets::badge(ui, type_badge, t.muted);
+                    }
 
-                    // Close button aligned to right edge without colliding with any content below
+                    // Right-to-left layout for buttons: [Close] [Down] [Up]
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if widgets::glyph_button(ui, Glyph::Close, "Remove Step").clicked() {
                             remove_clicked = true;
+                        }
+
+                        if total_count > 1 {
+                            if idx + 1 < total_count && widgets::glyph_button(ui, Glyph::Down, "Move Step Down").clicked() {
+                                move_down_clicked = true;
+                            }
+                            if idx > 0 && widgets::glyph_button(ui, Glyph::Up, "Move Step Up").clicked() {
+                                move_up_clicked = true;
+                            }
+                        }
+
+                        // Middle blank space on top strip is also draggable
+                        let empty_w = (ui.available_width() - 8.0).max(0.0);
+                        if empty_w > 0.0 {
+                            let (_, strip_resp) = ui.allocate_exact_size(vec2(empty_w, theme::CONTROL_H), Sense::click_and_drag());
+                            if strip_resp.drag_started() {
+                                drag_started = true;
+                            }
+                            if strip_resp.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                            }
                         }
                     });
                 });
@@ -541,7 +1027,8 @@ fn render_action_card(
                 widgets::hrule(ui);
 
                 // 2. CARD BODY: Full-width stacked parameter fields
-                match action {
+                ui.add_enabled_ui(!is_being_dragged, |ui| {
+                    match action {
                     Action::StartProcess {
                         file_path,
                         arguments,
@@ -788,9 +1275,16 @@ fn render_action_card(
                     }
                 }
             });
+            });
         });
 
-    remove_clicked
+    ActionCardResponse {
+        remove_clicked,
+        move_up_clicked,
+        move_down_clicked,
+        drag_started,
+        card_rect: card_response.response.rect,
+    }
 }
 
 fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSnapshotItem, t: &Tokens) {

@@ -384,9 +384,11 @@ pub fn window_edges(ctx: &egui::Context) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Glyph {
     Close,
+    Up,
+    Down,
 }
 
-/// Small outlined square button with a drawn glyph (X); inverts on hover.
+/// Small outlined square button with a drawn glyph (X, Up, Down); inverts on hover.
 pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::click());
@@ -405,9 +407,49 @@ pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
             p.line_segment([m + vec2(-s, -s), m + vec2(s, s)], Stroke::new(1.5, c));
             p.line_segment([m + vec2(-s, s), m + vec2(s, -s)], Stroke::new(1.5, c));
         }
+        Glyph::Up => {
+            let s = 3.5;
+            p.line_segment([m + vec2(-s, s * 0.5), m + vec2(0.0, -s * 0.8)], Stroke::new(1.4, c));
+            p.line_segment([m + vec2(0.0, -s * 0.8), m + vec2(s, s * 0.5)], Stroke::new(1.4, c));
+        }
+        Glyph::Down => {
+            let s = 3.5;
+            p.line_segment([m + vec2(-s, -s * 0.5), m + vec2(0.0, s * 0.8)], Stroke::new(1.4, c));
+            p.line_segment([m + vec2(0.0, s * 0.8), m + vec2(s, -s * 0.5)], Stroke::new(1.4, c));
+        }
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
     resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A precision drag handle with 6 studio dots; senses click and drag.
+pub fn drag_handle(ui: &mut Ui, tip: &str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(vec2(18.0, theme::CONTROL_H), Sense::click_and_drag());
+    let hovered = resp.hovered();
+    let dragged = resp.dragged();
+    let p = ui.painter();
+    if hovered || dragged {
+        p.rect_filled(rect, CornerRadius::ZERO, t.sunken);
+    }
+    let c = if dragged {
+        t.accent_ink
+    } else if hovered {
+        t.ink
+    } else {
+        t.muted.gamma_multiply(0.6)
+    };
+    let m = rect.center();
+    let dx = 2.8;
+    let dy = 3.8;
+    for x in [-dx, dx] {
+        for y in [-dy, 0.0, dy] {
+            p.circle_filled(m + vec2(x, y), 1.2, c);
+        }
+    }
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    let cursor = if dragged { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab };
+    resp.on_hover_text(tip).on_hover_cursor(cursor)
 }
 
 /// App wordmark in display font with accent color suffix, vertically centered in container of given height.
