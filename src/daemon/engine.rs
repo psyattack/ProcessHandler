@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+use tokio::sync::mpsc;
 use crate::config::AppConfig;
 use crate::ipc::{DaemonState, IpcRequest, IpcResponse};
 use crate::models::{Action, LogItem, ProcessMatchMode, Rule, ScheduleType, SystemEventType, Trigger};
@@ -14,6 +15,16 @@ pub struct BoundProcess {
     pub target_executable: String,
 }
 
+#[derive(Debug)]
+pub enum ActionCompletionEvent {
+    Log {
+        level: String,
+        category: String,
+        message: String,
+    },
+    AddBoundProcess(BoundProcess),
+}
+
 pub struct DaemonEngine {
     pub config: AppConfig,
     pub start_time: Instant,
@@ -22,12 +33,15 @@ pub struct DaemonEngine {
     pub active_bound_processes: Vec<BoundProcess>,
     pub rule_last_triggered: HashMap<String, Instant>,
     pub active_rule_pids: HashMap<String, HashSet<u32>>,
+    action_tx: mpsc::UnboundedSender<ActionCompletionEvent>,
+    action_rx: mpsc::UnboundedReceiver<ActionCompletionEvent>,
 }
 
 impl DaemonEngine {
     pub const MAX_LOGS: usize = 100;
 
     pub fn new(config: AppConfig) -> Self {
+        let (action_tx, action_rx) = mpsc::unbounded_channel();
         Self {
             config,
             start_time: Instant::now(),
@@ -36,6 +50,21 @@ impl DaemonEngine {
             active_bound_processes: Vec::new(),
             rule_last_triggered: HashMap::new(),
             active_rule_pids: HashMap::new(),
+            action_tx,
+            action_rx,
+        }
+    }
+
+    pub fn drain_action_events(&mut self) {
+        while let Ok(event) = self.action_rx.try_recv() {
+            match event {
+                ActionCompletionEvent::Log { level, category, message } => {
+                    self.log(&level, &category, &message);
+                }
+                ActionCompletionEvent::AddBoundProcess(bp) => {
+                    self.active_bound_processes.push(bp);
+                }
+            }
         }
     }
 
@@ -53,6 +82,7 @@ impl DaemonEngine {
     }
 
     pub async fn tick_process_events(&mut self) {
+        self.drain_action_events();
         let events = self.watcher.poll_changes();
         for event in events {
             self.handle_process_event(event).await;
@@ -109,7 +139,7 @@ impl DaemonEngine {
 
                             if is_first {
                                 if !rule.actions.is_empty() {
-                                    self.try_execute_rule(rule, &event.process_name, event.pid).await;
+                                    let _ = self.try_execute_rule(rule, &event.process_name, event.pid).await;
                                 }
                             } else if !rule.actions.is_empty() {
                                 self.log(
@@ -122,7 +152,7 @@ impl DaemonEngine {
                                 );
                             }
                         } else if !rule.actions.is_empty() {
-                            self.try_execute_rule(rule, &event.process_name, event.pid).await;
+                            let _ = self.try_execute_rule(rule, &event.process_name, event.pid).await;
                         }
                     }
                 }
@@ -210,10 +240,10 @@ impl DaemonEngine {
                     if Self::matches_process(process_name, &event.process_name, *match_mode) {
                         if *single_instance {
                             if single_instance_rules_exited.contains(&rule.id) {
-                                self.try_execute_exit_actions(rule, &event.process_name, event.pid).await;
+                                let _ = self.try_execute_exit_actions(rule, &event.process_name, event.pid).await;
                             }
                         } else {
-                            self.try_execute_exit_actions(rule, &event.process_name, event.pid).await;
+                            let _ = self.try_execute_exit_actions(rule, &event.process_name, event.pid).await;
                         }
                     }
                 }
@@ -222,6 +252,7 @@ impl DaemonEngine {
     }
 
     pub async fn handle_system_event(&mut self, event: SystemEventType) {
+        self.drain_action_events();
         let event_name = format!("{:?}", event);
         self.log("INFO", "SYSTEM", &format!("System Event: {}", event_name));
 
@@ -233,13 +264,14 @@ impl DaemonEngine {
 
             if let Some(Trigger::SystemEvent { event_type, .. }) = &rule.trigger {
                 if *event_type == event {
-                    self.try_execute_rule(rule, &event_name, 0).await;
+                    let _ = self.try_execute_rule(rule, &event_name, 0).await;
                 }
             }
         }
     }
 
     pub async fn tick_schedule(&mut self) {
+        self.drain_action_events();
         let now_instant = Instant::now();
         let now_local = chrono::Local::now();
         let rules = self.config.rules.clone();
@@ -292,7 +324,7 @@ impl DaemonEngine {
                         };
 
                         if should_run {
-                            self.try_execute_rule(rule, &format!("Schedule Interval {}s", interval), 0).await;
+                            let _ = self.try_execute_rule(rule, &format!("Schedule Interval {}s", interval), 0).await;
                         }
                     }
                     ScheduleType::Daily => {
@@ -314,7 +346,7 @@ impl DaemonEngine {
                                     None => false,
                                 };
                                 if !already_ran {
-                                    self.try_execute_rule(rule, &format!("Daily Schedule {}", t_str), 0).await;
+                                    let _ = self.try_execute_rule(rule, &format!("Daily Schedule {}", t_str), 0).await;
                                 }
                             }
                         }
@@ -330,7 +362,7 @@ impl DaemonEngine {
                             if cur_datetime >= target_cmp {
                                 let already_ran = self.rule_last_triggered.contains_key(&rule.id);
                                 if !already_ran {
-                                    self.try_execute_rule(rule, &format!("One-Shot Schedule {}", target), 0).await;
+                                    let _ = self.try_execute_rule(rule, &format!("One-Shot Schedule {}", target), 0).await;
                                     if let Some(stored) = self.config.rules.iter_mut().find(|r| r.id == rule.id) {
                                         stored.is_enabled = false;
                                         let _ = self.config.save_to_file(AppConfig::config_path());
@@ -348,55 +380,110 @@ impl DaemonEngine {
         }
     }
 
-    pub async fn try_execute_rule(&mut self, rule: &Rule, context_name: &str, pid: u32) {
+    pub async fn try_execute_rule(
+        &mut self,
+        rule: &Rule,
+        context_name: &str,
+        pid: u32,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        self.drain_action_events();
+
         if let Some(last) = self.rule_last_triggered.get(&rule.id) {
-            if last.elapsed().as_secs_f64() < rule.cooldown_seconds {
-                return;
+            if last.elapsed().as_secs_f64() < rule.cooldown_seconds && context_name != "MANUAL_TEST" {
+                return None;
             }
         }
 
         self.rule_last_triggered.insert(rule.id.clone(), Instant::now());
         self.log("TRIGGER", "RULE", &format!("Rule '{}' triggered by {}", rule.name, context_name));
 
+        if rule.actions.is_empty() {
+            return None;
+        }
+
         let mut ctx = HashMap::new();
         ctx.insert("ProcessName".into(), context_name.into());
         ctx.insert("ProcessId".into(), pid.to_string());
         ctx.insert("Timestamp".into(), chrono::Local::now().to_rfc3339());
 
-        for action in &rule.actions {
-            if let Action::StartProcess { file_path, close_on_exit, .. } = action {
-                if *close_on_exit {
-                    self.active_bound_processes.push(BoundProcess {
-                        rule_id: rule.id.clone(),
-                        primary_process_name: context_name.to_string(),
-                        primary_pid: pid,
-                        target_executable: file_path.clone(),
-                    });
-                }
-            }
+        let actions = rule.actions.clone();
+        let rule_name = rule.name.clone();
+        let rule_id = rule.id.clone();
+        let context_name = context_name.to_string();
+        let tx = self.action_tx.clone();
 
-            if let Err(err) = ActionRunner::execute(action, &ctx).await {
-                self.log("ERROR", "ACTION", &format!("Action failed in '{}': {}", rule.name, err));
-            }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let join_handle = handle.spawn(async move {
+                for action in actions {
+                    match ActionRunner::execute(&action, &ctx).await {
+                        Ok(()) => {
+                            if let Action::StartProcess { file_path, close_on_exit: true, .. } = &action {
+                                let _ = tx.send(ActionCompletionEvent::AddBoundProcess(BoundProcess {
+                                    rule_id: rule_id.clone(),
+                                    primary_process_name: context_name.clone(),
+                                    primary_pid: pid,
+                                    target_executable: file_path.clone(),
+                                }));
+                            }
+                        }
+                        Err(err) => {
+                            let _ = tx.send(ActionCompletionEvent::Log {
+                                level: "ERROR".to_string(),
+                                category: "ACTION".to_string(),
+                                message: format!("Action failed in '{}': {}", rule_name, err),
+                            });
+                        }
+                    }
+                }
+            });
+            Some(join_handle)
+        } else {
+            None
         }
     }
 
-    pub async fn try_execute_exit_actions(&mut self, rule: &Rule, context_name: &str, pid: u32) {
+    pub async fn try_execute_exit_actions(
+        &mut self,
+        rule: &Rule,
+        context_name: &str,
+        pid: u32,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        self.drain_action_events();
         self.log("TRIGGER", "RULE", &format!("Rule '{}' exit actions triggered by {}", rule.name, context_name));
+
+        if rule.on_exit_actions.is_empty() {
+            return None;
+        }
 
         let mut ctx = HashMap::new();
         ctx.insert("ProcessName".into(), context_name.into());
         ctx.insert("ProcessId".into(), pid.to_string());
         ctx.insert("Timestamp".into(), chrono::Local::now().to_rfc3339());
 
-        for action in &rule.on_exit_actions {
-            if let Err(err) = ActionRunner::execute(action, &ctx).await {
-                self.log("ERROR", "ACTION", &format!("Exit action failed in '{}': {}", rule.name, err));
-            }
+        let actions = rule.on_exit_actions.clone();
+        let rule_name = rule.name.clone();
+        let tx = self.action_tx.clone();
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let join_handle = handle.spawn(async move {
+                for action in actions {
+                    if let Err(err) = ActionRunner::execute(&action, &ctx).await {
+                        let _ = tx.send(ActionCompletionEvent::Log {
+                            level: "ERROR".to_string(),
+                            category: "ACTION".to_string(),
+                            message: format!("Exit action failed in '{}': {}", rule_name, err),
+                        });
+                    }
+                }
+            });
+            Some(join_handle)
+        } else {
+            None
         }
     }
 
     pub async fn handle_request(&mut self, req: IpcRequest) -> IpcResponse {
+        self.drain_action_events();
         match req {
             IpcRequest::Ping => IpcResponse::Pong,
 
@@ -444,7 +531,7 @@ impl DaemonEngine {
 
             IpcRequest::TestRunRule(id) => {
                 if let Some(rule) = self.config.rules.iter().find(|r| r.id == id).cloned() {
-                    self.try_execute_rule(&rule, "MANUAL_TEST", 0).await;
+                    let _ = self.try_execute_rule(&rule, "MANUAL_TEST", 0).await;
                     IpcResponse::Ok
                 } else {
                     IpcResponse::Error("Rule not found".into())
@@ -506,6 +593,7 @@ impl DaemonEngine {
 
     pub async fn execute_shutdown_rules(&mut self) {
         let rules = self.config.rules.clone();
+        let mut handles = Vec::new();
         for rule in &rules {
             if rule.is_enabled {
                 if let Some(Trigger::Schedule {
@@ -513,13 +601,20 @@ impl DaemonEngine {
                     ..
                 }) = &rule.trigger
                 {
-                    self.try_execute_rule(rule, "App Shutdown", 0).await;
+                    if let Some(handle) = self.try_execute_rule(rule, "App Shutdown", 0).await {
+                        handles.push(handle);
+                    }
                 }
             }
         }
+        for handle in handles {
+            let _ = handle.await;
+        }
+        self.drain_action_events();
     }
 
-    pub fn get_current_state(&self) -> DaemonState {
+    pub fn get_current_state(&mut self) -> DaemonState {
+        self.drain_action_events();
         let active_rules = self.config.rules.iter().filter(|r| r.is_enabled).count();
         let total_rules = self.config.rules.len();
 
@@ -956,6 +1051,95 @@ mod tests {
         }).await;
 
         assert!(engine.logs.iter().any(|l| l.category == "RULE" && l.message.contains("exit actions triggered by exitapp.exe")));
+    }
+
+    #[tokio::test]
+    async fn test_rule_delay_does_not_block_engine() {
+        let mut config = AppConfig::default();
+        config.rules.push(Rule {
+            id: "delayed_rule".into(),
+            name: "Delayed Automation".into(),
+            description: String::new(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: None,
+            actions: vec![
+                Action::Delay { seconds: 0.5 },
+                Action::Notification {
+                    title: "Test".into(),
+                    message: "Completed".into(),
+                },
+            ],
+            on_exit_actions: Vec::new(),
+            execution_count: 0,
+        });
+
+        let mut engine = DaemonEngine::new(config);
+        let start = Instant::now();
+
+        // 1. try_execute_rule MUST return immediately without blocking on the 0.5s delay
+        let handle = engine.try_execute_rule(&engine.config.rules[0].clone(), "MANUAL_TEST", 0).await;
+        let elapsed_on_return = start.elapsed();
+        assert!(
+            elapsed_on_return < std::time::Duration::from_millis(150),
+            "try_execute_rule took too long to return: {:?}",
+            elapsed_on_return
+        );
+
+        // 2. The trigger log was generated immediately
+        assert!(engine.logs.iter().any(|l| l.category == "RULE" && l.message.contains("Delayed Automation")));
+
+        // 3. Engine is free to perform other operations immediately (e.g. handle requests, state query)
+        let resp = engine.handle_request(IpcRequest::Ping).await;
+        assert!(matches!(resp, IpcResponse::Pong));
+
+        // 4. Awaiting the task handle waits for the actual background delay to complete
+        assert!(handle.is_some());
+        let _ = handle.unwrap().await;
+        assert!(start.elapsed() >= std::time::Duration::from_millis(450));
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_delays_do_not_block_each_other() {
+        let config = AppConfig::default();
+        let rule_long = Rule {
+            id: "long_rule".into(),
+            name: "Long Rule".into(),
+            description: String::new(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: None,
+            actions: vec![Action::Delay { seconds: 0.4 }],
+            on_exit_actions: Vec::new(),
+            execution_count: 0,
+        };
+        let rule_short = Rule {
+            id: "short_rule".into(),
+            name: "Short Rule".into(),
+            description: String::new(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: None,
+            actions: vec![Action::Delay { seconds: 0.1 }],
+            on_exit_actions: Vec::new(),
+            execution_count: 0,
+        };
+
+        let mut engine = DaemonEngine::new(config);
+        let start = Instant::now();
+
+        // Launch long rule first, then short rule immediately after
+        let handle_long = engine.try_execute_rule(&rule_long, "Test Concurrent", 0).await.unwrap();
+        let handle_short = engine.try_execute_rule(&rule_short, "Test Concurrent", 0).await.unwrap();
+
+        // The short rule must complete before the long rule, without being blocked by it
+        handle_short.await.unwrap();
+        let short_duration = start.elapsed();
+        assert!(short_duration < std::time::Duration::from_millis(300), "Short rule was blocked: {:?}", short_duration);
+
+        handle_long.await.unwrap();
+        let total_duration = start.elapsed();
+        assert!(total_duration >= std::time::Duration::from_millis(380), "Long rule finished too early: {:?}", total_duration);
     }
 }
 

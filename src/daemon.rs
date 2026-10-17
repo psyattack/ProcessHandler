@@ -92,7 +92,7 @@ pub fn run_daemon() {
             for rule in &rules {
                 if rule.is_enabled {
                     if let Some(crate::models::Trigger::Schedule { schedule_type: crate::models::ScheduleType::AppStartup, .. }) = &rule.trigger {
-                        eng.try_execute_rule(rule, "App Startup", 0).await;
+                        let _ = eng.try_execute_rule(rule, "App Startup", 0).await;
                     }
                 }
             }
