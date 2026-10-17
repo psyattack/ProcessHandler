@@ -27,6 +27,13 @@ pub enum ProcessCategoryFilter {
     BackgroundOnly,
 }
 
+#[derive(Debug, Clone)]
+pub struct ExpandedScriptEditorState {
+    pub step_idx: usize,
+    pub is_exit_pipeline: bool,
+    pub language: crate::gui::components::script_highlighter::ScriptLanguage,
+}
+
 pub struct GuiState {
     pub active_view: ActiveView,
     pub search_query: String,
@@ -39,6 +46,8 @@ pub struct GuiState {
     pub selected_rule_id: Option<String>,
     pub is_creating_new_rule: bool,
     pub editing_rule: Option<Rule>,
+    pub expanded_script_editor: Option<ExpandedScriptEditorState>,
+    pub last_script_editor: Option<ExpandedScriptEditorState>,
     pub last_sync: Instant,
     pub toast: Option<(String, Instant)>,
     pub is_daemon_connected: bool,
@@ -59,11 +68,32 @@ impl GuiState {
             selected_rule_id: None,
             is_creating_new_rule: false,
             editing_rule: None,
+            expanded_script_editor: None,
+            last_script_editor: None,
             last_sync: Instant::now() - std::time::Duration::from_secs(10),
             toast: None,
             is_daemon_connected: false,
             icon_cache: crate::gui::components::icons::ProcessIconCache::new(),
         }
+    }
+
+    pub fn open_script_editor(
+        &mut self,
+        step_idx: usize,
+        is_exit_pipeline: bool,
+        language: crate::gui::components::script_highlighter::ScriptLanguage,
+    ) {
+        let editor = ExpandedScriptEditorState {
+            step_idx,
+            is_exit_pipeline,
+            language,
+        };
+        self.expanded_script_editor = Some(editor.clone());
+        self.last_script_editor = Some(editor);
+    }
+
+    pub fn close_script_editor(&mut self) {
+        self.expanded_script_editor = None;
     }
 
     pub fn set_toast(&mut self, msg: impl Into<String>) {

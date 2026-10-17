@@ -5,6 +5,7 @@
 use egui::{
     CornerRadius, Id, LayerId, Order, Pos2, Rect, Sense, Stroke, Ui, emath::easing, pos2, vec2,
 };
+use crate::gui::components::script_highlighter::{create_script_layouter, ScriptLanguage};
 use crate::gui::components::widgets::{self, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
@@ -19,8 +20,8 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
 
     let is_open = state.editing_rule.is_some() || state.selected_process.is_some();
 
-    // Handle Esc key to close inspector
-    if is_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // Handle Esc key to close inspector (only if script canvas is NOT open)
+    if is_open && state.expanded_script_editor.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         state.editing_rule = None;
         state.selected_process = None;
         state.is_creating_new_rule = false;
@@ -821,6 +822,9 @@ fn render_actions_pipeline(
         if resp.clone_clicked {
             clone_idx = Some(idx);
         }
+        if let Some(lang) = resp.expand_script {
+            state.open_script_editor(idx, is_exit_pipeline, lang);
+        }
         if resp.drag_started {
             drag_started_idx = Some(idx);
         }
@@ -920,6 +924,7 @@ fn render_actions_pipeline(
 struct ActionCardResponse {
     pub remove_clicked: bool,
     pub clone_clicked: bool,
+    pub expand_script: Option<ScriptLanguage>,
     pub drag_started: bool,
     pub card_rect: Rect,
 }
@@ -935,6 +940,7 @@ fn render_action_card(
 ) -> ActionCardResponse {
     let mut remove_clicked = false;
     let mut clone_clicked = false;
+    let mut expand_script = None;
     let mut drag_started = false;
 
     let ghost_id = ui.id().with(("card_ghost", is_exit_pipeline, idx));
@@ -1105,26 +1111,44 @@ fn render_action_card(
                     }
 
                     Action::PowerShell { script, run_in_window } => {
-                        widgets::hud(ui, "POWERSHELL SCRIPT:", t.muted);
+                        ui.horizontal(|ui| {
+                            widgets::hud(ui, "POWERSHELL SCRIPT:", t.muted);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if widgets::glyph_button(ui, Glyph::Expand, "Expand script canvas").clicked() {
+                                    expand_script = Some(ScriptLanguage::PowerShell);
+                                }
+                            });
+                        });
+                        let mut layouter = create_script_layouter(ScriptLanguage::PowerShell, *t, 12.0);
                         ui.add(
                             egui::TextEdit::multiline(script)
                                 .desired_width(ui.available_width())
                                 .desired_rows(3)
                                 .font(egui::FontId::new(12.0, theme::mono()))
-                                .margin(vec2(10.0, 8.0)),
+                                .margin(vec2(10.0, 8.0))
+                                .layouter(&mut layouter),
                         );
 
                         ui.checkbox(run_in_window, "Run in visible console window");
                     }
 
                     Action::Cmd { command, run_in_window } => {
-                        widgets::hud(ui, "COMMAND LINE PROMPT:", t.muted);
+                        ui.horizontal(|ui| {
+                            widgets::hud(ui, "COMMAND LINE PROMPT:", t.muted);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if widgets::glyph_button(ui, Glyph::Expand, "Expand command canvas").clicked() {
+                                    expand_script = Some(ScriptLanguage::Batch);
+                                }
+                            });
+                        });
+                        let mut layouter = create_script_layouter(ScriptLanguage::Batch, *t, 12.0);
                         ui.add(
-                            egui::TextEdit::singleline(command)
+                            egui::TextEdit::multiline(command)
                                 .desired_width(ui.available_width())
-                                .min_size(vec2(0.0, theme::CONTROL_H))
-                                .vertical_align(egui::Align::Center)
-                                .margin(vec2(10.0, 8.0)),
+                                .desired_rows(2)
+                                .font(egui::FontId::new(12.0, theme::mono()))
+                                .margin(vec2(10.0, 8.0))
+                                .layouter(&mut layouter),
                         );
                         ui.checkbox(run_in_window, "Run in visible console window");
                     }
@@ -1263,6 +1287,7 @@ fn render_action_card(
     ActionCardResponse {
         remove_clicked,
         clone_clicked,
+        expand_script,
         drag_started,
         card_rect: card_response.response.rect,
     }

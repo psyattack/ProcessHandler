@@ -3,4 +3,5 @@ pub mod inspector;
 pub mod logs_view;
 pub mod processes_view;
 pub mod rules_view;
+pub mod script_modal;
 pub mod settings_view;

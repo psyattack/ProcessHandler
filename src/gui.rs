@@ -13,6 +13,7 @@ use views::inspector::render_inspector_drawer;
 use views::logs_view::render_logs_view;
 use views::processes_view::render_processes_view;
 use views::rules_view::render_rules_view;
+use views::script_modal::render_script_editor_canvas;
 use views::settings_view::render_settings_view;
 use crate::config::{AppConfig, WindowState};
 
@@ -169,7 +170,10 @@ impl App for ProcessHandlerApp {
         // 4. Sliding Inspector Drawer (slides in from right with cubic easing)
         render_inspector_drawer(&ctx, &mut self.state);
 
-        // 5. Borderless Window Edges (8-direction border resize & hairline stroke)
+        // 5. Centered Expanded Script Canvas (modal popup for pwsh / cmd editing)
+        render_script_editor_canvas(&ctx, &mut self.state);
+
+        // 6. Borderless Window Edges (8-direction border resize & hairline stroke)
         widgets::window_edges(&ctx);
 
         // Track window size and position for persistence across restarts
