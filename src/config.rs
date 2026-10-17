@@ -55,6 +55,9 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub autorun_configured: bool,
+
+    #[serde(default)]
+    pub language: crate::i18n::Language,
 }
 
 fn default_monitoring_mode() -> String {
@@ -74,6 +77,7 @@ impl Default for AppConfig {
             window: None,
             rules: Vec::new(),
             autorun_configured: false,
+            language: crate::i18n::Language::English,
         }
     }
 }

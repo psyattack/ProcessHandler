@@ -18,6 +18,7 @@ enum LogFilter {
 
 pub fn render_logs_view(ui: &mut Ui, state: &mut GuiState) {
     let t = Tokens::get(ui.ctx());
+    let loc = state.loc();
 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 12.0;
@@ -42,40 +43,40 @@ pub fn render_logs_view(ui: &mut Ui, state: &mut GuiState) {
                 (
                     LogFilter::All,
                     Cell {
-                        label: "ALL EVENTS",
-                        tip: "Show complete event telemetry stream - max 100 entries",
+                        label: loc.logs_cell_all,
+                        tip: loc.logs_cell_all_tip,
                         count: Some((total, None)),
                     },
                 ),
                 (
                     LogFilter::Rules,
                     Cell {
-                        label: "RULES",
-                        tip: "Show automation trigger and action executions",
+                        label: loc.logs_cell_rules,
+                        tip: loc.logs_cell_rules_tip,
                         count: None,
                     },
                 ),
                 (
                     LogFilter::Processes,
                     Cell {
-                        label: "PROCESSES",
-                        tip: "Show Windows process start and exit hooks",
+                        label: loc.logs_cell_processes,
+                        tip: loc.logs_cell_processes_tip,
                         count: None,
                     },
                 ),
                 (
                     LogFilter::System,
                     Cell {
-                        label: "SYSTEM",
-                        tip: "Show system power, sleep, and session events",
+                        label: loc.logs_cell_system,
+                        tip: loc.logs_cell_system_tip,
                         count: None,
                     },
                 ),
                 (
                     LogFilter::Errors,
                     Cell {
-                        label: "ERRORS",
-                        tip: "Show failed actions and system errors",
+                        label: loc.logs_cell_errors,
+                        tip: loc.logs_cell_errors_tip,
                         count: Some((error_count, if error_count > 0 { Some(t.bad) } else { None })),
                     },
                 ),
@@ -87,12 +88,12 @@ pub fn render_logs_view(ui: &mut Ui, state: &mut GuiState) {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Clear button
-                if widgets::button(ui, "CLEAR LOGS", Kind::Secondary, 0.0).clicked() {
+                if widgets::button(ui, loc.logs_btn_clear, Kind::Secondary, 0.0).clicked() {
                     let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::ClearLogs);
                     if let Some(ds) = &mut state.daemon_state {
                         ds.logs.clear();
                     }
-                    state.set_toast("Activity stream cleared");
+                    state.set_toast(loc.toast_stream_cleared);
                 }
 
                 ui.add_space(8.0);
@@ -100,7 +101,7 @@ pub fn render_logs_view(ui: &mut Ui, state: &mut GuiState) {
                 // Search edit
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_query)
-                        .hint_text("FILTER LOG STREAM...")
+                        .hint_text(loc.logs_search_placeholder)
                         .desired_width(240.0)
                         .min_size(vec2(0.0, theme::CONTROL_H))
                         .vertical_align(egui::Align::Center)
@@ -136,9 +137,9 @@ pub fn render_logs_view(ui: &mut Ui, state: &mut GuiState) {
         if filtered.is_empty() {
             ui.add_space(48.0);
             ui.vertical_centered(|ui| {
-                widgets::hud(ui, "NO EVENT TELEMETRY LOGGED", t.muted);
+                widgets::hud(ui, loc.logs_empty_title, t.muted);
                 ui.add_space(6.0);
-                widgets::hud(ui, "RULE TRIGGERS, ACTIONS AND PROCESS HOOKS WILL STREAM HERE", t.faint);
+                widgets::hud(ui, loc.logs_empty_subtitle, t.faint);
             });
             return;
         }

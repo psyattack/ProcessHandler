@@ -156,16 +156,17 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
             }
 
             // --- 1. HEADER ZONE ---
+            let loc = state.loc();
             ui.scope_builder(egui::UiBuilder::new().max_rect(header_rect), |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add_space(20.0);
-                    let prefix = if modal.is_exit_pipeline { "EXIT STEP" } else { "STEP" };
+                    let prefix = if modal.is_exit_pipeline { loc.inspector_exit_prefix } else { loc.inspector_step_prefix };
                     widgets::hud(ui, &format!("{} {:02}", prefix, modal.step_idx + 1), t.accent_ink);
                     ui.add_space(8.0);
                     widgets::badge(ui, modal.language.badge_name(), t.accent_ink);
                     ui.add_space(10.0);
                     ui.label(
-                        egui::RichText::new(modal.language.subtitle())
+                        egui::RichText::new(modal.language.localized_subtitle(loc))
                             .family(theme::medium())
                             .size(13.0)
                             .color(t.muted),
@@ -173,7 +174,7 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(20.0);
-                        if widgets::glyph_button(ui, Glyph::Close, "Close canvas (Esc)").clicked() {
+                        if widgets::glyph_button(ui, Glyph::Close, loc.modal_tip_close).clicked() {
                             close_clicked = true;
                         }
                         ui.add_space(14.0);
@@ -181,7 +182,7 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
                         let char_count = script_buffer.len();
                         widgets::hud(
                             ui,
-                            &format!("{} LINES  •  {} BYTES", line_count, char_count),
+                            &format!("{} {}  •  {} {}", line_count, loc.modal_lines, char_count, loc.modal_bytes),
                             t.faint,
                         );
                     });
@@ -217,15 +218,15 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
             ui.scope_builder(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add_space(20.0);
-                    widgets::hud(ui, "PRESS ESC OR CLICK OUTSIDE TO CLOSE", t.faint);
+                    widgets::hud(ui, loc.modal_esc_hint, t.faint);
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(20.0);
-                        if widgets::button(ui, "DONE", Kind::Primary, 0.0).clicked() {
+                        if widgets::button(ui, loc.modal_btn_done, Kind::Primary, 0.0).clicked() {
                             close_clicked = true;
                         }
                         ui.add_space(10.0);
-                        if widgets::button(ui, "COPY SCRIPT", Kind::Secondary, 0.0).clicked() {
+                        if widgets::button(ui, loc.modal_btn_copy_script, Kind::Secondary, 0.0).clicked() {
                             copy_clicked = true;
                         }
                     });
@@ -235,7 +236,8 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
 
     if copy_clicked {
         ctx.copy_text(script_buffer.clone());
-        state.set_toast("Script copied to clipboard");
+        let loc = state.loc();
+        state.set_toast(loc.toast_script_copied);
     }
 
     if text_changed {

@@ -1,9 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod autorun;
-mod config;
+pub mod config;
 mod daemon;
 mod gui;
+pub mod i18n;
 mod ipc;
 mod models;
 pub mod single_instance;

@@ -11,6 +11,7 @@ use crate::models::{ProcessSnapshotItem, Rule, Trigger};
 
 pub fn render_processes_view(ui: &mut Ui, state: &mut GuiState) {
     let t = Tokens::get(ui.ctx());
+    let loc = state.loc();
 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 12.0;
@@ -24,7 +25,7 @@ pub fn render_processes_view(ui: &mut Ui, state: &mut GuiState) {
         if processes.is_empty() {
             ui.add_space(48.0);
             ui.vertical_centered(|ui| {
-                widgets::hud(ui, "NO ACTIVE PROCESSES MATCH FILTER", t.muted);
+                widgets::hud(ui, loc.hunter_empty_title, t.muted);
             });
             return;
         }
@@ -43,20 +44,20 @@ pub fn render_processes_view(ui: &mut Ui, state: &mut GuiState) {
             .column(Column::exact(160.0))
             .header(32.0, |mut header| {
                 header.col(|ui| {
-                    render_sortable_header(ui, state, ProcessSortColumn::Name, "PROCESS NAME", &t);
+                    render_sortable_header(ui, state, ProcessSortColumn::Name, loc.hunter_col_process_name, &t);
                 });
                 header.col(|ui| {
-                    render_sortable_header(ui, state, ProcessSortColumn::Pid, "PID", &t);
+                    render_sortable_header(ui, state, ProcessSortColumn::Pid, loc.hunter_col_pid, &t);
                 });
                 header.col(|ui| {
-                    render_sortable_header(ui, state, ProcessSortColumn::Memory, "WORKING SET", &t);
+                    render_sortable_header(ui, state, ProcessSortColumn::Memory, loc.hunter_col_working_set, &t);
                 });
                 header.col(|ui| {
-                    render_sortable_header(ui, state, ProcessSortColumn::WindowTitle, "WINDOW TITLE", &t);
+                    render_sortable_header(ui, state, ProcessSortColumn::WindowTitle, loc.hunter_col_window_title, &t);
                 });
                 header.col(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        widgets::hud(ui, "QUICK ACTIONS", t.faint);
+                        widgets::hud(ui, loc.hunter_col_quick_actions, t.faint);
                     });
                 });
             })
@@ -132,15 +133,15 @@ pub fn render_processes_view(ui: &mut Ui, state: &mut GuiState) {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.spacing_mut().item_spacing.x = 6.0;
 
-                                if widgets::button(ui, "+ RULE", Kind::Secondary, 0.0)
-                                    .on_hover_text("Create an automation rule triggered by this process")
+                                if widgets::button(ui, loc.hunter_btn_rule, Kind::Secondary, 0.0)
+                                    .on_hover_text(loc.hunter_btn_rule_tip)
                                     .clicked()
                                 {
                                     state.active_view = crate::gui::state::ActiveView::Rules;
                                     state.is_creating_new_rule = true;
                                     state.editing_rule = Some(Rule {
                                         id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-                                        name: format!("Track {}", proc.name),
+                                        name: format!("{} {}", loc.inspector_rule_track_prefix, proc.name),
                                         description: String::new(),
                                         is_enabled: true,
                                         cooldown_seconds: 0.0,
@@ -163,6 +164,7 @@ pub fn render_processes_view(ui: &mut Ui, state: &mut GuiState) {
 }
 
 fn render_toolbar(ui: &mut Ui, state: &mut GuiState, t: &Tokens) {
+    let loc = state.loc();
     ui.horizontal(|ui| {
         let total = state.cached_processes.len();
         let windowed_count = state.cached_processes.iter().filter(|p| !p.window_title.is_empty()).count();
@@ -172,24 +174,24 @@ fn render_toolbar(ui: &mut Ui, state: &mut GuiState, t: &Tokens) {
             (
                 ProcessCategoryFilter::All,
                 Cell {
-                    label: "ALL PROCESSES",
-                    tip: "Show all active Windows tasks and processes",
+                    label: loc.hunter_cell_all,
+                    tip: loc.hunter_cell_all_tip,
                     count: Some((total, None)),
                 },
             ),
             (
                 ProcessCategoryFilter::WindowedOnly,
                 Cell {
-                    label: "WINDOWED APPS",
-                    tip: "Show processes that have top-level window handles",
+                    label: loc.hunter_cell_windowed,
+                    tip: loc.hunter_cell_windowed_tip,
                     count: Some((windowed_count, Some(t.accent_ink))),
                 },
             ),
             (
                 ProcessCategoryFilter::BackgroundOnly,
                 Cell {
-                    label: "SERVICES & DAEMONS",
-                    tip: "Show headless background system services",
+                    label: loc.hunter_cell_services,
+                    tip: loc.hunter_cell_services_tip,
                     count: Some((bg_count, None)),
                 },
             ),
@@ -198,12 +200,12 @@ fn render_toolbar(ui: &mut Ui, state: &mut GuiState, t: &Tokens) {
         widgets::cells(ui, &mut state.process_category_filter, &options);
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if widgets::button(ui, "RESCAN", Kind::Secondary, 0.0).clicked() {
+            if widgets::button(ui, loc.hunter_btn_rescan, Kind::Secondary, 0.0).clicked() {
                 if let Ok(crate::ipc::IpcResponse::Processes(procs)) =
                     crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::GetProcesses)
                 {
                     state.cached_processes = procs;
-                    state.set_toast("Refreshed system process snapshot");
+                    state.set_toast(loc.toast_process_refreshed);
                 }
             }
 
@@ -211,7 +213,7 @@ fn render_toolbar(ui: &mut Ui, state: &mut GuiState, t: &Tokens) {
 
             ui.add(
                 egui::TextEdit::singleline(&mut state.search_query)
-                    .hint_text("SEARCH BY NAME, PID, OR TITLE...")
+                    .hint_text(loc.hunter_search_placeholder)
                     .desired_width(280.0)
                     .min_size(vec2(0.0, theme::CONTROL_H))
                     .vertical_align(egui::Align::Center)

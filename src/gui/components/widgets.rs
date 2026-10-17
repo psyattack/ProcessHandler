@@ -272,22 +272,26 @@ enum WindowButton {
 }
 
 /// Minimize, maximize (or restore) and close buttons for custom title bars.
-pub fn window_buttons(ui: &mut Ui, height: f32) {
+pub fn window_buttons(ui: &mut Ui, height: f32, loc: &crate::i18n::Strings) {
     let ctx = ui.ctx().clone();
     let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-    if window_button(ui, WindowButton::Close, height).clicked() {
+    if window_button(ui, WindowButton::Close, height, loc.win_btn_close).clicked() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
-    let size = if maximized { WindowButton::Restore } else { WindowButton::Maximize };
-    if window_button(ui, size, height).clicked() {
+    let (size, label) = if maximized {
+        (WindowButton::Restore, loc.win_btn_restore)
+    } else {
+        (WindowButton::Maximize, loc.win_btn_maximize)
+    };
+    if window_button(ui, size, height, label).clicked() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }
-    if window_button(ui, WindowButton::Minimize, height).clicked() {
+    if window_button(ui, WindowButton::Minimize, height, loc.win_btn_minimize).clicked() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
     }
 }
 
-fn window_button(ui: &mut Ui, button: WindowButton, height: f32) -> Response {
+fn window_button(ui: &mut Ui, button: WindowButton, height: f32, tip: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(46.0, height), Sense::hover());
     let right = if button == WindowButton::Close { RESIZE_EDGE } else { 0.0 };
@@ -304,12 +308,6 @@ fn window_button(ui: &mut Ui, button: WindowButton, height: f32) -> Response {
     p.rect_filled(rect, CornerRadius::ZERO, fill);
     let c = rect.center();
     let stroke = Stroke::new(1.0, ink);
-    let label = match button {
-        WindowButton::Minimize => "Minimize",
-        WindowButton::Maximize => "Maximize",
-        WindowButton::Restore => "Restore",
-        WindowButton::Close => "Close",
-    };
 
     let s = 5.0;
     match button {
@@ -330,8 +328,8 @@ fn window_button(ui: &mut Ui, button: WindowButton, height: f32) -> Response {
             p.line_segment([c + vec2(-s, s), c + vec2(s, -s)], stroke);
         }
     }
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-    resp.on_hover_text(label)
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    resp.on_hover_text(tip)
 }
 
 /// Custom title bars: hairline around the window and resizing from edges and corners.

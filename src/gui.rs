@@ -42,6 +42,7 @@ impl ProcessHandlerApp {
     }
 
     fn render_footer(&self, ui: &mut Ui, t: &Tokens) {
+        let loc = self.state.loc();
         let r = ui.max_rect();
         // Hairline top border across footer
         ui.painter().hline(r.x_range(), r.top() + 0.5, t.hairline());
@@ -52,7 +53,7 @@ impl ProcessHandlerApp {
             if let Some(ds) = &self.state.daemon_state {
                 let active = ds.active_rules_count;
                 let total = ds.total_rules_count;
-                widgets::hud(ui, &format!("{}/{} RULES ACTIVE", active, total), t.faint);
+                widgets::hud(ui, &format!("{}/{} {}", active, total, loc.footer_rules_active), t.faint);
             }
 
             // Right-aligned status
@@ -63,7 +64,7 @@ impl ProcessHandlerApp {
                 let autorun = self.state.daemon_state.as_ref().map(|s| s.autorun_enabled).unwrap_or(false);
                 widgets::hud(
                     ui,
-                    if autorun { "AUTORUN: ON" } else { "AUTORUN: OFF" },
+                    if autorun { loc.footer_autorun_on } else { loc.footer_autorun_off },
                     if autorun { t.good } else { t.muted },
                 );
             });

@@ -18,6 +18,7 @@ enum RuleFilter {
 
 pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
     let t = Tokens::get(ui.ctx());
+    let loc = state.loc();
 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 12.0;
@@ -43,24 +44,24 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                 (
                     RuleFilter::All,
                     Cell {
-                        label: "ALL RULES",
-                        tip: "Show all automation pipelines",
+                        label: loc.rules_cell_all,
+                        tip: loc.rules_cell_all_tip,
                         count: Some((total, None)),
                     },
                 ),
                 (
                     RuleFilter::ActiveOnly,
                     Cell {
-                        label: "ACTIVE",
-                        tip: "Show actively evaluated rules",
+                        label: loc.rules_cell_active,
+                        tip: loc.rules_cell_active_tip,
                         count: Some((active_count, Some(t.good))),
                     },
                 ),
                 (
                     RuleFilter::PausedOnly,
                     Cell {
-                        label: "PAUSED",
-                        tip: "Show disabled rules",
+                        label: loc.rules_cell_paused,
+                        tip: loc.rules_cell_paused_tip,
                         count: Some((paused_count, None)),
                     },
                 ),
@@ -72,12 +73,12 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Primary "+ NEW AUTOMATION" Button
-                if widgets::button(ui, "+ NEW AUTOMATION", Kind::Primary, 0.0).clicked() {
+                if widgets::button(ui, loc.rules_btn_new, Kind::Primary, 0.0).clicked() {
                     state.selected_rule_id = None;
                     state.is_creating_new_rule = true;
                     state.editing_rule = Some(Rule {
                         id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-                        name: "New Automation Flow".into(),
+                        name: loc.rules_default_new_name.into(),
                         description: String::new(),
                         is_enabled: true,
                         cooldown_seconds: 0.0,
@@ -97,7 +98,7 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                 // Search box
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_query)
-                        .hint_text("SEARCH AUTOMATIONS...")
+                        .hint_text(loc.rules_search_placeholder)
                         .desired_width(240.0)
                         .min_size(vec2(0.0, theme::CONTROL_H))
                         .vertical_align(egui::Align::Center)
@@ -129,14 +130,14 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
         if filtered.is_empty() {
             ui.add_space(48.0);
             ui.vertical_centered(|ui| {
-                widgets::hud(ui, "NO AUTOMATION RULES CONFIGURED", t.muted);
+                widgets::hud(ui, loc.rules_empty_title, t.muted);
                 ui.add_space(12.0);
-                if widgets::button(ui, "CREATE FIRST RULE", Kind::Secondary, 0.0).clicked() {
+                if widgets::button(ui, loc.rules_btn_create_first, Kind::Secondary, 0.0).clicked() {
                     state.selected_rule_id = None;
                     state.is_creating_new_rule = true;
                     state.editing_rule = Some(Rule {
                         id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-                        name: "New Automation Flow".into(),
+                        name: loc.rules_default_new_name.into(),
                         description: String::new(),
                         is_enabled: true,
                         cooldown_seconds: 0.0,
@@ -176,6 +177,7 @@ fn render_rule_card(
     _is_selected: bool,
     t: &Tokens,
 ) {
+    let loc = state.loc();
     let frame = egui::Frame::new()
         .fill(t.bg)
         .stroke(t.hairline())
@@ -188,30 +190,30 @@ fn render_rule_card(
 
             // Top strip: Eyebrow + Status Badge + Actions
             ui.horizontal(|ui| {
-                widgets::eyebrow(ui, &format!("{:02}", idx + 1), "AUTOMATION");
+                widgets::eyebrow(ui, &format!("{:02}", idx + 1), loc.rules_badge_automation);
                 ui.add_space(8.0);
                 widgets::badge(
                     ui,
-                    if rule.is_enabled { "ACTIVE" } else { "PAUSED" },
+                    if rule.is_enabled { loc.rules_badge_active } else { loc.rules_badge_paused },
                     if rule.is_enabled { t.good } else { t.muted },
                 );
                 ui.add_space(6.0);
-                widgets::badge(ui, &format!("{:.1}S COOLDOWN", rule.cooldown_seconds), t.accent_ink);
+                widgets::badge(ui, &format!("{:.1}{}", rule.cooldown_seconds, loc.rules_badge_cooldown_suffix), t.accent_ink);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
 
                     // Delete
-                    if widgets::button(ui, "DELETE", Kind::Danger, 0.0)
-                        .on_hover_text("Delete automation rule")
+                    if widgets::button(ui, loc.rules_btn_delete, Kind::Danger, 0.0)
+                        .on_hover_text(loc.rules_btn_delete_tip)
                         .clicked()
                     {
                         state.delete_rule(&rule.id);
                     }
 
                     // Edit
-                    if widgets::button(ui, "EDIT", Kind::Secondary, 0.0)
-                        .on_hover_text("Edit rule in inspector drawer")
+                    if widgets::button(ui, loc.rules_btn_edit, Kind::Secondary, 0.0)
+                        .on_hover_text(loc.rules_btn_edit_tip)
                         .clicked()
                     {
                         state.selected_rule_id = Some(rule.id.clone());
@@ -220,22 +222,22 @@ fn render_rule_card(
                     }
 
                     // Clone
-                    if widgets::button(ui, "CLONE", Kind::Secondary, 0.0)
-                        .on_hover_text("Duplicate this rule")
+                    if widgets::button(ui, loc.rules_btn_clone, Kind::Secondary, 0.0)
+                        .on_hover_text(loc.rules_btn_clone_tip)
                         .clicked()
                     {
                         state.clone_rule(rule);
                     }
 
                     // Toggle Pause / Enable
-                    let toggle_label = if rule.is_enabled { "PAUSE" } else { "RESUME" };
+                    let toggle_label = if rule.is_enabled { loc.rules_btn_pause } else { loc.rules_btn_resume };
                     if widgets::button(ui, toggle_label, Kind::Secondary, 0.0).clicked() {
                         state.toggle_rule(&rule.id, !rule.is_enabled);
                     }
 
                     // Test Run
-                    if widgets::button(ui, "TEST RUN", Kind::Secondary, 0.0)
-                        .on_hover_text("Trigger rule action pipeline immediately")
+                    if widgets::button(ui, loc.rules_btn_test_run, Kind::Secondary, 0.0)
+                        .on_hover_text(loc.rules_btn_test_run_tip)
                         .clicked()
                     {
                         state.test_run_rule(&rule.id);
@@ -262,56 +264,58 @@ fn render_rule_card(
 
             // Pipeline summary
             ui.add_space(4.0);
-            render_pipeline_summary(ui, rule, t);
+            render_pipeline_summary(ui, loc, rule, t);
         });
     });
 }
 
-fn render_pipeline_summary(ui: &mut Ui, rule: &Rule, t: &Tokens) {
+fn render_pipeline_summary(ui: &mut Ui, loc: &crate::i18n::Strings, rule: &Rule, t: &Tokens) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+
+        let prefix = if loc.rules_summary_trigger_process.starts_with("ТРИГГЕР") { "ТРИГГЕР: " } else { "TRIGGER: " };
 
         // Trigger Pill
         let trigger_text = match &rule.trigger {
             Some(Trigger::Process { process_name, single_instance, .. }) => {
-                let si_suffix = if *single_instance { " (SINGLE INSTANCE)" } else { "" };
-                format!("TRIGGER: PROCESS {}{}", process_name, si_suffix)
+                let si_suffix = if *single_instance { loc.rules_summary_single_instance } else { "" };
+                format!("{}{}{}", loc.rules_summary_trigger_process, process_name, si_suffix)
             }
             Some(Trigger::SystemEvent { event_type, .. }) => {
-                format!("TRIGGER: SYSTEM {:?}", event_type)
+                format!("{}{:?}", loc.rules_summary_trigger_system, event_type)
             }
             Some(Trigger::Schedule { schedule_type, interval_sec, daily_time, target_datetime, .. }) => {
                 match schedule_type {
                     crate::models::ScheduleType::Interval => {
                         let s = *interval_sec;
                         let text = if s >= 31536000 && s % 31536000 == 0 {
-                            format!("EVERY {}Y", s / 31536000)
+                            loc.rules_summary_every_year.replace("{}", &(s / 31536000).to_string())
                         } else if s >= 2592000 && s % 2592000 == 0 {
-                            format!("EVERY {}MO", s / 2592000)
+                            loc.rules_summary_every_month.replace("{}", &(s / 2592000).to_string())
                         } else if s >= 604800 && s % 604800 == 0 {
-                            format!("EVERY {}W", s / 604800)
+                            loc.rules_summary_every_week.replace("{}", &(s / 604800).to_string())
                         } else if s >= 86400 && s % 86400 == 0 {
-                            format!("EVERY {}D", s / 86400)
+                            loc.rules_summary_every_day.replace("{}", &(s / 86400).to_string())
                         } else if s >= 3600 && s % 3600 == 0 {
-                            format!("EVERY {}H", s / 3600)
+                            loc.rules_summary_every_hour.replace("{}", &(s / 3600).to_string())
                         } else if s >= 60 && s % 60 == 0 {
-                            format!("EVERY {}M", s / 60)
+                            loc.rules_summary_every_minute.replace("{}", &(s / 60).to_string())
                         } else {
-                            format!("EVERY {}S", s)
+                            loc.rules_summary_every_second.replace("{}", &s.to_string())
                         };
-                        format!("TRIGGER: {}", text)
+                        format!("{}{}", prefix, text)
                     }
                     crate::models::ScheduleType::Daily => {
-                        format!("TRIGGER: DAILY AT {}", daily_time.as_deref().unwrap_or("12:00"))
+                        loc.rules_summary_trigger_daily.replace("{}", daily_time.as_deref().unwrap_or("12:00"))
                     }
                     crate::models::ScheduleType::OneShot => {
-                        format!("TRIGGER: ONCE AT {}", target_datetime.as_deref().unwrap_or("SPECIFIED TIME"))
+                        loc.rules_summary_trigger_once.replace("{}", target_datetime.as_deref().unwrap_or("SPECIFIED TIME"))
                     }
-                    crate::models::ScheduleType::AppStartup => "TRIGGER: ON APP STARTUP".to_string(),
-                    crate::models::ScheduleType::AppShutdown => "TRIGGER: ON APP SHUTDOWN".to_string(),
+                    crate::models::ScheduleType::AppStartup => loc.rules_summary_trigger_startup.to_string(),
+                    crate::models::ScheduleType::AppShutdown => loc.rules_summary_trigger_shutdown.to_string(),
                 }
             }
-            None => "TRIGGER: NONE CONFIGURED".to_string(),
+            None => loc.rules_summary_trigger_none.to_string(),
         };
 
         widgets::badge(ui, &trigger_text, t.faint);
@@ -321,37 +325,37 @@ fn render_pipeline_summary(ui: &mut Ui, rule: &Rule, t: &Tokens) {
         // Actions Count & Preview
         let actions_count = rule.actions.len();
         let actions_summary = if actions_count == 0 {
-            "NO ACTIONS".to_string()
+            loc.rules_summary_no_actions.to_string()
         } else {
             let names: Vec<_> = rule.actions.iter().map(|a| match a {
                 Action::StartProcess { file_path, .. } => {
                     let fname = std::path::Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
-                    format!("LAUNCH {}", fname)
+                    format!("{} {}", loc.summary_action_launch, fname)
                 }
-                Action::KillProcess { process_name, .. } => format!("KILL {}", process_name),
+                Action::KillProcess { process_name, .. } => format!("{} {}", loc.summary_action_kill, process_name),
                 Action::PowerShell { .. } => "POWERSHELL".to_string(),
                 Action::Cmd { .. } => "CMD".to_string(),
                 Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
                 Action::Sound { .. } => "SOUND".to_string(),
                 Action::ProcessAudio { process_name, action_type, volume_level } => {
                     match action_type {
-                        ProcessAudioActionType::Mute => format!("MUTE {}", process_name),
-                        ProcessAudioActionType::Unmute => format!("UNMUTE {}", process_name),
-                        ProcessAudioActionType::ToggleMute => format!("TOGGLE {}", process_name),
-                        ProcessAudioActionType::SetVolume => format!("VOL {}% {}", volume_level, process_name),
+                        ProcessAudioActionType::Mute => format!("{} {}", loc.summary_action_mute, process_name),
+                        ProcessAudioActionType::Unmute => format!("{} {}", loc.summary_action_unmute, process_name),
+                        ProcessAudioActionType::ToggleMute => format!("{} {}", loc.summary_action_toggle, process_name),
+                        ProcessAudioActionType::SetVolume => format!("{} {}% {}", loc.summary_action_vol, volume_level, process_name),
                     }
                 }
-                Action::SystemPower { power_type } => format!("POWER {:?}", power_type),
-                Action::Delay { seconds } => format!("WAIT {:.1}S", seconds),
+                Action::SystemPower { power_type } => format!("{} {:?}", loc.summary_action_power, power_type),
+                Action::Delay { seconds } => format!("{} {:.1}S", loc.summary_action_wait, seconds),
                 Action::HttpWebhook { .. } => "WEBHOOK".to_string(),
             }).collect();
-            format!("ACTIONS {}: {}", actions_count, names.join(" | "))
+            format!("{} {}: {}", loc.rules_summary_actions, actions_count, names.join(" | "))
         };
         widgets::badge(ui, &actions_summary, t.muted);
 
         let has_companion = rule.actions.iter().any(|a| matches!(a, Action::StartProcess { close_on_exit: true, .. }));
         if has_companion {
-            widgets::badge(ui, "BOUND SATELLITE", t.good);
+            widgets::badge(ui, loc.rules_summary_bound_satellite, t.good);
         }
 
         if !rule.on_exit_actions.is_empty() {
@@ -359,26 +363,26 @@ fn render_pipeline_summary(ui: &mut Ui, rule: &Rule, t: &Tokens) {
             let exit_names: Vec<_> = rule.on_exit_actions.iter().map(|a| match a {
                 Action::StartProcess { file_path, .. } => {
                     let fname = std::path::Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
-                    format!("LAUNCH {}", fname)
+                    format!("{} {}", loc.summary_action_launch, fname)
                 }
-                Action::KillProcess { process_name, .. } => format!("KILL {}", process_name),
+                Action::KillProcess { process_name, .. } => format!("{} {}", loc.summary_action_kill, process_name),
                 Action::PowerShell { .. } => "POWERSHELL".to_string(),
                 Action::Cmd { .. } => "CMD".to_string(),
                 Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
                 Action::Sound { .. } => "SOUND".to_string(),
                 Action::ProcessAudio { process_name, action_type, volume_level } => {
                     match action_type {
-                        ProcessAudioActionType::Mute => format!("MUTE {}", process_name),
-                        ProcessAudioActionType::Unmute => format!("UNMUTE {}", process_name),
-                        ProcessAudioActionType::ToggleMute => format!("TOGGLE {}", process_name),
-                        ProcessAudioActionType::SetVolume => format!("VOL {}% {}", volume_level, process_name),
+                        ProcessAudioActionType::Mute => format!("{} {}", loc.summary_action_mute, process_name),
+                        ProcessAudioActionType::Unmute => format!("{} {}", loc.summary_action_unmute, process_name),
+                        ProcessAudioActionType::ToggleMute => format!("{} {}", loc.summary_action_toggle, process_name),
+                        ProcessAudioActionType::SetVolume => format!("{} {}% {}", loc.summary_action_vol, volume_level, process_name),
                     }
                 }
-                Action::SystemPower { power_type } => format!("POWER {:?}", power_type),
-                Action::Delay { seconds } => format!("WAIT {:.1}S", seconds),
+                Action::SystemPower { power_type } => format!("{} {:?}", loc.summary_action_power, power_type),
+                Action::Delay { seconds } => format!("{} {:.1}S", loc.summary_action_wait, seconds),
                 Action::HttpWebhook { .. } => "WEBHOOK".to_string(),
             }).collect();
-            let exit_summary = format!("ON-EXIT {}: {}", rule.on_exit_actions.len(), exit_names.join(" | "));
+            let exit_summary = format!("{} {}: {}", loc.rules_summary_on_exit, rule.on_exit_actions.len(), exit_names.join(" | "));
             widgets::badge(ui, &exit_summary, t.accent_ink);
         }
     });

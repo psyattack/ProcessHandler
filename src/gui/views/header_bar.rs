@@ -3,17 +3,12 @@ use crate::gui::components::widgets;
 use crate::gui::state::{ActiveView, GuiState};
 use crate::gui::theme::{self, Tokens};
 
-const TABS: &[(ActiveView, &str, &str)] = &[
-    (ActiveView::Rules, "AUTOMATIONS", "Automated process rules"),
-    (ActiveView::Processes, "HUNTER", "Process Hunter & live task inspector"),
-    (ActiveView::LiveStream, "LOGS", "Live event log stream"),
-    (ActiveView::Settings, "SETTINGS", "Engine and system preferences"),
-];
-
 pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
     let t = Tokens::get(ui.ctx());
     let h = theme::HEADER_H;
     let full_rect = ui.max_rect();
+
+    let loc = state.loc();
 
     // 1. Custom window title bar drag & double-click maximize
     widgets::title_bar_drag(ui);
@@ -32,12 +27,19 @@ pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
     let right_rect = Rect::from_min_size(pos2(full_rect.right() - right_w, full_rect.top()), vec2(right_w, h));
     ui.scope_builder(egui::UiBuilder::new().max_rect(right_rect), |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            widgets::window_buttons(ui, h);
+            widgets::window_buttons(ui, h, loc);
         });
     });
 
     // 4. Center: Navigation Tabs (strictly centered in the middle of the window)
-    let galleys: Vec<_> = TABS
+    let tabs = [
+        (ActiveView::Rules, loc.tab_automations, loc.tab_automations_tip),
+        (ActiveView::Processes, loc.tab_hunter, loc.tab_hunter_tip),
+        (ActiveView::LiveStream, loc.tab_logs, loc.tab_logs_tip),
+        (ActiveView::Settings, loc.tab_settings, loc.tab_settings_tip),
+    ];
+
+    let galleys: Vec<_> = tabs
         .iter()
         .map(|&(view, label, tip)| {
             let galley = widgets::hud_galley(ui, label, t.muted);
@@ -54,7 +56,7 @@ pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
         let tab_rect = Rect::from_min_size(pos2(current_x, full_rect.top()), vec2(w, h));
         current_x += w;
 
-        let resp = ui.interact(tab_rect, ui.id().with(label), egui::Sense::click());
+        let resp = ui.interact(tab_rect, ui.id().with(view as usize), egui::Sense::click());
         if resp.clicked() {
             state.active_view = view;
         }

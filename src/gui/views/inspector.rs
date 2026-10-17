@@ -88,13 +88,14 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
                     .corner_radius(CornerRadius::ZERO)
                     .inner_margin(egui::Margin::symmetric(20, 14))
                     .show(ui, |ui| {
+                        let loc = state.loc();
                         ui.set_width(ui.available_width());
                         ui.set_max_width(ui.available_width());
                         ui.horizontal(|ui| {
                             ui.set_width(ui.available_width());
-                            widgets::eyebrow(ui, "01", "AUTOMATION BUILDER");
+                            widgets::eyebrow(ui, "01", loc.inspector_eyebrow_builder);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if widgets::glyph_button(ui, Glyph::Close, "Close").clicked() {
+                                if widgets::glyph_button(ui, Glyph::Close, loc.inspector_btn_close_tip).clicked() {
                                     close_editor = true;
                                 }
                             });
@@ -116,13 +117,14 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
                     .corner_radius(CornerRadius::ZERO)
                     .inner_margin(egui::Margin::symmetric(20, 14))
                     .show(ui, |ui| {
+                        let loc = state.loc();
                         ui.set_width(ui.available_width());
                         ui.set_max_width(ui.available_width());
                         ui.horizontal(|ui| {
                             ui.set_width(ui.available_width());
-                            widgets::eyebrow(ui, "01", "TASK DETAILS");
+                            widgets::eyebrow(ui, "01", loc.inspector_eyebrow_task_details);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if widgets::glyph_button(ui, Glyph::Close, "Close").clicked() {
+                                if widgets::glyph_button(ui, Glyph::Close, loc.inspector_btn_close_tip).clicked() {
                                     close_process = true;
                                 }
                             });
@@ -174,7 +176,17 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
 fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &Tokens) {
     state.ensure_processes();
 
-    egui::Frame::new().inner_margin(egui::Margin::same(20)).show(ui, |ui| {
+    let scrollbar_w = ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_inner_margin + ui.spacing().scroll.bar_outer_margin;
+    let right_m = (20.0 - scrollbar_w).max(0.0).round() as i8;
+
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: 20,
+            right: right_m,
+            top: 20,
+            bottom: 20,
+        })
+        .show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.set_max_width(ui.available_width());
         ui.vertical(|ui| {
@@ -183,7 +195,8 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
             ui.spacing_mut().item_spacing.y = 12.0;
 
             // Basic Info
-            widgets::hud(ui, "RULE NAME:", t.muted);
+            let loc = state.loc();
+            widgets::hud(ui, loc.inspector_field_rule_name, t.muted);
             ui.add(
                 egui::TextEdit::singleline(&mut rule.name)
                     .desired_width(ui.available_width())
@@ -192,10 +205,10 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                     .margin(vec2(10.0, 8.0)),
             );
 
-            widgets::hud(ui, "DESCRIPTION:", t.muted);
+            widgets::hud(ui, loc.inspector_field_description, t.muted);
             ui.add(
                 egui::TextEdit::singleline(&mut rule.description)
-                    .hint_text("Optional memo, notes, or usage details...")
+                    .hint_text(loc.inspector_field_description_hint)
                     .desired_width(ui.available_width())
                     .min_size(vec2(0.0, theme::CONTROL_H))
                     .vertical_align(egui::Align::Center)
@@ -203,16 +216,16 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
             );
 
             ui.horizontal_wrapped(|ui| {
-                widgets::hud(ui, "COOLDOWN:", t.muted);
+                widgets::hud(ui, loc.inspector_field_cooldown, t.muted);
                 ui.add(egui::DragValue::new(&mut rule.cooldown_seconds).speed(0.1).range(0.0..=60.0).suffix(" s"));
                 ui.add_space(16.0);
-                ui.checkbox(&mut rule.is_enabled, "Rule Active");
+                ui.checkbox(&mut rule.is_enabled, loc.inspector_checkbox_rule_active);
             });
 
             widgets::hrule(ui);
 
             // 1. Trigger
-            widgets::eyebrow(ui, "02", "TRIGGER CONDITION");
+            widgets::eyebrow(ui, "02", loc.inspector_eyebrow_trigger);
 
             if rule.trigger.is_none() {
                 rule.trigger = Some(Trigger::Process {
@@ -222,7 +235,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                 });
             }
 
-            let trigger_types = ["Process Event", "System Event", "Periodic Timer"];
+            let trigger_types = [loc.inspector_trigger_process, loc.inspector_trigger_system, loc.inspector_trigger_timer];
             let mut current_idx = match &rule.trigger {
                 Some(Trigger::Process { .. }) => 0,
                 Some(Trigger::SystemEvent { .. }) => 1,
@@ -268,45 +281,46 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                     Trigger::Process { process_name, match_mode, single_instance } => {
                         is_process_trigger = true;
 
-                        widgets::hud(ui, "TARGET PROCESS:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
                         ui.horizontal(|ui| {
-                            let combo_w = 175.0;
-                            let input_w = (ui.available_width() - combo_w - ui.spacing().item_spacing.x).max(60.0);
-                            ui.add(
-                                egui::TextEdit::singleline(process_name)
-                                    .hint_text("e.g. game.exe, chrome.exe, *discord*")
-                                    .desired_width(input_w)
-                                    .min_size(vec2(0.0, theme::CONTROL_H))
-                                    .vertical_align(egui::Align::Center)
-                                    .margin(vec2(10.0, 8.0)),
-                            );
-                            render_process_picker(ui, state, process_name, "rule_proc_combo");
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                render_process_picker(ui, state, loc, process_name, "rule_proc_combo");
+                                ui.add(
+                                    egui::TextEdit::singleline(process_name)
+                                        .hint_text(loc.inspector_field_target_process_hint)
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                );
+                            });
                         });
 
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.y = 2.0;
 
                             ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, "MATCH MODE:", t.muted);
-                                ui.radio_value(match_mode, ProcessMatchMode::Exact, "Exact");
-                                ui.radio_value(match_mode, ProcessMatchMode::Wildcard, "Wildcard");
-                                ui.radio_value(match_mode, ProcessMatchMode::Regex, "Contains");
+                                widgets::hud(ui, loc.inspector_field_match_mode, t.muted);
+                                ui.radio_value(match_mode, ProcessMatchMode::Exact, loc.inspector_match_mode_exact);
+                                ui.radio_value(match_mode, ProcessMatchMode::Wildcard, loc.inspector_match_mode_wildcard);
+                                ui.radio_value(match_mode, ProcessMatchMode::Regex, loc.inspector_match_mode_contains);
                             });
 
-                            ui.checkbox(single_instance, "Single Instance");
+                            ui.checkbox(single_instance, loc.inspector_checkbox_single_instance);
                         });
                     }
                     Trigger::SystemEvent { event_type, idle_duration_sec, .. } => {
-                        widgets::hud(ui, "SYSTEM EVENT TYPE:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_sys_event_type, t.muted);
                         let events = [
-                            (SystemEventType::SessionLock, "Lock Screen"),
-                            (SystemEventType::SessionUnlock, "Unlock Screen"),
-                            (SystemEventType::SystemSleep, "PC Sleep"),
-                            (SystemEventType::SystemResume, "PC Resume from Sleep"),
-                            (SystemEventType::PowerSourceAc, "Switched to AC Power"),
-                            (SystemEventType::PowerSourceBattery, "Switched to Battery"),
-                            (SystemEventType::UserIdle, "User Inactive / Idle"),
-                            (SystemEventType::UserActive, "User Active"),
+                            (SystemEventType::SessionLock, loc.inspector_sys_event_lock),
+                            (SystemEventType::SessionUnlock, loc.inspector_sys_event_unlock),
+                            (SystemEventType::SystemSleep, loc.inspector_sys_event_sleep),
+                            (SystemEventType::SystemResume, loc.inspector_sys_event_resume),
+                            (SystemEventType::PowerSourceAc, loc.inspector_sys_event_ac),
+                            (SystemEventType::PowerSourceBattery, loc.inspector_sys_event_battery),
+                            (SystemEventType::UserIdle, loc.inspector_sys_event_idle),
+                            (SystemEventType::UserActive, loc.inspector_sys_event_active),
                         ];
 
                         egui::ComboBox::from_id_salt("sys_event_combo")
@@ -320,7 +334,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
                         if *event_type == SystemEventType::UserIdle {
                             ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, "IDLE DURATION:", t.muted);
+                                widgets::hud(ui, loc.inspector_field_idle_duration, t.muted);
                                 ui.add(egui::DragValue::new(idle_duration_sec).range(10..=3600).suffix(" s"));
                             });
                         }
@@ -335,6 +349,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                     } => {
                         render_schedule_trigger(
                             ui,
+                            loc,
                             schedule_type,
                             interval_sec,
                             daily_time,
@@ -350,9 +365,9 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
             // 2. Action Sequence Builder (Execution on trigger)
             let action_header = if is_process_trigger {
-                "ACTIONS ON PROCESS START"
+                loc.inspector_eyebrow_actions_start
             } else {
-                "ACTION SEQUENCE PIPELINE"
+                loc.inspector_eyebrow_actions_pipeline
             };
             widgets::eyebrow(ui, "03", action_header);
 
@@ -368,7 +383,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
             // 3. Actions on Process Exit
             if is_process_trigger {
                 widgets::hrule(ui);
-                widgets::eyebrow(ui, "04", "ACTIONS ON PROCESS TERMINATION");
+                widgets::eyebrow(ui, "04", loc.inspector_eyebrow_actions_exit);
 
                 render_actions_pipeline(
                     ui,
@@ -384,19 +399,19 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
             // Save / Cancel Actions
             ui.horizontal_wrapped(|ui| {
-                if widgets::button(ui, "SAVE RULE", Kind::Primary, 120.0).clicked() {
+                if widgets::button(ui, loc.inspector_btn_save_rule, Kind::Primary, 120.0).clicked() {
                     state.save_rule(rule.clone());
                 }
 
                 if !state.is_creating_new_rule
-                    && widgets::button(ui, "CLONE", Kind::Secondary, 0.0)
-                        .on_hover_text("Duplicate this rule with a new ID")
+                    && widgets::button(ui, loc.inspector_btn_clone, Kind::Secondary, 0.0)
+                        .on_hover_text(loc.inspector_btn_clone_tip)
                         .clicked()
                 {
                     state.clone_rule(rule);
                 }
 
-                if widgets::button(ui, "CANCEL", Kind::Secondary, 0.0).clicked() {
+                if widgets::button(ui, loc.inspector_btn_cancel, Kind::Secondary, 0.0).clicked() {
                     state.editing_rule = None;
                     state.is_creating_new_rule = false;
                 }
@@ -405,12 +420,12 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
     });
 }
 
-fn render_add_action_button(ui: &mut Ui, actions: &mut Vec<Action>, combo_id: &str, label: &str) {
+fn render_add_action_button(ui: &mut Ui, loc: &crate::i18n::Strings, actions: &mut Vec<Action>, combo_id: &str, label: &str) {
     egui::ComboBox::from_id_salt(combo_id)
         .selected_text(label)
         .width(240.0)
         .show_ui(ui, |ui| {
-            if ui.button("Launch Process").clicked() {
+            if ui.button(loc.inspector_menu_launch_process).clicked() {
                 actions.push(Action::StartProcess {
                     file_path: String::new(),
                     arguments: String::new(),
@@ -421,53 +436,53 @@ fn render_add_action_button(ui: &mut Ui, actions: &mut Vec<Action>, combo_id: &s
                     close_on_exit: false,
                 });
             }
-            if ui.button("Kill Process").clicked() {
+            if ui.button(loc.inspector_menu_kill_process).clicked() {
                 actions.push(Action::KillProcess {
                     process_name: "target.exe".into(),
                     kill_tree: true,
                     force: true,
                 });
             }
-            if ui.button("PowerShell Script").clicked() {
+            if ui.button(loc.inspector_menu_powershell).clicked() {
                 actions.push(Action::PowerShell {
                     script: "Write-Output 'ProcessHandler'".into(),
                     run_in_window: false,
                 });
             }
-            if ui.button("Command Prompt").clicked() {
+            if ui.button(loc.inspector_menu_cmd).clicked() {
                 actions.push(Action::Cmd {
                     command: "echo ProcessHandler".into(),
                     run_in_window: false,
                 });
             }
-            if ui.button("Notification Toast").clicked() {
+            if ui.button(loc.inspector_menu_notification).clicked() {
                 actions.push(Action::Notification {
                     title: "ProcessHandler Alert".into(),
                     message: "Process event triggered".into(),
                 });
             }
-            if ui.button("Sound / Volume").clicked() {
+            if ui.button(loc.inspector_menu_sound).clicked() {
                 actions.push(Action::Sound {
                     sound_type: SoundActionType::PlayBeep,
                     volume_level: 50,
                 });
             }
-            if ui.button("Process Audio (Mute/Vol)").clicked() {
+            if ui.button(loc.inspector_menu_process_audio).clicked() {
                 actions.push(Action::ProcessAudio {
                     process_name: "notepad.exe".into(),
                     action_type: ProcessAudioActionType::Mute,
                     volume_level: 100,
                 });
             }
-            if ui.button("System Power / Lock").clicked() {
+            if ui.button(loc.inspector_menu_system_power).clicked() {
                 actions.push(Action::SystemPower {
                     power_type: SystemPowerType::Lock,
                 });
             }
-            if ui.button("Delay Pause").clicked() {
+            if ui.button(loc.inspector_menu_delay).clicked() {
                 actions.push(Action::Delay { seconds: 1.0 });
             }
-            if ui.button("HTTP Webhook").clicked() {
+            if ui.button(loc.inspector_menu_webhook).clicked() {
                 actions.push(Action::HttpWebhook {
                     url: "http://localhost:8080/hook".into(),
                     method: "POST".into(),
@@ -485,24 +500,24 @@ struct DndDragSession {
     card_width: f32,
 }
 
-fn action_type_badge(action: &Action) -> &'static str {
+fn action_type_badge(action: &Action, loc: &crate::i18n::Strings) -> &'static str {
     match action {
         Action::StartProcess { close_on_exit, .. } => {
             if *close_on_exit {
-                "LAUNCH COMPANION"
+                loc.inspector_badge_launch_companion
             } else {
-                "LAUNCH PROCESS"
+                loc.inspector_badge_launch_process
             }
         }
-        Action::KillProcess { .. } => "KILL PROCESS",
-        Action::PowerShell { .. } => "POWERSHELL",
-        Action::Cmd { .. } => "CMD",
-        Action::Notification { .. } => "NOTIFICATION",
-        Action::Sound { .. } => "AUDIO / VOLUME",
-        Action::ProcessAudio { .. } => "PROCESS AUDIO",
-        Action::SystemPower { .. } => "SYSTEM POWER",
-        Action::Delay { .. } => "DELAY",
-        Action::HttpWebhook { .. } => "WEBHOOK",
+        Action::KillProcess { .. } => loc.inspector_badge_kill_process,
+        Action::PowerShell { .. } => loc.inspector_badge_powershell,
+        Action::Cmd { .. } => loc.inspector_badge_cmd,
+        Action::Notification { .. } => loc.inspector_badge_notification,
+        Action::Sound { .. } => loc.inspector_badge_audio_volume,
+        Action::ProcessAudio { .. } => loc.inspector_badge_process_audio,
+        Action::SystemPower { .. } => loc.inspector_badge_system_power,
+        Action::Delay { .. } => loc.inspector_badge_delay,
+        Action::HttpWebhook { .. } => loc.inspector_badge_webhook,
     }
 }
 
@@ -572,8 +587,10 @@ fn action_summary_preview(action: &Action) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_drop_slot(
     ui: &mut Ui,
+    loc: &crate::i18n::Strings,
     slot_idx: usize,
     active_dst: Option<usize>,
     active_src: Option<usize>,
@@ -617,7 +634,7 @@ fn render_drop_slot(
         );
 
         // Step number label at the right of the drop line
-        let prefix = if is_exit_pipeline { "EXIT" } else { "STEP" };
+        let prefix = if is_exit_pipeline { loc.inspector_exit_prefix } else { loc.inspector_step_prefix };
         let step_num = if let Some(src) = active_src {
             if slot_idx > src {
                 slot_idx
@@ -635,8 +652,10 @@ fn render_drop_slot(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_floating_drag_preview(
     ui: &Ui,
+    loc: &crate::i18n::Strings,
     action: &Action,
     session: DndDragSession,
     pointer_pos: Option<Pos2>,
@@ -680,7 +699,7 @@ fn render_floating_drag_preview(
     }
 
     // Step indicator: "STEP 01"
-    let prefix = if is_exit_pipeline { "EXIT" } else { "STEP" };
+    let prefix = if is_exit_pipeline { loc.inspector_exit_prefix } else { loc.inspector_step_prefix };
     let step_txt = format!("{} {:02}", prefix, session.source_idx + 1);
     let step_galley = widgets::caps(ui, &step_txt, 11.0, theme::mono_bold(), 1.0, t.accent_ink);
     painter.galley_with_override_text_color(
@@ -690,7 +709,7 @@ fn render_floating_drag_preview(
     );
 
     // Type badge
-    let type_badge = action_type_badge(action);
+    let type_badge = action_type_badge(action, loc);
     let badge_galley = widgets::caps(ui, type_badge, 10.0, theme::mono(), 1.0, t.ink_strong);
     let badge_rect = Rect::from_min_size(
         pos2(preview_rect.left() + 84.0, preview_rect.top() + 7.0),
@@ -797,10 +816,11 @@ fn render_actions_pipeline(
     let mut drag_started_idx = None;
     let mut current_centers = Vec::with_capacity(actions.len());
 
+    let loc = state.loc();
     let total = actions.len();
     for (idx, action) in actions.iter_mut().enumerate() {
         // Render drop slot BEFORE card idx
-        render_drop_slot(ui, idx, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
+        render_drop_slot(ui, loc, idx, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
 
         // Render card idx
         let is_ghost = active_src == Some(idx);
@@ -832,7 +852,7 @@ fn render_actions_pipeline(
 
     // Render trailing drop slot (after last card)
     if total > 0 {
-        render_drop_slot(ui, total, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
+        render_drop_slot(ui, loc, total, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
     }
 
     // Update target_idx using fresh current_centers from this exact frame
@@ -903,6 +923,7 @@ fn render_actions_pipeline(
         // Render floating drag preview card!
         render_floating_drag_preview(
             ui,
+            loc,
             &actions[session.source_idx],
             session,
             pointer_pos,
@@ -915,9 +936,10 @@ fn render_actions_pipeline(
     // Add action button at the bottom of the pipeline
     render_add_action_button(
         ui,
+        loc,
         actions,
         &format!("add_action_{}", pipeline_id),
-        "+ ADD ACTION...",
+        loc.inspector_btn_add_action,
     );
 }
 
@@ -938,6 +960,7 @@ fn render_action_card(
     is_exit_pipeline: bool,
     is_being_dragged: bool,
 ) -> ActionCardResponse {
+    let loc = state.loc();
     let mut remove_clicked = false;
     let mut clone_clicked = false;
     let mut expand_script = None;
@@ -972,43 +995,44 @@ fn render_action_card(
                 ui.horizontal(|ui| {
                     ui.set_width(ui.available_width());
 
-                    // Drag grip handle on far left
-                    let grip_resp = widgets::drag_handle(ui, "Drag to reorder step");
-                    if grip_resp.drag_started() {
-                        drag_started = true;
-                    }
-
-                    let prefix = if is_exit_pipeline { "EXIT" } else { "STEP" };
-                    widgets::hud(ui, &format!("{} {:02}", prefix, idx + 1), t.accent_ink);
-
-                    let type_badge = action_type_badge(action);
-                    if is_being_dragged {
-                        widgets::badge(ui, "MOVING STEP...", t.accent_ink);
-                    } else {
-                        widgets::badge(ui, type_badge, t.muted);
-                    }
-
-                    // Right-to-left layout for buttons: [Close] [Clone]
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::glyph_button(ui, Glyph::Close, "Remove Step").clicked() {
+                        if widgets::glyph_button(ui, Glyph::Close, loc.inspector_tip_remove_step).clicked() {
                             remove_clicked = true;
                         }
 
-                        if widgets::glyph_button(ui, Glyph::Clone, "Clone Step").clicked() {
+                        if widgets::glyph_button(ui, Glyph::Clone, loc.inspector_tip_clone_step).clicked() {
                             clone_clicked = true;
                         }
 
-                        // Middle blank space on top strip is also draggable
-                        let empty_w = (ui.available_width() - 8.0).max(0.0);
-                        if empty_w > 0.0 {
-                            let (_, strip_resp) = ui.allocate_exact_size(vec2(empty_w, theme::CONTROL_H), Sense::click_and_drag());
-                            if strip_resp.drag_started() {
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            // Drag grip handle on far left
+                            let grip_resp = widgets::drag_handle(ui, loc.inspector_tip_drag_step);
+                            if grip_resp.drag_started() {
                                 drag_started = true;
                             }
-                            if strip_resp.hovered() {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+
+                            let prefix = if is_exit_pipeline { loc.inspector_exit_prefix } else { loc.inspector_step_prefix };
+                            widgets::hud(ui, &format!("{} {:02}", prefix, idx + 1), t.accent_ink);
+
+                            let type_badge = action_type_badge(action, loc);
+                            if is_being_dragged {
+                                widgets::badge(ui, loc.inspector_badge_moving_step, t.accent_ink);
+                            } else {
+                                widgets::badge(ui, type_badge, t.muted);
                             }
-                        }
+
+                            // Middle blank space on top strip is also draggable
+                            let empty_w = (ui.available_width() - 4.0).max(0.0);
+                            if empty_w > 0.0 {
+                                let (_, strip_resp) = ui.allocate_exact_size(vec2(empty_w, theme::CONTROL_H), Sense::click_and_drag());
+                                if strip_resp.drag_started() {
+                                    drag_started = true;
+                                }
+                                if strip_resp.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                }
+                            }
+                        });
                     });
                 });
 
@@ -1026,95 +1050,100 @@ fn render_action_card(
                         run_hidden,
                         close_on_exit,
                     } => {
-                        widgets::hud(ui, "EXECUTABLE PATH:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_executable_path, t.muted);
                         ui.horizontal(|ui| {
-                            let btn_w = widgets::button_width(ui, "BROWSE...", 0.0);
-                            let input_w = (ui.available_width() - btn_w - ui.spacing().item_spacing.x).max(60.0);
-                            ui.add(
-                                egui::TextEdit::singleline(file_path)
-                                    .hint_text("C:\\Path\\To\\Application.exe")
-                                    .desired_width(input_w)
-                                    .min_size(vec2(0.0, theme::CONTROL_H))
-                                    .vertical_align(egui::Align::Center)
-                                    .margin(vec2(10.0, 8.0)),
-                            );
-                            if widgets::button(ui, "BROWSE...", Kind::Secondary, btn_w).clicked() {
-                                if let Some(file) = rfd::FileDialog::new()
-                                    .add_filter("Executables", &["exe", "bat", "cmd", "lnk", "ps1"])
-                                    .pick_file()
-                                {
-                                    *file_path = file.to_string_lossy().to_string();
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let btn_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
+                                if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, btn_w).clicked() {
+                                    if let Some(file) = rfd::FileDialog::new()
+                                        .add_filter("Executables", &["exe", "bat", "cmd", "lnk", "ps1"])
+                                        .pick_file()
+                                    {
+                                        *file_path = file.to_string_lossy().to_string();
+                                    }
                                 }
-                            }
+                                ui.add(
+                                    egui::TextEdit::singleline(file_path)
+                                        .hint_text(loc.inspector_field_executable_hint)
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                );
+                            });
                         });
 
-                        widgets::hud(ui, "ARGUMENTS:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_arguments, t.muted);
                         ui.add(
                             egui::TextEdit::singleline(arguments)
-                                .hint_text("e.g. -windowed -port 8080 {ProcessId}")
+                                .hint_text(loc.inspector_field_arguments_hint)
                                 .desired_width(ui.available_width())
                                 .min_size(vec2(0.0, theme::CONTROL_H))
                                 .vertical_align(egui::Align::Center)
                                 .margin(vec2(10.0, 8.0)),
                         );
 
-                        widgets::hud(ui, "WORKING DIRECTORY:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_working_directory, t.muted);
                         ui.horizontal(|ui| {
-                            let mut wd_str = working_directory.clone().unwrap_or_default();
-                            let btn_w = widgets::button_width(ui, "FOLDER...", 0.0);
-                            let input_w = (ui.available_width() - btn_w - ui.spacing().item_spacing.x).max(60.0);
-                            if ui.add(
-                                egui::TextEdit::singleline(&mut wd_str)
-                                    .hint_text("Default executable directory")
-                                    .desired_width(input_w)
-                                    .min_size(vec2(0.0, theme::CONTROL_H))
-                                    .vertical_align(egui::Align::Center)
-                                    .margin(vec2(10.0, 8.0)),
-                            ).changed() {
-                                *working_directory = if wd_str.trim().is_empty() { None } else { Some(wd_str.clone()) };
-                            }
-                            if widgets::button(ui, "FOLDER...", Kind::Secondary, btn_w).clicked() {
-                                if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                                    *working_directory = Some(folder.to_string_lossy().to_string());
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let btn_w = widgets::button_width(ui, loc.inspector_btn_folder, 0.0);
+                                if widgets::button(ui, loc.inspector_btn_folder, Kind::Secondary, btn_w).clicked() {
+                                    if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                        *working_directory = Some(folder.to_string_lossy().to_string());
+                                    }
                                 }
-                            }
+                                let mut wd_str = working_directory.clone().unwrap_or_default();
+                                if ui.add(
+                                    egui::TextEdit::singleline(&mut wd_str)
+                                        .hint_text(loc.inspector_field_working_directory_hint)
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                ).changed() {
+                                    *working_directory = if wd_str.trim().is_empty() { None } else { Some(wd_str.clone()) };
+                                }
+                            });
                         });
 
-                        ui.checkbox(run_hidden, "Run hidden (no console window)");
-                        ui.checkbox(only_if_not_running, "Don't launch if process is already running");
-                        ui.checkbox(run_as_admin, "Run as Administrator");
+                        ui.checkbox(run_hidden, loc.inspector_checkbox_run_hidden);
+                        ui.checkbox(only_if_not_running, loc.inspector_checkbox_only_if_not_running);
+                        ui.checkbox(run_as_admin, loc.inspector_checkbox_run_as_admin);
                         if !is_exit_pipeline {
-                            ui.checkbox(close_on_exit, "Auto-close when tracked process exits");
+                            ui.checkbox(close_on_exit, loc.inspector_checkbox_close_on_exit);
                         }
                     }
 
                     Action::KillProcess { process_name, kill_tree, force } => {
-                        widgets::hud(ui, "TERMINATE PROCESS NAME:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_terminate_process_name, t.muted);
                         ui.horizontal(|ui| {
-                            let combo_w = 175.0;
-                            let input_w = (ui.available_width() - combo_w - ui.spacing().item_spacing.x).max(60.0);
-                            ui.add(
-                                egui::TextEdit::singleline(process_name)
-                                    .hint_text("e.g. soundkeeper.exe or target.exe")
-                                    .desired_width(input_w)
-                                    .min_size(vec2(0.0, theme::CONTROL_H))
-                                    .vertical_align(egui::Align::Center)
-                                    .margin(vec2(10.0, 8.0)),
-                            );
-                            render_process_picker(ui, state, process_name, &format!("kill_proc_{idx}"));
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                render_process_picker(ui, state, loc, process_name, &format!("kill_proc_{idx}"));
+                                ui.add(
+                                    egui::TextEdit::singleline(process_name)
+                                        .hint_text(loc.inspector_field_terminate_hint)
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                );
+                            });
                         });
 
                         ui.horizontal_wrapped(|ui| {
-                            ui.checkbox(kill_tree, "Kill process tree");
-                            ui.checkbox(force, "Force terminate");
+                            ui.checkbox(kill_tree, loc.inspector_checkbox_kill_tree);
+                            ui.checkbox(force, loc.inspector_checkbox_force_terminate);
                         });
                     }
 
                     Action::PowerShell { script, run_in_window } => {
                         ui.horizontal(|ui| {
-                            widgets::hud(ui, "POWERSHELL SCRIPT:", t.muted);
+                            widgets::hud(ui, loc.inspector_field_powershell_script, t.muted);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if widgets::glyph_button(ui, Glyph::Expand, "Expand script canvas").clicked() {
+                                if widgets::glyph_button(ui, Glyph::Expand, loc.inspector_tip_expand_pwsh).clicked() {
                                     expand_script = Some(ScriptLanguage::PowerShell);
                                 }
                             });
@@ -1129,14 +1158,14 @@ fn render_action_card(
                                 .layouter(&mut layouter),
                         );
 
-                        ui.checkbox(run_in_window, "Run in visible console window");
+                        ui.checkbox(run_in_window, loc.inspector_checkbox_visible_console);
                     }
 
                     Action::Cmd { command, run_in_window } => {
                         ui.horizontal(|ui| {
-                            widgets::hud(ui, "COMMAND LINE PROMPT:", t.muted);
+                            widgets::hud(ui, loc.inspector_field_cmd_prompt, t.muted);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if widgets::glyph_button(ui, Glyph::Expand, "Expand command canvas").clicked() {
+                                if widgets::glyph_button(ui, Glyph::Expand, loc.inspector_tip_expand_cmd).clicked() {
                                     expand_script = Some(ScriptLanguage::Batch);
                                 }
                             });
@@ -1150,11 +1179,11 @@ fn render_action_card(
                                 .margin(vec2(10.0, 8.0))
                                 .layouter(&mut layouter),
                         );
-                        ui.checkbox(run_in_window, "Run in visible console window");
+                        ui.checkbox(run_in_window, loc.inspector_checkbox_visible_console);
                     }
 
                     Action::Notification { title, message } => {
-                        widgets::hud(ui, "NOTIFICATION TITLE:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_notif_title, t.muted);
                         ui.add(
                             egui::TextEdit::singleline(title)
                                 .desired_width(ui.available_width())
@@ -1163,7 +1192,7 @@ fn render_action_card(
                                 .margin(vec2(10.0, 8.0)),
                         );
 
-                        widgets::hud(ui, "NOTIFICATION MESSAGE:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_notif_message, t.muted);
                         ui.add(
                             egui::TextEdit::singleline(message)
                                 .desired_width(ui.available_width())
@@ -1174,17 +1203,17 @@ fn render_action_card(
                     }
 
                     Action::Sound { sound_type, volume_level } => {
-                        widgets::hud(ui, "AUDIO ACTION TYPE:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_audio_action_type, t.muted);
                         ui.horizontal_wrapped(|ui| {
-                            ui.radio_value(sound_type, SoundActionType::PlayBeep, "System Beep");
-                            ui.radio_value(sound_type, SoundActionType::Mute, "Mute");
-                            ui.radio_value(sound_type, SoundActionType::Unmute, "Unmute");
-                            ui.radio_value(sound_type, SoundActionType::ToggleMute, "Toggle Mute");
-                            ui.radio_value(sound_type, SoundActionType::SetVolume, "Set Volume");
+                            ui.radio_value(sound_type, SoundActionType::PlayBeep, loc.inspector_audio_beep);
+                            ui.radio_value(sound_type, SoundActionType::Mute, loc.inspector_audio_mute);
+                            ui.radio_value(sound_type, SoundActionType::Unmute, loc.inspector_audio_unmute);
+                            ui.radio_value(sound_type, SoundActionType::ToggleMute, loc.inspector_audio_toggle_mute);
+                            ui.radio_value(sound_type, SoundActionType::SetVolume, loc.inspector_audio_set_volume);
                         });
                         if *sound_type == SoundActionType::SetVolume {
                             ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, "VOLUME LEVEL:", t.muted);
+                                widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
                                 ui.add(egui::Slider::new(volume_level, 0..=100).text("%"));
                             });
                         }
@@ -1195,79 +1224,81 @@ fn render_action_card(
                         action_type,
                         volume_level,
                     } => {
-                        widgets::hud(ui, "TARGET PROCESS:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
                         ui.horizontal(|ui| {
-                            let combo_w = 175.0;
-                            let input_w = (ui.available_width() - combo_w - ui.spacing().item_spacing.x).max(60.0);
-                            ui.add(
-                                egui::TextEdit::singleline(process_name)
-                                    .hint_text("e.g. notepad.exe or game.exe")
-                                    .desired_width(input_w)
-                                    .min_size(vec2(0.0, theme::CONTROL_H))
-                                    .vertical_align(egui::Align::Center)
-                                    .margin(vec2(10.0, 8.0)),
-                            );
-                            render_process_picker(ui, state, process_name, &format!("audio_proc_{idx}"));
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                render_process_picker(ui, state, loc, process_name, &format!("audio_proc_{idx}"));
+                                ui.add(
+                                    egui::TextEdit::singleline(process_name)
+                                        .hint_text("e.g. notepad.exe or game.exe")
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                );
+                            });
                         });
 
-                        widgets::hud(ui, "PROCESS AUDIO ACTION:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_process_audio_action, t.muted);
                         ui.horizontal_wrapped(|ui| {
-                            ui.radio_value(action_type, ProcessAudioActionType::Mute, "Mute");
-                            ui.radio_value(action_type, ProcessAudioActionType::Unmute, "Unmute");
-                            ui.radio_value(action_type, ProcessAudioActionType::ToggleMute, "Toggle Mute");
-                            ui.radio_value(action_type, ProcessAudioActionType::SetVolume, "Set Volume");
+                            ui.radio_value(action_type, ProcessAudioActionType::Mute, loc.inspector_audio_mute);
+                            ui.radio_value(action_type, ProcessAudioActionType::Unmute, loc.inspector_audio_unmute);
+                            ui.radio_value(action_type, ProcessAudioActionType::ToggleMute, loc.inspector_audio_toggle_mute);
+                            ui.radio_value(action_type, ProcessAudioActionType::SetVolume, loc.inspector_audio_set_volume);
                         });
                         if *action_type == ProcessAudioActionType::SetVolume {
                             ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, "VOLUME LEVEL:", t.muted);
+                                widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
                                 ui.add(egui::Slider::new(volume_level, 0..=100).text("%"));
                             });
                         }
                     }
 
                     Action::SystemPower { power_type } => {
-                        widgets::hud(ui, "POWER ACTION:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_power_action, t.muted);
                         ui.horizontal_wrapped(|ui| {
-                            ui.radio_value(power_type, SystemPowerType::Lock, "Lock Screen");
-                            ui.radio_value(power_type, SystemPowerType::Sleep, "Sleep PC");
-                            ui.radio_value(power_type, SystemPowerType::TurnScreenOff, "Turn Screen Off");
-                            ui.radio_value(power_type, SystemPowerType::Restart, "Restart");
-                            ui.radio_value(power_type, SystemPowerType::Shutdown, "Shutdown");
+                            ui.radio_value(power_type, SystemPowerType::Lock, loc.inspector_power_lock);
+                            ui.radio_value(power_type, SystemPowerType::Sleep, loc.inspector_power_sleep);
+                            ui.radio_value(power_type, SystemPowerType::TurnScreenOff, loc.inspector_power_screen_off);
+                            ui.radio_value(power_type, SystemPowerType::Restart, loc.inspector_power_restart);
+                            ui.radio_value(power_type, SystemPowerType::Shutdown, loc.inspector_power_shutdown);
                         });
                     }
 
                     Action::Delay { seconds } => {
                         ui.horizontal_wrapped(|ui| {
-                            widgets::hud(ui, "PAUSE DELAY:", t.muted);
+                            widgets::hud(ui, loc.inspector_field_pause_delay, t.muted);
                             ui.add(egui::DragValue::new(seconds).speed(0.1).range(0.1..=120.0).suffix(" s"));
                         });
                     }
 
                     Action::HttpWebhook { url, method, payload, .. } => {
-                        widgets::hud(ui, "WEBHOOK URL:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_webhook_url, t.muted);
                         ui.horizontal(|ui| {
-                            let combo_w = 85.0;
-                            let input_w = (ui.available_width() - combo_w - ui.spacing().item_spacing.x).max(60.0);
-                            ui.add(
-                                egui::TextEdit::singleline(url)
-                                    .hint_text("https://api.example.com/webhook")
-                                    .desired_width(input_w)
-                                    .min_size(vec2(0.0, theme::CONTROL_H))
-                                    .vertical_align(egui::Align::Center)
-                                    .margin(vec2(10.0, 8.0)),
-                            );
-                            let combo_id = ui.id().with(idx).with("meth_combo");
-                            egui::ComboBox::from_id_salt(combo_id)
-                                .selected_text(method.as_str())
-                                .width(65.0)
-                                .show_ui(ui, |ui| {
-                                    for m in &["POST", "GET", "PUT", "DELETE"] {
-                                        ui.selectable_value(method, m.to_string(), *m);
-                                    }
-                                });
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let combo_id = ui.id().with(idx).with("meth_combo");
+                                egui::ComboBox::from_id_salt(combo_id)
+                                    .selected_text(method.as_str())
+                                    .width(65.0)
+                                    .show_ui(ui, |ui| {
+                                        for m in &["POST", "GET", "PUT", "DELETE"] {
+                                            ui.selectable_value(method, m.to_string(), *m);
+                                        }
+                                    });
+                                ui.add(
+                                    egui::TextEdit::singleline(url)
+                                        .hint_text(loc.inspector_field_webhook_url_hint)
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                );
+                            });
                         });
 
-                        widgets::hud(ui, "JSON BODY PAYLOAD:", t.muted);
+                        widgets::hud(ui, loc.inspector_field_json_body, t.muted);
                         let mut p_str = payload.clone().unwrap_or_default();
                         if ui.add(
                             egui::TextEdit::multiline(&mut p_str)
@@ -1294,16 +1325,27 @@ fn render_action_card(
 }
 
 fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSnapshotItem, t: &Tokens) {
-    egui::Frame::new().inner_margin(egui::Margin::same(20)).show(ui, |ui| {
+    let loc = state.loc();
+    let scrollbar_w = ui.spacing().scroll.bar_width + ui.spacing().scroll.bar_inner_margin + ui.spacing().scroll.bar_outer_margin;
+    let right_m = (20.0 - scrollbar_w).max(0.0).round() as i8;
+
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: 20,
+            right: right_m,
+            top: 20,
+            bottom: 20,
+        })
+        .show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.vertical(|ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 12.0;
 
             // Window Title
-            widgets::hud(ui, "WINDOW TITLE:", t.muted);
+            widgets::hud(ui, loc.inspector_field_window_title, t.muted);
             let wtitle = if proc.window_title.is_empty() {
-                "No active top-level window"
+                loc.inspector_no_active_window
             } else {
                 &proc.window_title
             };
@@ -1316,22 +1358,22 @@ fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSna
 
             // RAM Working Set
             let mb = proc.memory_bytes as f64 / 1_048_576.0;
-            widgets::hud(ui, "WORKING SET RAM:", t.muted);
+            widgets::hud(ui, loc.inspector_field_working_set_ram, t.muted);
             ui.horizontal_wrapped(|ui| {
                 widgets::badge(ui, &format!("{:.1} MB", mb), t.good);
-                widgets::hud(ui, &format!("{} BYTES", proc.memory_bytes), t.faint);
+                widgets::hud(ui, &format!("{} {}", proc.memory_bytes, loc.inspector_bytes_suffix), t.faint);
             });
 
             widgets::hrule(ui);
 
-            widgets::eyebrow(ui, "02", "1-CLICK AUTOMATION ACTIONS");
+            widgets::eyebrow(ui, "02", loc.inspector_eyebrow_quick_actions);
 
-            if widgets::button(ui, "+ CREATE AUTOMATION RULE", Kind::Secondary, 0.0).clicked() {
+            if widgets::button(ui, loc.inspector_btn_create_automation, Kind::Secondary, 0.0).clicked() {
                 state.active_view = crate::gui::state::ActiveView::Rules;
                 state.is_creating_new_rule = true;
                 state.editing_rule = Some(Rule {
                     id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-                    name: format!("Track {}", proc.name),
+                    name: format!("{} {}", loc.inspector_rule_track_prefix, proc.name),
                     description: String::new(),
                     is_enabled: true,
                     cooldown_seconds: 0.0,
@@ -1348,12 +1390,12 @@ fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSna
 
             widgets::hrule(ui);
 
-            if widgets::button(ui, "TERMINATE PROCESS", Kind::Danger, 0.0).clicked() {
+            if widgets::button(ui, loc.inspector_btn_terminate_process, Kind::Danger, 0.0).clicked() {
                 let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::KillProcess {
                     pid: proc.pid,
                     force: true,
                 });
-                state.set_toast(format!("Terminated {} #{}", proc.name, proc.pid));
+                state.set_toast(format!("{} {} #{}", loc.toast_process_terminated, proc.name, proc.pid));
                 state.selected_process = None;
             }
         });
@@ -1363,6 +1405,7 @@ fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSna
 fn render_process_picker(
     ui: &mut Ui,
     state: &GuiState,
+    loc: &crate::i18n::Strings,
     target_process: &mut String,
     id_salt: &str,
 ) {
@@ -1380,8 +1423,8 @@ fn render_process_picker(
     let mut filter_text: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
 
     egui::ComboBox::from_id_salt(id_salt)
-        .selected_text("Pick running...")
-        .width(160.0)
+        .selected_text(loc.inspector_pick_running)
+        .width(135.0)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show_ui(ui, |ui| {
             ui.set_max_height(320.0);
@@ -1391,7 +1434,7 @@ fn render_process_picker(
                 ui.label("🔍");
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut filter_text)
-                        .hint_text("Search process...")
+                        .hint_text(loc.inspector_search_process_hint)
                         .desired_width(180.0),
                 );
                 if resp.changed() {
@@ -1420,7 +1463,7 @@ fn render_process_picker(
                     }
                     if count == 0 {
                         ui.label(
-                            egui::RichText::new("No matching processes")
+                            egui::RichText::new(loc.inspector_no_matching_processes)
                                 .italics()
                                 .color(ui.visuals().weak_text_color()),
                         );
@@ -1446,6 +1489,7 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 
 fn render_datetime_picker(
     ui: &mut Ui,
+    loc: &crate::i18n::Strings,
     target_datetime: &mut Option<String>,
     t: &Tokens,
     id_salt: &str,
@@ -1477,7 +1521,7 @@ fn render_datetime_picker(
     let mut view_month: u32 = ui.data_mut(|d| d.get_temp(view_month_id).unwrap_or(sel_month));
     let mut view_year: i32 = ui.data_mut(|d| d.get_temp(view_year_id).unwrap_or(sel_year));
 
-    widgets::hud(ui, "MINI CALENDAR:", t.muted);
+    widgets::hud(ui, loc.inspector_mini_calendar, t.muted);
     ui.horizontal(|ui| {
         if widgets::button(ui, "◀", Kind::Secondary, 24.0).clicked() {
             if view_month == 1 {
@@ -1492,11 +1536,10 @@ fn render_datetime_picker(
             });
         }
 
-        let month_name = match view_month {
-            1 => "January", 2 => "February", 3 => "March", 4 => "April",
-            5 => "May", 6 => "June", 7 => "July", 8 => "August",
-            9 => "September", 10 => "October", 11 => "November", 12 => "December",
-            _ => "",
+        let month_name = if (1..=12).contains(&view_month) {
+            loc.inspector_cal_month_names[(view_month - 1) as usize]
+        } else {
+            ""
         };
         ui.label(egui::RichText::new(format!("{} {}", month_name, view_year)).strong());
 
@@ -1523,7 +1566,7 @@ fn render_datetime_picker(
         egui::Grid::new(ui.id().with(id_salt).with("mini_cal_grid"))
             .spacing(vec2(3.0, 3.0))
             .show(ui, |ui| {
-                for d in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] {
+                for d in loc.inspector_cal_day_names {
                     let (rect, _) = ui.allocate_exact_size(vec2(two_digit_w, 18.0), Sense::hover());
                     ui.painter().text(
                         rect.center(),
@@ -1573,7 +1616,7 @@ fn render_datetime_picker(
 
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
-        widgets::hud(ui, "EXECUTION TIME:", t.muted);
+        widgets::hud(ui, loc.inspector_execution_time, t.muted);
         let h_ch = ui.add(
             egui::DragValue::new(&mut sel_hour)
                 .range(0..=23)
@@ -1604,8 +1647,10 @@ fn render_datetime_picker(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_schedule_trigger(
     ui: &mut Ui,
+    loc: &crate::i18n::Strings,
     schedule_type: &mut ScheduleType,
     interval_sec: &mut u64,
     daily_time: &mut Option<String>,
@@ -1618,9 +1663,9 @@ fn render_schedule_trigger(
 
         ui.horizontal_wrapped(|ui| {
             let modes = [
-                (ScheduleType::Interval, "Periodic Interval"),
-                (ScheduleType::Daily, "Daily at Time"),
-                (ScheduleType::OneShot, "Specific Date & Time"),
+                (ScheduleType::Interval, loc.inspector_schedule_interval),
+                (ScheduleType::Daily, loc.inspector_schedule_daily),
+                (ScheduleType::OneShot, loc.inspector_schedule_oneshot),
             ];
             for (m, label) in modes {
                 let prev = *schedule_type;
@@ -1635,8 +1680,8 @@ fn render_schedule_trigger(
 
         ui.horizontal_wrapped(|ui| {
             let modes = [
-                (ScheduleType::AppStartup, "On App Start"),
-                (ScheduleType::AppShutdown, "On App Close"),
+                (ScheduleType::AppStartup, loc.inspector_schedule_app_start),
+                (ScheduleType::AppShutdown, loc.inspector_schedule_app_close),
             ];
             for (m, label) in modes {
                 let prev = *schedule_type;
@@ -1651,7 +1696,7 @@ fn render_schedule_trigger(
 
     match schedule_type {
         ScheduleType::Interval => {
-            widgets::hud(ui, "QUICK PRESET INTERVALS:", t.muted);
+            widgets::hud(ui, loc.inspector_preset_intervals, t.muted);
             let presets: &[(&str, u64)] = &[
                 ("1S", 1),
                 ("1M", 60),
@@ -1667,13 +1712,13 @@ fn render_schedule_trigger(
                 for &(label, secs) in presets {
                     let on = *interval_sec == secs;
                     let tip = match label {
-                        "1S" => "1 second",
-                        "1M" => "1 minute",
-                        "1H" => "1 hour",
-                        "1D" => "1 day (24 hours)",
-                        "1W" => "1 week (7 days)",
-                        "1MO" => "1 month (30 days)",
-                        "1Y" => "1 year (365 days)",
+                        "1S" => loc.inspector_preset_tip_1s,
+                        "1M" => loc.inspector_preset_tip_1m,
+                        "1H" => loc.inspector_preset_tip_1h,
+                        "1D" => loc.inspector_preset_tip_1d,
+                        "1W" => loc.inspector_preset_tip_1w,
+                        "1MO" => loc.inspector_preset_tip_1mo,
+                        "1Y" => loc.inspector_preset_tip_1y,
                         _ => "",
                     };
                     let btn = widgets::button(ui, label, if on { Kind::Primary } else { Kind::Secondary }, 0.0);
@@ -1685,7 +1730,7 @@ fn render_schedule_trigger(
             });
 
             ui.add_space(4.0);
-            widgets::hud(ui, "CUSTOM REPEAT INTERVAL:", t.muted);
+            widgets::hud(ui, loc.inspector_custom_interval, t.muted);
 
             let s = *interval_sec;
             let mut hours = s / 3600;
@@ -1693,7 +1738,7 @@ fn render_schedule_trigger(
             let mut secs = s % 60;
 
             ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new("Hours:").monospace().size(12.0).color(t.ink));
+                ui.label(egui::RichText::new(loc.inspector_interval_hours).monospace().size(12.0).color(t.ink));
                 let h_ch = ui.add(
                     egui::DragValue::new(&mut hours)
                         .range(0..=999_999)
@@ -1702,7 +1747,7 @@ fn render_schedule_trigger(
                 ).changed();
 
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new("Minutes:").monospace().size(12.0).color(t.ink));
+                ui.label(egui::RichText::new(loc.inspector_interval_minutes).monospace().size(12.0).color(t.ink));
                 let m_ch = ui.add(
                     egui::DragValue::new(&mut mins)
                         .range(0..=59)
@@ -1711,7 +1756,7 @@ fn render_schedule_trigger(
                 ).changed();
 
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new("Seconds:").monospace().size(12.0).color(t.ink));
+                ui.label(egui::RichText::new(loc.inspector_interval_seconds).monospace().size(12.0).color(t.ink));
                 let s_ch = ui.add(
                     egui::DragValue::new(&mut secs)
                         .range(0..=59)
@@ -1728,7 +1773,7 @@ fn render_schedule_trigger(
             ui.add_space(8.0);
             widgets::hrule(ui);
             let mut has_start_time = target_datetime.is_some();
-            if ui.checkbox(&mut has_start_time, "Specify first execution date and time").changed() {
+            if ui.checkbox(&mut has_start_time, loc.inspector_checkbox_first_execution).changed() {
                 if has_start_time {
                     let now = chrono::Local::now();
                     *target_datetime = Some(format!(
@@ -1742,7 +1787,7 @@ fn render_schedule_trigger(
 
             if has_start_time {
                 ui.add_space(4.0);
-                render_datetime_picker(ui, target_datetime, t, "interval_cal");
+                render_datetime_picker(ui, loc, target_datetime, t, "interval_cal");
             }
         }
 
@@ -1760,7 +1805,7 @@ fn render_schedule_trigger(
                 (h, m, s)
             };
 
-            widgets::hud(ui, "DAILY EXECUTION TIME:", t.muted);
+            widgets::hud(ui, loc.inspector_daily_execution_time, t.muted);
             ui.horizontal_wrapped(|ui| {
                 let h_ch = ui.add(
                     egui::DragValue::new(&mut hour)
@@ -1788,15 +1833,15 @@ fn render_schedule_trigger(
                 }
             });
 
-            widgets::hud(ui, "ACTIVE DAYS OF THE WEEK:", t.muted);
+            widgets::hud(ui, loc.inspector_active_days_of_week, t.muted);
             let dow_names = [
-                (1, "Mon"),
-                (2, "Tue"),
-                (3, "Wed"),
-                (4, "Thu"),
-                (5, "Fri"),
-                (6, "Sat"),
-                (7, "Sun"),
+                (1, loc.inspector_dow_mon),
+                (2, loc.inspector_dow_tue),
+                (3, loc.inspector_dow_wed),
+                (4, loc.inspector_dow_thu),
+                (5, loc.inspector_dow_fri),
+                (6, loc.inspector_dow_sat),
+                (7, loc.inspector_dow_sun),
             ];
 
             ui.horizontal_wrapped(|ui| {
@@ -1816,20 +1861,20 @@ fn render_schedule_trigger(
                     }
                 }
                 let all_active = days_of_week.is_empty() || days_of_week.len() == 7;
-                if widgets::button(ui, "ALL", if all_active { Kind::Primary } else { Kind::Secondary }, 0.0).clicked() {
+                if widgets::button(ui, loc.inspector_btn_all_days, if all_active { Kind::Primary } else { Kind::Secondary }, 0.0).clicked() {
                     days_of_week.clear();
                 }
             });
         }
 
         ScheduleType::OneShot => {
-            render_datetime_picker(ui, target_datetime, t, "oneshot_cal");
+            render_datetime_picker(ui, loc, target_datetime, t, "oneshot_cal");
         }
 
         ScheduleType::AppStartup => {
             widgets::badge(
                 ui,
-                "Fires once automatically whenever ProcessHandler starts",
+                loc.inspector_badge_app_startup,
                 t.good,
             );
         }
@@ -1837,7 +1882,7 @@ fn render_schedule_trigger(
         ScheduleType::AppShutdown => {
             widgets::badge(
                 ui,
-                "Fires when ProcessHandler shuts down",
+                loc.inspector_badge_app_shutdown,
                 t.muted,
             );
         }

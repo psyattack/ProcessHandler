@@ -260,10 +260,15 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
             if event == WM_LBUTTONDBLCLK {
                 spawn_or_show_gui();
             } else if event == WM_RBUTTONUP {
+                let config = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+                let loc = crate::i18n::get(config.language);
+                let open_w: Vec<u16> = loc.tray_menu_open.encode_utf16().chain(std::iter::once(0)).collect();
+                let exit_w: Vec<u16> = loc.tray_menu_exit.encode_utf16().chain(std::iter::once(0)).collect();
+
                 let hmenu = CreatePopupMenu().unwrap();
-                let _ = InsertMenuW(hmenu, 0, MF_BYPOSITION | MF_STRING, IDM_OPEN, w!("Open"));
+                let _ = InsertMenuW(hmenu, 0, MF_BYPOSITION | MF_STRING, IDM_OPEN, PCWSTR(open_w.as_ptr()));
                 let _ = InsertMenuW(hmenu, 1, MF_BYPOSITION | MF_SEPARATOR, 0, None);
-                let _ = InsertMenuW(hmenu, 2, MF_BYPOSITION | MF_STRING, IDM_EXIT, w!("Exit"));
+                let _ = InsertMenuW(hmenu, 2, MF_BYPOSITION | MF_STRING, IDM_EXIT, PCWSTR(exit_w.as_ptr()));
 
                 let mut pt = POINT::default();
                 let _ = GetCursorPos(&mut pt);

@@ -19,10 +19,10 @@ impl ScriptLanguage {
         }
     }
 
-    pub fn subtitle(&self) -> &'static str {
+    pub fn localized_subtitle(&self, loc: &crate::i18n::Strings) -> &'static str {
         match self {
-            Self::PowerShell => "PowerShell 5.1 / 7+ Script",
-            Self::Batch => "Windows Command Prompt (cmd.exe)",
+            Self::PowerShell => loc.modal_pwsh_subtitle,
+            Self::Batch => loc.modal_cmd_subtitle,
         }
     }
 }

@@ -48,6 +48,7 @@ pub struct GuiState {
     pub editing_rule: Option<Rule>,
     pub expanded_script_editor: Option<ExpandedScriptEditorState>,
     pub last_script_editor: Option<ExpandedScriptEditorState>,
+    pub language: crate::i18n::Language,
     pub last_sync: Instant,
     pub toast: Option<(String, Instant)>,
     pub is_daemon_connected: bool,
@@ -56,6 +57,7 @@ pub struct GuiState {
 
 impl GuiState {
     pub fn new() -> Self {
+        let config = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
         Self {
             active_view: ActiveView::Rules,
             search_query: String::new(),
@@ -70,10 +72,25 @@ impl GuiState {
             editing_rule: None,
             expanded_script_editor: None,
             last_script_editor: None,
+            language: config.language,
             last_sync: Instant::now() - std::time::Duration::from_secs(10),
             toast: None,
             is_daemon_connected: false,
             icon_cache: crate::gui::components::icons::ProcessIconCache::new(),
+        }
+    }
+
+    pub fn loc(&self) -> &'static crate::i18n::Strings {
+        crate::i18n::get(self.language)
+    }
+
+    pub fn set_language(&mut self, lang: crate::i18n::Language) {
+        if self.language != lang {
+            self.language = lang;
+            let mut cfg = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+            cfg.language = lang;
+            let _ = cfg.save_to_file(crate::config::AppConfig::config_path());
+            self.set_toast(self.loc().toast_lang_changed);
         }
     }
 
@@ -149,7 +166,7 @@ impl GuiState {
         let _ = IpcClient::call(&IpcRequest::SaveRule(rule));
         self.editing_rule = None;
         self.is_creating_new_rule = false;
-        self.set_toast("Rule saved successfully");
+        self.set_toast(self.loc().toast_rule_saved);
         self.sync_with_daemon();
     }
 
@@ -159,7 +176,7 @@ impl GuiState {
             self.selected_rule_id = None;
             self.editing_rule = None;
         }
-        self.set_toast("Rule deleted");
+        self.set_toast(self.loc().toast_rule_deleted);
         self.sync_with_daemon();
     }
 
@@ -174,7 +191,7 @@ impl GuiState {
             self.editing_rule = Some(cloned);
             self.is_creating_new_rule = false;
         }
-        self.set_toast(format!("Cloned rule (paused): {}", new_name));
+        self.set_toast(format!("{}: {}", self.loc().toast_rule_cloned, new_name));
         self.sync_with_daemon();
     }
 
@@ -188,7 +205,7 @@ impl GuiState {
 
     pub fn test_run_rule(&mut self, id: &str) {
         let _ = IpcClient::call(&IpcRequest::TestRunRule(id.to_string()));
-        self.set_toast("Test execution triggered");
+        self.set_toast(self.loc().toast_test_execution);
         self.sync_with_daemon();
     }
 }
