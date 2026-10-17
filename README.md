@@ -27,9 +27,11 @@ Whether you need to boost game performance by binding companion utilities, safeg
 ## ✨ Key Features
 
 * **Instant process lifecycle detection** via native Windows WMI event notifications
-* **Flexible trigger & action pipeline** supporting multi-step automations
+* **Flexible trigger & action pipeline** supporting multi-step automations with per-process audio control
 * **Companion process mode** with automated startup and exit cleanup
 * **Interactive process manager** with real Win32 icon extraction and metrics
+* **Modern visual studio & themes** with Dark, Light, and Chocolate palettes in English & Russian
+* **Built-in auto-updater** with GitHub release checks and changelog modal
 * **Zero-spin background daemon** sitting quietly in the system tray
 
 *Specifically:*
@@ -52,10 +54,14 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *System Events*: User idle state (custom inactivity threshold), user resume active, AC power plug-in, and battery power switch.
 - **Multi-Action Pipelines**:
   - *Process Management*: Launch executable (custom arguments, working directory), terminate process (graceful or forced kill), restart process.
-  - *Audio & Multimedia*: Master system sound control via Windows Core Audio `IAudioEndpointVolume` (Mute, Unmute, Toggle Mute, Set Volume 0–100%) and frequency-tuned audible beeps.
+  - *Per-Process Audio Control (WASAPI)*: Direct per-application audio session management via Windows WASAPI (`IAudioSessionManager2` & `ISimpleAudioVolume`). Mute, unmute, toggle mute, or set volume (0–100%) for specific processes or wildcards, with automatic retry polling for newly launched apps.
+  - *Master Audio & Multimedia*: Master system sound control via Windows Core Audio `IAudioEndpointVolume` (Mute, Unmute, Toggle Mute, Set Volume 0–100%) and frequency-tuned audible beeps.
   - *System Alerts*: Native Windows balloon / toast notifications with custom title and body text.
-  - *Shell Commands*: Execute custom PowerShell commands, CLI scripts, or batch files with dynamic parameter expansion.
-- **Rule Safeguards**: Configurable cooldown intervals to prevent rapid re-trigger storms, execution counters, one-click rule cloning, and non-destructive pause toggles.
+  - *Shell Commands & Scripts*: Execute custom PowerShell commands, CLI scripts, or batch files with dynamic parameter expansion, supported by an expandable modal editor with syntax highlighting.
+  - *Timing Delays*: Configurable pause intervals between pipeline execution steps.
+- **Rule Safeguards & Execution**:
+  - *Non-Blocking Asynchronous Engine*: Rule actions and delays execute in decoupled background Tokio tasks, ensuring heavy commands or delays never freeze the daemon or the UI.
+  - *Execution Controls*: Configurable cooldown intervals to prevent rapid re-trigger storms, execution counters, one-click rule cloning, and non-destructive pause toggles.
 
 </details>
 
@@ -72,17 +78,23 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 - **Windows Named Pipes**: Reliable, bidirectional client-daemon communication over `\\.\pipe\ProcessHandler_daemon` using strongly-typed Serde JSON payloads.
 - **Single-Instance Enforcement**: Global Windows mutex prevents duplicate daemon instances; running an extra instance brings the existing GUI window to the foreground.
-- **System Tray Integration**: Unobtrusive tray icon with quick-action context menu (Open GUI, Exit) and double-click activation.
+- **System Tray Integration**: Unobtrusive tray icon with quick-action context menu (Open GUI, Exit), double-click activation, and dynamic language localization.
 - **Registry Autorun**: Seamless 1-click startup registration in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+- **Integrated Auto-Updater**: Built-in GitHub Releases checker, streaming binary downloads, and zero-downtime in-place self-replacement with automated daemon and GUI restarts.
 
 </details>
 
 <details>
 <summary><b>User Interface & Design</b></summary>
 
-- **Custom Minimalist Design System**: Sleek monochrome aesthetic, crisp typography (Archivo, Inter, GeistMono), and subtle hairline borders.
+- **Design System & Themes**: Sleek industrial aesthetic with custom typography (Archivo, Inter, GeistMono), subtle hairline borders, and three built-in color themes (**Dark**, **Light**, and **Chocolate**) with instant live switching.
+- **Full Internationalization (i18n)**: Comprehensive English and Russian localization covering all interface views, inspector controls, logs, settings, modals, and tray menus.
+- **Interactive Rule Builder**:
+  - *Animated Drag-and-Drop*: Reorder pipeline action steps smoothly with 6-dot drag handles, drop slot indicators, live previews, and viewport edge auto-scrolling.
+  - *Step Cloning*: One-click action step duplication directly beneath the source step.
+  - *Modal Script Editor*: Centered expandable modal for PowerShell and Batch scripts with custom syntax highlighting, live two-way sync, and backdrop dimming.
+- **Release Changelog Modal**: In-app viewer for GitHub release notes with rich Markdown/HTML formatting and 1-click update installation.
 - **Live Process Table**: Filter by application category (All, Apps, Background, Windows) and sort by Name, PID, Memory, or CPU.
-- **Visual Rule Builder**: Intuitive visual editor for creating complex triggers and action sequences with immediate schema validation.
 - **Execution Log Inspector**: Real-time diagnostic activity feed capturing trigger evaluations, action results, and system events.
 
 </details>
@@ -153,7 +165,9 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 ### Frontend / UI
 - **egui** (Immediate-mode GUI engine)
 - **eframe** (Desktop windowing & rendering integration)
-- **Custom Design Tokens** (Adaptive Dark/Light palette)
+- **Custom Design Tokens & Themes** (Dark, Light, Chocolate palettes)
+- **i18n Localization Engine** (Full English & Russian support)
+- **Script Syntax Highlighter** (PowerShell & Batch lexer)
 - **Win32 Shell GDI** (Native icon rasterization & textures)
 - **Named Pipe Client** (Thread-safe IPC client)
 
@@ -162,9 +176,11 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 
 ### Backend / Engine
 - **Rust** (High-performance, memory-safe systems language)
+- **Tokio** (Asynchronous runtime for decoupled rule execution & IPC)
 - **windows-rs** (Official Win32, COM & Core Audio bindings)
 - **WMI** (Windows Management Instrumentation event listener)
-- **Core Audio (IAudioEndpointVolume)** (Hardware-level master volume)
+- **Core Audio & WASAPI** (System volume & per-process)
+- **reqwest** (Async HTTP client for GitHub releases & binary updates)
 - **Named Pipes Server** (Multi-client background IPC listener)
 - **Serde + Serde JSON** (Strongly-typed state persistence)
 - **Windows Registry API** (System autorun persistence)
@@ -189,7 +205,7 @@ ProcessHandler/
 │   └── app.svg                       # Vector logo
 ├── src/                              # Source code
 │   ├── daemon/                       # Background daemon service
-│   │   ├── actions.rs                # Execution handlers (Process, Audio, Toast, Commands)
+│   │   ├── actions.rs                # Execution handlers (Process, Master Audio, Process Audio, Toast, Commands)
 │   │   ├── engine.rs                 # Central automation state engine & rule evaluator
 │   │   ├── ipc_server.rs             # Named pipe listener & connection worker
 │   │   ├── system_events.rs          # Win32 idle time & AC/battery power monitor
@@ -198,24 +214,32 @@ ProcessHandler/
 │   ├── gui/                          # egui desktop user interface
 │   │   ├── components/               # UI components
 │   │   │   ├── icons.rs              # Win32 shell icon extractor & texture cache
-│   │   │   └── widgets.rs            # Custom canvas controls (buttons, inputs, cards)
+│   │   │   ├── script_highlighter.rs # PowerShell & Batch syntax highlighter
+│   │   │   └── widgets.rs            # Custom canvas controls (buttons, inputs, cards, drag handles)
 │   │   ├── views/                    # Application screens & panels
+│   │   │   ├── changelog_modal.rs    # GitHub release notes & changelog viewer
 │   │   │   ├── header_bar.rs         # Custom window titlebar & controls
-│   │   │   ├── inspector.rs          # Rule inspector, trigger & action editor
+│   │   │   ├── inspector.rs          # Rule inspector, trigger & action editor (drag-and-drop)
 │   │   │   ├── logs_view.rs          # Real-time event & action logs
 │   │   │   ├── processes_view.rs     # Live process table with search & sorting
 │   │   │   ├── rules_view.rs         # Rule management list & cards
-│   │   │   └── settings_view.rs      # Engine configuration & autostart options
+│   │   │   ├── script_modal.rs       # Expandable script editor modal
+│   │   │   └── settings_view.rs      # Balanced 2x2 settings (System, Engine, Appearance, Updates)
 │   │   ├── state.rs                  # GUI state management & IPC synchronization
-│   │   └── theme.rs                  # Design system tokens, typography & palette
+│   │   └── theme.rs                  # Design system tokens (Dark, Light, Chocolate palettes)
+│   ├── i18n/                         # Internationalization & localization
+│   │   ├── en.rs                     # English string catalog
+│   │   └── ru.rs                     # Russian string catalog
 │   ├── ipc/                          # Inter-process communication
 │   │   ├── client.rs                 # Named pipe IPC client
 │   │   └── protocol.rs               # Request & response message types (Serde)
 │   ├── autorun.rs                    # Windows Registry autorun integration
-│   ├── config.rs                     # JSON configuration persistence & validation
+│   ├── config.rs                     # JSON configuration persistence & validation (theme, language, updates)
 │   ├── daemon.rs                     # Daemon entrypoint & service lifecycle
 │   ├── gui.rs                        # GUI entrypoint & eframe application loop
+│   ├── i18n.rs                       # Internationalization loader & language switcher
 │   ├── models.rs                     # Domain data models (Rule, Trigger, Action, Process)
+│   ├── updater.rs                    # GitHub releases auto-update & self-replacement engine
 │   └── main.rs                       # CLI dispatcher (--daemon, --gui, default)
 ├── build.rs                          # Windows resource compilation (icon, manifest)
 ├── Cargo.toml                        # Rust manifest & dependencies
@@ -233,7 +257,7 @@ Configuration and state files are located in:
 
 | File / Directory | Description |
 |------|-------------|
-| `config.json` | Application settings, user rules, poll interval, window geometry, and autorun state |
+| `config.json` | Application settings, user rules, poll interval, window geometry, color theme (`dark`, `light`, `chocolate`), language (`english`, `russian`), startup update checks, and autorun state |
 
 > [!NOTE]
 > Event and action execution logs are maintained in an in-memory ring buffer (up to 100 entries) in RAM and streamed via IPC directly to the GUI without incurring disk I/O wear.

@@ -9,8 +9,8 @@ fn main() {
         res.set("LegalCopyright", "psyattack");
         res.set("OriginalFilename", "ProcessHandler.exe");
         res.set("InternalName", "ProcessHandler");
-        res.set("FileVersion", "1.0.0.0");
-        res.set("ProductVersion", "1.0.0.0");
+        res.set("FileVersion", "1.1.0.0");
+        res.set("ProductVersion", "1.1.0.0");
         res.set_version_info(winres::VersionInfo::FILEVERSION, 0x0001000000000000);
         res.set_version_info(winres::VersionInfo::PRODUCTVERSION, 0x0001000000000000);
         let _ = res.compile();
