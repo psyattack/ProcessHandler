@@ -6,7 +6,7 @@ use egui::{CornerRadius, Ui, vec2};
 use crate::gui::components::widgets::{self, Cell, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
-use crate::models::{Action, Rule, Trigger};
+use crate::models::{Action, ProcessAudioActionType, Rule, Trigger};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum RuleFilter {
@@ -333,6 +333,14 @@ fn render_pipeline_summary(ui: &mut Ui, rule: &Rule, t: &Tokens) {
                 Action::Cmd { .. } => "CMD".to_string(),
                 Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
                 Action::Sound { .. } => "SOUND".to_string(),
+                Action::ProcessAudio { process_name, action_type, volume_level } => {
+                    match action_type {
+                        ProcessAudioActionType::Mute => format!("MUTE {}", process_name),
+                        ProcessAudioActionType::Unmute => format!("UNMUTE {}", process_name),
+                        ProcessAudioActionType::ToggleMute => format!("TOGGLE {}", process_name),
+                        ProcessAudioActionType::SetVolume => format!("VOL {}% {}", volume_level, process_name),
+                    }
+                }
                 Action::SystemPower { power_type } => format!("POWER {:?}", power_type),
                 Action::Delay { seconds } => format!("WAIT {:.1}S", seconds),
                 Action::HttpWebhook { .. } => "WEBHOOK".to_string(),
@@ -358,6 +366,14 @@ fn render_pipeline_summary(ui: &mut Ui, rule: &Rule, t: &Tokens) {
                 Action::Cmd { .. } => "CMD".to_string(),
                 Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
                 Action::Sound { .. } => "SOUND".to_string(),
+                Action::ProcessAudio { process_name, action_type, volume_level } => {
+                    match action_type {
+                        ProcessAudioActionType::Mute => format!("MUTE {}", process_name),
+                        ProcessAudioActionType::Unmute => format!("UNMUTE {}", process_name),
+                        ProcessAudioActionType::ToggleMute => format!("TOGGLE {}", process_name),
+                        ProcessAudioActionType::SetVolume => format!("VOL {}% {}", volume_level, process_name),
+                    }
+                }
                 Action::SystemPower { power_type } => format!("POWER {:?}", power_type),
                 Action::Delay { seconds } => format!("WAIT {:.1}S", seconds),
                 Action::HttpWebhook { .. } => "WEBHOOK".to_string(),

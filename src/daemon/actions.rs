@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::process::Command;
-use crate::models::{Action, SoundActionType, SystemPowerType};
+use crate::models::{Action, ProcessAudioActionType, SoundActionType, SystemPowerType};
 
 #[cfg(windows)]
 use windows::Win32::System::Shutdown::LockWorkStation;
@@ -261,6 +261,39 @@ impl ActionRunner {
                 Ok(())
             }
 
+            Action::ProcessAudio {
+                process_name,
+                action_type,
+                volume_level,
+            } => {
+                let proc_name = Self::interpolate_tokens(process_name, context);
+                let target_pid = context.get("ProcessId").and_then(|p| p.parse::<u32>().ok());
+
+                #[cfg(windows)]
+                {
+                    // Retry up to 15 times with 150ms delay (~2.2s total) in case audio session is not yet registered
+                    let mut matched = false;
+                    for attempt in 0..15 {
+                        match set_process_audio(&proc_name, target_pid, *action_type, *volume_level) {
+                            Ok(found) => {
+                                if found {
+                                    matched = true;
+                                    break;
+                                }
+                            }
+                            Err(e) => return Err(e),
+                        }
+                        if attempt < 14 {
+                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                        }
+                    }
+                    if !matched {
+                        return Err(format!("No audio session found for process '{}'", proc_name));
+                    }
+                }
+                Ok(())
+            }
+
             Action::Delay { seconds } => {
                 tokio::time::sleep(std::time::Duration::from_secs_f64(*seconds)).await;
                 Ok(())
@@ -320,6 +353,115 @@ fn set_audio_volume_or_mute(sound_type: SoundActionType, volume_level: u8) -> Re
                 SoundActionType::PlayBeep => {}
             }
             Ok(())
+        })();
+
+        if must_uninit {
+            CoUninitialize();
+        }
+
+        res
+    }
+}
+
+#[cfg(windows)]
+fn set_process_audio(
+    target_process: &str,
+    target_pid: Option<u32>,
+    action_type: ProcessAudioActionType,
+    volume_level: u8,
+) -> Result<bool, String> {
+    use windows::core::Interface;
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::Media::Audio::{eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator, IAudioSessionManager2, IAudioSessionControl2, ISimpleAudioVolume};
+
+    unsafe {
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let must_uninit = hr.is_ok();
+
+        let res = (|| -> Result<bool, String> {
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| format!("CoCreateInstance MMDeviceEnumerator failed: {e}"))?;
+
+            let device = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia)
+                .map_err(|e| format!("GetDefaultAudioEndpoint failed: {e}"))?;
+
+            let session_manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None)
+                .map_err(|e| format!("Activate IAudioSessionManager2 failed: {e}"))?;
+
+            let session_enumerator = session_manager.GetSessionEnumerator()
+                .map_err(|e| format!("GetSessionEnumerator failed: {e}"))?;
+
+            let count = session_enumerator.GetCount()
+                .map_err(|e| format!("GetCount failed: {e}"))?;
+
+            let proc_map = crate::daemon::watcher::ProcessWatcher::snapshot_process_map();
+            let target_clean = target_process.trim().to_lowercase();
+            let is_wildcard_or_current = target_clean == "*" || target_clean == "current" || target_clean.is_empty();
+
+            let mut matched_any = false;
+
+            for i in 0..count {
+                let session_control = match session_enumerator.GetSession(i) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+
+                let session_control2: IAudioSessionControl2 = match session_control.cast() {
+                    Ok(c2) => c2,
+                    Err(_) => continue,
+                };
+
+                let pid = match session_control2.GetProcessId() {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+
+                if pid == 0 {
+                    continue;
+                }
+
+                let matches_pid = target_pid.map(|tp| tp == pid).unwrap_or(false);
+                let matches_name = if !target_clean.is_empty() && target_clean != "current" {
+                    proc_map.get(&pid).map(|name| {
+                        name.eq_ignore_ascii_case(&target_clean)
+                            || name.trim_end_matches(".exe").eq_ignore_ascii_case(target_clean.trim_end_matches(".exe"))
+                    }).unwrap_or(false)
+                } else {
+                    false
+                };
+
+                if (is_wildcard_or_current && matches_pid) || matches_name || (target_clean == "*" && target_pid.is_none()) {
+                    let volume: ISimpleAudioVolume = match session_control.cast() {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    match action_type {
+                        ProcessAudioActionType::Mute => {
+                            volume.SetMute(true, std::ptr::null())
+                                .map_err(|e| format!("SetMute failed: {e}"))?;
+                        }
+                        ProcessAudioActionType::Unmute => {
+                            volume.SetMute(false, std::ptr::null())
+                                .map_err(|e| format!("SetMute failed: {e}"))?;
+                        }
+                        ProcessAudioActionType::ToggleMute => {
+                            let current = volume.GetMute()
+                                .map_err(|e| format!("GetMute failed: {e}"))?;
+                            volume.SetMute(!current.as_bool(), std::ptr::null())
+                                .map_err(|e| format!("SetMute failed: {e}"))?;
+                        }
+                        ProcessAudioActionType::SetVolume => {
+                            let scalar = (volume_level.min(100) as f32) / 100.0;
+                            volume.SetMasterVolume(scalar, std::ptr::null())
+                                .map_err(|e| format!("SetMasterVolume failed: {e}"))?;
+                        }
+                    }
+                    matched_any = true;
+                }
+            }
+
+            Ok(matched_any)
         })();
 
         if must_uninit {

@@ -134,6 +134,13 @@ pub enum Action {
         #[serde(default)]
         volume_level: u8, // 0..100
     },
+    #[serde(rename = "process_audio")]
+    ProcessAudio {
+        process_name: String,
+        action_type: ProcessAudioActionType,
+        #[serde(default)]
+        volume_level: u8, // 0..100
+    },
     #[serde(rename = "system_power")]
     SystemPower {
         power_type: SystemPowerType,
@@ -146,6 +153,16 @@ pub enum Action {
 
 fn default_http_method() -> String {
     "POST".to_string()
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessAudioActionType {
+    #[default]
+    Mute,
+    Unmute,
+    ToggleMute,
+    SetVolume,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

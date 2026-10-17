@@ -729,6 +729,63 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_process_audio_rule_serde() {
+        use crate::models::ProcessAudioActionType;
+
+        let json = r#"{
+            "id": "audio_rule_1",
+            "name": "Game Audio Intro Muter",
+            "is_enabled": true,
+            "actions": [
+                {
+                    "$action_type": "process_audio",
+                    "process_name": "game.exe",
+                    "action_type": "mute",
+                    "volume_level": 100
+                },
+                {
+                    "$action_type": "delay",
+                    "seconds": 5.0
+                },
+                {
+                    "$action_type": "process_audio",
+                    "process_name": "{ProcessName}",
+                    "action_type": "unmute",
+                    "volume_level": 100
+                }
+            ]
+        }"#;
+
+        let rule: Rule = serde_json::from_str(json).expect("deserialize process audio rule");
+        assert_eq!(rule.name, "Game Audio Intro Muter");
+        assert_eq!(rule.actions.len(), 3);
+
+        if let Action::ProcessAudio { process_name, action_type, .. } = &rule.actions[0] {
+            assert_eq!(process_name, "game.exe");
+            assert_eq!(*action_type, ProcessAudioActionType::Mute);
+        } else {
+            panic!("Expected ProcessAudio Mute");
+        }
+
+        if let Action::Delay { seconds } = &rule.actions[1] {
+            assert_eq!(*seconds, 5.0);
+        } else {
+            panic!("Expected Delay");
+        }
+
+        if let Action::ProcessAudio { process_name, action_type, .. } = &rule.actions[2] {
+            assert_eq!(process_name, "{ProcessName}");
+            assert_eq!(*action_type, ProcessAudioActionType::Unmute);
+        } else {
+            panic!("Expected ProcessAudio Unmute");
+        }
+
+        let serialized = serde_json::to_string(&rule).expect("serialize rule");
+        assert!(serialized.contains("process_audio"));
+        assert!(serialized.contains("game.exe"));
+    }
+
     #[tokio::test]
     async fn test_schedule_trigger_interval() {
         let mut config = AppConfig::default();

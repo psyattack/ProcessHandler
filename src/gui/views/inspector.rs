@@ -9,7 +9,7 @@ use crate::gui::components::widgets::{self, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
 use crate::models::{
-    Action, ProcessMatchMode, ProcessSnapshotItem, Rule, ScheduleType, SoundActionType,
+    Action, ProcessAudioActionType, ProcessMatchMode, ProcessSnapshotItem, Rule, ScheduleType, SoundActionType,
     SystemEventType, SystemPowerType, Trigger,
 };
 use chrono::{Datelike, Timelike};
@@ -459,6 +459,13 @@ fn render_add_action_button(ui: &mut Ui, actions: &mut Vec<Action>, combo_id: &s
                     volume_level: 50,
                 });
             }
+            if ui.button("Process Audio (Mute/Vol)").clicked() {
+                actions.push(Action::ProcessAudio {
+                    process_name: "notepad.exe".into(),
+                    action_type: ProcessAudioActionType::Mute,
+                    volume_level: 100,
+                });
+            }
             if ui.button("System Power / Lock").clicked() {
                 actions.push(Action::SystemPower {
                     power_type: SystemPowerType::Lock,
@@ -516,6 +523,7 @@ fn render_action_card(
                         Action::Cmd { .. } => "CMD",
                         Action::Notification { .. } => "NOTIFICATION",
                         Action::Sound { .. } => "AUDIO / VOLUME",
+                        Action::ProcessAudio { .. } => "PROCESS AUDIO",
                         Action::SystemPower { .. } => "SYSTEM POWER",
                         Action::Delay { .. } => "DELAY",
                         Action::HttpWebhook { .. } => "WEBHOOK",
@@ -682,6 +690,41 @@ fn render_action_card(
                             ui.radio_value(sound_type, SoundActionType::SetVolume, "Set Volume");
                         });
                         if *sound_type == SoundActionType::SetVolume {
+                            ui.horizontal_wrapped(|ui| {
+                                widgets::hud(ui, "VOLUME LEVEL:", t.muted);
+                                ui.add(egui::Slider::new(volume_level, 0..=100).text("%"));
+                            });
+                        }
+                    }
+
+                    Action::ProcessAudio {
+                        process_name,
+                        action_type,
+                        volume_level,
+                    } => {
+                        widgets::hud(ui, "TARGET PROCESS:", t.muted);
+                        ui.horizontal(|ui| {
+                            let combo_w = 175.0;
+                            let input_w = (ui.available_width() - combo_w - ui.spacing().item_spacing.x).max(60.0);
+                            ui.add(
+                                egui::TextEdit::singleline(process_name)
+                                    .hint_text("e.g. notepad.exe or game.exe")
+                                    .desired_width(input_w)
+                                    .min_size(vec2(0.0, theme::CONTROL_H))
+                                    .vertical_align(egui::Align::Center)
+                                    .margin(vec2(10.0, 8.0)),
+                            );
+                            render_process_picker(ui, state, process_name, &format!("audio_proc_{idx}"));
+                        });
+
+                        widgets::hud(ui, "PROCESS AUDIO ACTION:", t.muted);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.radio_value(action_type, ProcessAudioActionType::Mute, "Mute");
+                            ui.radio_value(action_type, ProcessAudioActionType::Unmute, "Unmute");
+                            ui.radio_value(action_type, ProcessAudioActionType::ToggleMute, "Toggle Mute");
+                            ui.radio_value(action_type, ProcessAudioActionType::SetVolume, "Set Volume");
+                        });
+                        if *action_type == ProcessAudioActionType::SetVolume {
                             ui.horizontal_wrapped(|ui| {
                                 widgets::hud(ui, "VOLUME LEVEL:", t.muted);
                                 ui.add(egui::Slider::new(volume_level, 0..=100).text("%"));
