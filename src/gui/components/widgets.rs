@@ -384,11 +384,10 @@ pub fn window_edges(ctx: &egui::Context) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Glyph {
     Close,
-    Up,
-    Down,
+    Clone,
 }
 
-/// Small outlined square button with a drawn glyph (X, Up, Down); inverts on hover.
+/// Small outlined square button with a drawn glyph (X, Clone); inverts on hover.
 pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::click());
@@ -407,15 +406,14 @@ pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
             p.line_segment([m + vec2(-s, -s), m + vec2(s, s)], Stroke::new(1.5, c));
             p.line_segment([m + vec2(-s, s), m + vec2(s, -s)], Stroke::new(1.5, c));
         }
-        Glyph::Up => {
-            let s = 3.5;
-            p.line_segment([m + vec2(-s, s * 0.5), m + vec2(0.0, -s * 0.8)], Stroke::new(1.4, c));
-            p.line_segment([m + vec2(0.0, -s * 0.8), m + vec2(s, s * 0.5)], Stroke::new(1.4, c));
-        }
-        Glyph::Down => {
-            let s = 3.5;
-            p.line_segment([m + vec2(-s, -s * 0.5), m + vec2(0.0, s * 0.8)], Stroke::new(1.4, c));
-            p.line_segment([m + vec2(0.0, s * 0.8), m + vec2(s, -s * 0.5)], Stroke::new(1.4, c));
+        Glyph::Clone => {
+            let back = Rect::from_center_size(m + vec2(-2.0, -2.0), vec2(7.0, 7.0));
+            let front = Rect::from_center_size(m + vec2(1.8, 1.8), vec2(7.0, 7.0));
+            p.line_segment([back.left_top(), back.right_top()], Stroke::new(1.2, c));
+            p.line_segment([back.left_top(), back.left_bottom()], Stroke::new(1.2, c));
+            p.line_segment([back.right_top(), back.right_top() + vec2(0.0, 2.0)], Stroke::new(1.2, c));
+            p.line_segment([back.left_bottom(), back.left_bottom() + vec2(2.0, 0.0)], Stroke::new(1.2, c));
+            p.rect_stroke(front, CornerRadius::ZERO, Stroke::new(1.2, c), egui::StrokeKind::Inside);
         }
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));

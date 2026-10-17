@@ -792,8 +792,7 @@ fn render_actions_pipeline(
     let active_dst = dnd_session.as_ref().map(|s| s.target_idx);
 
     let mut remove_idx = None;
-    let mut move_up_idx = None;
-    let mut move_down_idx = None;
+    let mut clone_idx = None;
     let mut drag_started_idx = None;
     let mut current_centers = Vec::with_capacity(actions.len());
 
@@ -809,7 +808,6 @@ fn render_actions_pipeline(
             state,
             action,
             idx,
-            total,
             t,
             is_exit_pipeline,
             is_ghost,
@@ -820,11 +818,8 @@ fn render_actions_pipeline(
         if resp.remove_clicked {
             remove_idx = Some(idx);
         }
-        if resp.move_up_clicked {
-            move_up_idx = Some(idx);
-        }
-        if resp.move_down_clicked {
-            move_down_idx = Some(idx);
+        if resp.clone_clicked {
+            clone_idx = Some(idx);
         }
         if resp.drag_started {
             drag_started_idx = Some(idx);
@@ -874,15 +869,11 @@ fn render_actions_pipeline(
         }
     }
 
-    // Handle button moves
-    if let Some(idx) = move_up_idx {
-        if idx > 0 && idx < actions.len() {
-            actions.swap(idx, idx - 1);
-        }
-    }
-    if let Some(idx) = move_down_idx {
-        if idx + 1 < actions.len() {
-            actions.swap(idx, idx + 1);
+    // Handle step cloning
+    if let Some(idx) = clone_idx {
+        if idx < actions.len() {
+            let cloned = actions[idx].clone();
+            actions.insert(idx + 1, cloned);
         }
     }
     if let Some(idx) = remove_idx {
@@ -928,26 +919,22 @@ fn render_actions_pipeline(
 
 struct ActionCardResponse {
     pub remove_clicked: bool,
-    pub move_up_clicked: bool,
-    pub move_down_clicked: bool,
+    pub clone_clicked: bool,
     pub drag_started: bool,
     pub card_rect: Rect,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_action_card(
     ui: &mut Ui,
     state: &GuiState,
     action: &mut Action,
     idx: usize,
-    total_count: usize,
     t: &Tokens,
     is_exit_pipeline: bool,
     is_being_dragged: bool,
 ) -> ActionCardResponse {
     let mut remove_clicked = false;
-    let mut move_up_clicked = false;
-    let mut move_down_clicked = false;
+    let mut clone_clicked = false;
     let mut drag_started = false;
 
     let ghost_id = ui.id().with(("card_ghost", is_exit_pipeline, idx));
@@ -995,19 +982,14 @@ fn render_action_card(
                         widgets::badge(ui, type_badge, t.muted);
                     }
 
-                    // Right-to-left layout for buttons: [Close] [Down] [Up]
+                    // Right-to-left layout for buttons: [Close] [Clone]
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if widgets::glyph_button(ui, Glyph::Close, "Remove Step").clicked() {
                             remove_clicked = true;
                         }
 
-                        if total_count > 1 {
-                            if idx + 1 < total_count && widgets::glyph_button(ui, Glyph::Down, "Move Step Down").clicked() {
-                                move_down_clicked = true;
-                            }
-                            if idx > 0 && widgets::glyph_button(ui, Glyph::Up, "Move Step Up").clicked() {
-                                move_up_clicked = true;
-                            }
+                        if widgets::glyph_button(ui, Glyph::Clone, "Clone Step").clicked() {
+                            clone_clicked = true;
                         }
 
                         // Middle blank space on top strip is also draggable
@@ -1280,8 +1262,7 @@ fn render_action_card(
 
     ActionCardResponse {
         remove_clicked,
-        move_up_clicked,
-        move_down_clicked,
+        clone_clicked,
         drag_started,
         card_rect: card_response.response.rect,
     }
