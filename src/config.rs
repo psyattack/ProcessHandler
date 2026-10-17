@@ -36,6 +36,15 @@ impl WindowState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AppTheme {
+    #[default]
+    Dark,
+    Light,
+    Chocolate,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     #[serde(default = "default_monitoring_mode")]
@@ -61,6 +70,9 @@ pub struct AppConfig {
 
     #[serde(default = "default_check_updates_on_startup")]
     pub check_updates_on_startup: bool,
+
+    #[serde(default)]
+    pub theme: AppTheme,
 }
 
 fn default_check_updates_on_startup() -> bool {
@@ -86,6 +98,7 @@ impl Default for AppConfig {
             autorun_configured: false,
             language: crate::i18n::Language::English,
             check_updates_on_startup: true,
+            theme: AppTheme::Dark,
         }
     }
 }
@@ -208,5 +221,22 @@ mod tests {
         let json = serde_json::to_string(&cfg).expect("serialize");
         let parsed: AppConfig = serde_json::from_str(&json).expect("deserialize");
         assert!(parsed.autorun_configured);
+    }
+
+    #[test]
+    fn test_app_theme_serde_and_default() {
+        assert_eq!(AppTheme::default(), AppTheme::Dark);
+
+        let dark_json = serde_json::to_string(&AppTheme::Dark).unwrap();
+        assert_eq!(dark_json, "\"dark\"");
+        assert_eq!(serde_json::from_str::<AppTheme>(&dark_json).unwrap(), AppTheme::Dark);
+
+        let light_json = serde_json::to_string(&AppTheme::Light).unwrap();
+        assert_eq!(light_json, "\"light\"");
+        assert_eq!(serde_json::from_str::<AppTheme>(&light_json).unwrap(), AppTheme::Light);
+
+        let choco_json = serde_json::to_string(&AppTheme::Chocolate).unwrap();
+        assert_eq!(choco_json, "\"chocolate\"");
+        assert_eq!(serde_json::from_str::<AppTheme>(&choco_json).unwrap(), AppTheme::Chocolate);
     }
 }

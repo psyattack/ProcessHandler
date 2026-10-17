@@ -132,6 +132,14 @@ pub static STRINGS: Strings = Strings {
     settings_scan_interval: "SCAN INTERVAL:",
     settings_eyebrow_language: "INTERFACE LANGUAGE",
     settings_language_label: "ACTIVE LANGUAGE:",
+    settings_eyebrow_appearance: "APPEARANCE & COLOR THEME",
+    settings_theme_label: "ACTIVE THEME:",
+    settings_theme_dark: "DARK",
+    settings_theme_dark_tip: "Default deep onyx studio theme",
+    settings_theme_light: "LIGHT",
+    settings_theme_light_tip: "Clean high-contrast daytime paper theme",
+    settings_theme_chocolate: "CHOCOLATE",
+    settings_theme_chocolate_tip: "Warm artisanal cocoa & amber theme",
 
     // Inspector Drawer (inspector.rs)
     inspector_eyebrow_builder: "AUTOMATION BUILDER",
@@ -318,6 +326,7 @@ pub static STRINGS: Strings = Strings {
     toast_autorun_enabled: "Autorun enabled in Windows Registry",
     toast_autorun_disabled: "Autorun removed from Windows Registry",
     toast_lang_changed: "Language changed to English",
+    toast_theme_changed: "Color theme updated",
 
     // Settings Updates (settings_view.rs)
     settings_eyebrow_updates: "APPLICATION UPDATES",

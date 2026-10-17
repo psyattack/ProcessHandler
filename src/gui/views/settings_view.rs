@@ -188,8 +188,41 @@ pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
                 });
             });
 
-        // SECTION 04: Application Updates
-        widgets::eyebrow(ui, "04", loc.settings_eyebrow_updates);
+        // SECTION 04: Appearance & Color Theme
+        widgets::eyebrow(ui, "04", loc.settings_eyebrow_appearance);
+
+        egui::Frame::new()
+            .fill(t.sunken)
+            .stroke(t.hairline())
+            .corner_radius(CornerRadius::ZERO)
+            .inner_margin(egui::Margin::symmetric(18, 14))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.spacing_mut().item_spacing.y = 10.0;
+
+                    let mut theme_val = state.theme;
+                    let theme_options = [
+                        (crate::config::AppTheme::Dark, widgets::Cell::new(loc.settings_theme_dark, loc.settings_theme_dark_tip)),
+                        (crate::config::AppTheme::Light, widgets::Cell::new(loc.settings_theme_light, loc.settings_theme_light_tip)),
+                        (crate::config::AppTheme::Chocolate, widgets::Cell::new(loc.settings_theme_chocolate, loc.settings_theme_chocolate_tip)),
+                    ];
+
+                    ui.horizontal_wrapped(|ui| {
+                        widgets::hud(ui, loc.settings_theme_label, t.muted);
+                        if widgets::cells(ui, &mut theme_val, &theme_options) {
+                            state.set_theme(theme_val);
+                            crate::gui::theme::apply_theme(ui.ctx(), theme_val);
+                            cfg.theme = theme_val;
+                            let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::SaveConfig(cfg.clone()));
+                        }
+                    });
+                });
+            });
+
+        // SECTION 05: Application Updates
+        widgets::eyebrow(ui, "05", loc.settings_eyebrow_updates);
 
         egui::Frame::new()
             .fill(t.sunken)

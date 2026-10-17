@@ -132,6 +132,14 @@ pub static STRINGS: Strings = Strings {
     settings_scan_interval: "ИНТЕРВАЛ СКАНИРОВАНИЯ:",
     settings_eyebrow_language: "ЯЗЫК ИНТЕРФЕЙСА",
     settings_language_label: "ТЕКУЩИЙ ЯЗЫК:",
+    settings_eyebrow_appearance: "ОФОРМЛЕНИЕ И ЦВЕТОВАЯ ТЕМА",
+    settings_theme_label: "ТЕКУЩАЯ ТЕМА:",
+    settings_theme_dark: "ТЁМНАЯ",
+    settings_theme_dark_tip: "Классическая глубокая тёмная ониксовая тема",
+    settings_theme_light: "СВЕТЛАЯ",
+    settings_theme_light_tip: "Чистая высококонтрастная дневная тема",
+    settings_theme_chocolate: "ШОКОЛАДНАЯ",
+    settings_theme_chocolate_tip: "Тёплая палитра тёмного какао и карамельного янтаря",
 
     // Inspector Drawer (inspector.rs)
     inspector_eyebrow_builder: "КОНСТРУКТОР АВТОМАТИЗАЦИИ",
@@ -318,6 +326,7 @@ pub static STRINGS: Strings = Strings {
     toast_autorun_enabled: "Автозапуск добавлен в реестр Windows",
     toast_autorun_disabled: "Автозапуск удален из реестра Windows",
     toast_lang_changed: "Язык интерфейса изменен на русский",
+    toast_theme_changed: "Цветовая тема изменена",
 
     // Settings Updates (settings_view.rs)
     settings_eyebrow_updates: "ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ",

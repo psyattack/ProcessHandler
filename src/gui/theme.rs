@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use egui::epaint::text::VariationCoords;
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, FontTweak, Stroke, TextStyle, Visuals};
+pub use crate::config::AppTheme;
 
 /// Height of buttons, inputs and filter cells.
 pub const CONTROL_H: f32 = 34.0;
@@ -106,11 +107,31 @@ impl Tokens {
         bad: hex(0xb3261e),
     };
 
+    pub const CHOCOLATE: Self = Self {
+        dark: true,
+        bg: hex(0x201714),
+        sunken: hex(0x130d0a),
+        ink: hex(0xf2e8dc),
+        ink_strong: hex(0xfff7ee),
+        muted: ink_alpha(0xf2e8dc, 153),
+        faint: ink_alpha(0xf2e8dc, 97),
+        line: ink_alpha(0xf2e8dc, 38),
+        line_strong: ink_alpha(0xf2e8dc, 102),
+        accent: hex(0xd97736),
+        accent_ink: hex(0xf29652),
+        invert_bg: hex(0xf2e8dc),
+        invert_fg: hex(0x1c1310),
+        good: hex(0x45cf9c),
+        warn: hex(0xfcb447),
+        bad: hex(0xf25f52),
+    };
+
     pub fn get(ctx: &egui::Context) -> Self {
-        if ctx.theme() == egui::Theme::Dark {
-            Self::DARK
-        } else {
-            Self::LIGHT
+        let theme = ctx.data(|d| d.get_temp::<AppTheme>(egui::Id::new("app_theme"))).unwrap_or(AppTheme::Dark);
+        match theme {
+            AppTheme::Dark => Self::DARK,
+            AppTheme::Light => Self::LIGHT,
+            AppTheme::Chocolate => Self::CHOCOLATE,
         }
     }
 
@@ -241,10 +262,21 @@ fn visuals(t: &Tokens) -> Visuals {
     v
 }
 
-pub fn apply_theme(ctx: &egui::Context) {
+pub fn apply_theme(ctx: &egui::Context, theme: AppTheme) {
+    let tokens = match theme {
+        AppTheme::Dark => Tokens::DARK,
+        AppTheme::Light => Tokens::LIGHT,
+        AppTheme::Chocolate => Tokens::CHOCOLATE,
+    };
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("app_theme"), theme));
     ctx.set_visuals_of(egui::Theme::Dark, visuals(&Tokens::DARK));
     ctx.set_visuals_of(egui::Theme::Light, visuals(&Tokens::LIGHT));
-    ctx.set_theme(egui::ThemePreference::Dark);
+    ctx.set_visuals(visuals(&tokens));
+    if tokens.dark {
+        ctx.set_theme(egui::ThemePreference::Dark);
+    } else {
+        ctx.set_theme(egui::ThemePreference::Light);
+    }
 
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);

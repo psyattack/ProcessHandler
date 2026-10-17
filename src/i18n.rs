@@ -152,6 +152,14 @@ pub struct Strings {
     pub settings_scan_interval: &'static str,
     pub settings_eyebrow_language: &'static str,
     pub settings_language_label: &'static str,
+    pub settings_eyebrow_appearance: &'static str,
+    pub settings_theme_label: &'static str,
+    pub settings_theme_dark: &'static str,
+    pub settings_theme_dark_tip: &'static str,
+    pub settings_theme_light: &'static str,
+    pub settings_theme_light_tip: &'static str,
+    pub settings_theme_chocolate: &'static str,
+    pub settings_theme_chocolate_tip: &'static str,
 
     // Inspector Drawer (inspector.rs)
     pub inspector_eyebrow_builder: &'static str,
@@ -335,6 +343,7 @@ pub struct Strings {
     pub toast_autorun_enabled: &'static str,
     pub toast_autorun_disabled: &'static str,
     pub toast_lang_changed: &'static str,
+    pub toast_theme_changed: &'static str,
 
     // Settings Updates (settings_view.rs)
     pub settings_eyebrow_updates: &'static str,
@@ -416,6 +425,10 @@ mod tests {
         assert_eq!(ru.settings_language_label, "ТЕКУЩИЙ ЯЗЫК:");
         assert_eq!(en.settings_eyebrow_language, "INTERFACE LANGUAGE");
         assert_eq!(ru.settings_eyebrow_language, "ЯЗЫК ИНТЕРФЕЙСА");
+        assert_eq!(en.settings_eyebrow_appearance, "APPEARANCE & COLOR THEME");
+        assert_eq!(ru.settings_eyebrow_appearance, "ОФОРМЛЕНИЕ И ЦВЕТОВАЯ ТЕМА");
+        assert_eq!(en.settings_theme_chocolate, "CHOCOLATE");
+        assert_eq!(ru.settings_theme_chocolate, "ШОКОЛАДНАЯ");
 
         assert_eq!(en.settings_eyebrow_updates, "APPLICATION UPDATES");
         assert_eq!(ru.settings_eyebrow_updates, "ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ");

@@ -49,6 +49,7 @@ pub struct GuiState {
     pub expanded_script_editor: Option<ExpandedScriptEditorState>,
     pub last_script_editor: Option<ExpandedScriptEditorState>,
     pub language: crate::i18n::Language,
+    pub theme: crate::config::AppTheme,
     pub last_sync: Instant,
     pub toast: Option<(String, Instant)>,
     pub is_daemon_connected: bool,
@@ -81,6 +82,7 @@ impl GuiState {
             expanded_script_editor: None,
             last_script_editor: None,
             language: config.language,
+            theme: config.theme,
             last_sync: Instant::now() - std::time::Duration::from_secs(10),
             toast: None,
             is_daemon_connected: false,
@@ -106,6 +108,16 @@ impl GuiState {
             cfg.language = lang;
             let _ = cfg.save_to_file(crate::config::AppConfig::config_path());
             self.set_toast(self.loc().toast_lang_changed);
+        }
+    }
+
+    pub fn set_theme(&mut self, theme: crate::config::AppTheme) {
+        if self.theme != theme {
+            self.theme = theme;
+            let mut cfg = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+            cfg.theme = theme;
+            let _ = cfg.save_to_file(crate::config::AppConfig::config_path());
+            self.set_toast(self.loc().toast_theme_changed);
         }
     }
 

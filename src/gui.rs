@@ -21,7 +21,7 @@ use crate::config::{AppConfig, WindowState};
 pub struct ProcessHandlerApp {
     state: GuiState,
     fonts_ready: bool,
-    initialized_theme: bool,
+    current_theme: Option<crate::config::AppTheme>,
     last_window_state: Option<WindowState>,
 }
 
@@ -33,6 +33,7 @@ impl ProcessHandlerApp {
         let mut state = GuiState::new();
         state.sync_with_daemon();
         let config = AppConfig::load_from_file(AppConfig::config_path());
+        theme::apply_theme(&cc.egui_ctx, config.theme);
         if config.check_updates_on_startup {
             state.check_for_updates(false);
         }
@@ -40,7 +41,7 @@ impl ProcessHandlerApp {
         Self {
             state,
             fonts_ready: false,
-            initialized_theme: false,
+            current_theme: Some(config.theme),
             last_window_state,
         }
     }
@@ -156,9 +157,9 @@ impl App for ProcessHandlerApp {
             ctx.request_repaint();
             return;
         }
-        if !self.initialized_theme {
-            apply_theme(&ctx);
-            self.initialized_theme = true;
+        if self.current_theme != Some(self.state.theme) {
+            apply_theme(&ctx, self.state.theme);
+            self.current_theme = Some(self.state.theme);
         }
 
         // Sync with daemon state
