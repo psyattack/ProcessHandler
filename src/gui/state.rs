@@ -53,11 +53,19 @@ pub struct GuiState {
     pub toast: Option<(String, Instant)>,
     pub is_daemon_connected: bool,
     pub icon_cache: crate::gui::components::icons::ProcessIconCache,
+    pub available_update: Option<crate::updater::ReleaseInfo>,
+    pub is_checking_update: bool,
+    pub is_downloading_update: bool,
+    pub update_download_progress: f32,
+    pub show_changelog_modal: bool,
+    update_event_tx: std::sync::mpsc::Sender<crate::updater::UpdateEvent>,
+    update_event_rx: std::sync::mpsc::Receiver<crate::updater::UpdateEvent>,
 }
 
 impl GuiState {
     pub fn new() -> Self {
         let config = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+        let (update_event_tx, update_event_rx) = std::sync::mpsc::channel();
         Self {
             active_view: ActiveView::Rules,
             search_query: String::new(),
@@ -77,6 +85,13 @@ impl GuiState {
             toast: None,
             is_daemon_connected: false,
             icon_cache: crate::gui::components::icons::ProcessIconCache::new(),
+            available_update: None,
+            is_checking_update: false,
+            is_downloading_update: false,
+            update_download_progress: 0.0,
+            show_changelog_modal: false,
+            update_event_tx,
+            update_event_rx,
         }
     }
 
@@ -207,5 +222,108 @@ impl GuiState {
         let _ = IpcClient::call(&IpcRequest::TestRunRule(id.to_string()));
         self.set_toast(self.loc().toast_test_execution);
         self.sync_with_daemon();
+    }
+
+    pub fn check_for_updates(&mut self, is_manual: bool) {
+        if self.is_checking_update || self.is_downloading_update {
+            return;
+        }
+        self.is_checking_update = true;
+        let tx = self.update_event_tx.clone();
+        let current_ver = env!("CARGO_PKG_VERSION").to_string();
+
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = tx.send(crate::updater::UpdateEvent::CheckComplete {
+                        result: Err(format!("Runtime error: {e}")),
+                        is_manual,
+                    });
+                    return;
+                }
+            };
+
+            let result = rt.block_on(async {
+                crate::updater::check_github_release(crate::updater::GITHUB_REPO, &current_ver).await
+            });
+
+            let _ = tx.send(crate::updater::UpdateEvent::CheckComplete {
+                result,
+                is_manual,
+            });
+        });
+    }
+
+    pub fn start_update(&mut self, info: crate::updater::ReleaseInfo) {
+        if self.is_downloading_update {
+            return;
+        }
+        self.is_downloading_update = true;
+        self.update_download_progress = 0.0;
+        self.set_toast(self.loc().toast_update_downloading.replace("{}", &info.version));
+
+        let tx = self.update_event_tx.clone();
+        let asset_url = info.asset_url.clone();
+
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = tx.send(crate::updater::UpdateEvent::DownloadComplete(Err(format!("Runtime error: {e}"))));
+                    return;
+                }
+            };
+
+            let tx_progress = tx.clone();
+            let result = rt.block_on(async move {
+                crate::updater::download_and_install(&asset_url, move |pct| {
+                    let _ = tx_progress.send(crate::updater::UpdateEvent::DownloadProgress(pct));
+                }).await
+            });
+
+            let _ = tx.send(crate::updater::UpdateEvent::DownloadComplete(result));
+        });
+    }
+
+    pub fn poll_update_events(&mut self) {
+        while let Ok(event) = self.update_event_rx.try_recv() {
+            match event {
+                crate::updater::UpdateEvent::CheckStarted => {
+                    self.is_checking_update = true;
+                }
+                crate::updater::UpdateEvent::CheckComplete { result, is_manual } => {
+                    self.is_checking_update = false;
+                    match result {
+                        Ok(Some(info)) => {
+                            let ver = info.version.clone();
+                            self.available_update = Some(info);
+                            if is_manual {
+                                self.set_toast(self.loc().toast_update_available.replace("{}", &ver));
+                            }
+                        }
+                        Ok(None) => {
+                            if is_manual {
+                                self.set_toast(self.loc().toast_latest_version.replace("{}", env!("CARGO_PKG_VERSION")));
+                            }
+                        }
+                        Err(err) => {
+                            if is_manual {
+                                self.set_toast(self.loc().toast_update_check_failed.replace("{}", &err));
+                            }
+                        }
+                    }
+                }
+                crate::updater::UpdateEvent::DownloadProgress(pct) => {
+                    self.update_download_progress = pct;
+                }
+                crate::updater::UpdateEvent::DownloadComplete(result) => {
+                    self.is_downloading_update = false;
+                    if let Err(err) = result {
+                        self.set_toast(self.loc().toast_update_failed.replace("{}", &err));
+                    }
+                }
+            }
+        }
     }
 }

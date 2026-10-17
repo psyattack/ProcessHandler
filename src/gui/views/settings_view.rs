@@ -11,22 +11,26 @@ pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
     let t = Tokens::get(ui.ctx());
     let loc = state.loc();
 
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 16.0;
+    let (mut cfg, current_autorun) = match &state.daemon_state {
+        Some(ds) => (ds.config.clone(), ds.autorun_enabled),
+        None => {
+            ui.add_space(32.0);
+            widgets::hud(ui, loc.settings_daemon_offline, t.bad);
+            return;
+        }
+    };
 
-        let (mut cfg, current_autorun) = match &state.daemon_state {
-            Some(ds) => (ds.config.clone(), ds.autorun_enabled),
-            None => {
-                ui.add_space(32.0);
-                widgets::hud(ui, loc.settings_daemon_offline, t.bad);
-                return;
-            }
-        };
+    let mut changed = false;
 
-        let mut changed = false;
+    egui::ScrollArea::vertical()
+        .id_salt("settings_scroll_area")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 16.0;
 
-        // SECTION 01: Windows Logon & System Integration
-        widgets::eyebrow(ui, "01", loc.settings_eyebrow_system);
+                // SECTION 01: Windows Logon & System Integration
+                widgets::eyebrow(ui, "01", loc.settings_eyebrow_system);
 
         egui::Frame::new()
             .fill(t.sunken)
@@ -184,11 +188,56 @@ pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
                 });
             });
 
-        if changed {
-            crate::daemon::tray::update_tray_icon(cfg.tray_icon_path.clone());
-            let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::SaveConfig(cfg));
-            state.set_toast(loc.toast_config_saved);
-            state.sync_with_daemon();
-        }
+        // SECTION 04: Application Updates
+        widgets::eyebrow(ui, "04", loc.settings_eyebrow_updates);
+
+        egui::Frame::new()
+            .fill(t.sunken)
+            .stroke(t.hairline())
+            .corner_radius(CornerRadius::ZERO)
+            .inner_margin(egui::Margin::symmetric(18, 14))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.spacing_mut().item_spacing.y = 12.0;
+
+                    // Checkbox: Check on startup
+                    if ui.checkbox(&mut cfg.check_updates_on_startup, loc.settings_check_startup_checkbox).changed() {
+                        changed = true;
+                    }
+
+                    widgets::hrule(ui);
+
+                    // Button: Check for updates
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 12.0;
+
+                        let btn_label = if state.is_checking_update {
+                            loc.settings_btn_checking_updates
+                        } else {
+                            loc.settings_btn_check_updates
+                        };
+
+                        let can_click = !state.is_checking_update && !state.is_downloading_update;
+                        ui.add_enabled_ui(can_click, |ui| {
+                            if widgets::button(ui, btn_label, Kind::Secondary, 0.0).clicked() {
+                                state.check_for_updates(true);
+                            }
+                        });
+
+                        let cur_ver = format!("v{}", env!("CARGO_PKG_VERSION"));
+                        widgets::hud(ui, &loc.settings_last_checked.replace("{}", &cur_ver), t.faint);
+                    });
+                });
+            });
+        });
     });
+
+    if changed {
+        crate::daemon::tray::update_tray_icon(cfg.tray_icon_path.clone());
+        let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::SaveConfig(cfg));
+        state.set_toast(loc.toast_config_saved);
+        state.sync_with_daemon();
+    }
 }

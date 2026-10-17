@@ -8,6 +8,7 @@ pub mod i18n;
 mod ipc;
 mod models;
 pub mod single_instance;
+pub mod updater;
 
 use std::env;
 use std::process::Command;
@@ -16,6 +17,18 @@ use std::time::Duration;
 use ipc::IpcClient;
 
 fn main() {
+    // Clean up temporary update files if left from previous self-update
+    if let Ok(exe_path) = env::current_exe() {
+        let old = exe_path.with_extension("old");
+        if old.exists() {
+            let _ = std::fs::remove_file(old);
+        }
+        let pending = exe_path.with_extension("pending");
+        if pending.exists() {
+            let _ = std::fs::remove_file(pending);
+        }
+    }
+
     let args: Vec<String> = env::args().collect();
 
     let is_daemon_flag = args.iter().any(|a| {

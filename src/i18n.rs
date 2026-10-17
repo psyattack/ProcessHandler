@@ -335,6 +335,36 @@ pub struct Strings {
     pub toast_autorun_enabled: &'static str,
     pub toast_autorun_disabled: &'static str,
     pub toast_lang_changed: &'static str,
+
+    // Settings Updates (settings_view.rs)
+    pub settings_eyebrow_updates: &'static str,
+    pub settings_check_startup_checkbox: &'static str,
+    pub settings_btn_check_updates: &'static str,
+    pub settings_btn_checking_updates: &'static str,
+    pub settings_last_checked: &'static str,
+
+    // Footer Updates (gui.rs)
+    pub footer_update_available: &'static str,
+    pub footer_btn_update: &'static str,
+    pub footer_btn_info: &'static str,
+    pub footer_btn_info_tip: &'static str,
+    pub footer_btn_update_tip: &'static str,
+    pub footer_downloading_progress: &'static str,
+
+    // Changelog Modal (changelog_modal.rs)
+    pub changelog_eyebrow: &'static str,
+    pub changelog_modal_title: &'static str,
+    pub changelog_btn_close: &'static str,
+    pub changelog_btn_update: &'static str,
+    pub changelog_open_github: &'static str,
+    pub changelog_no_notes: &'static str,
+
+    // Update Toasts
+    pub toast_update_available: &'static str,
+    pub toast_latest_version: &'static str,
+    pub toast_update_check_failed: &'static str,
+    pub toast_update_downloading: &'static str,
+    pub toast_update_failed: &'static str,
 }
 
 pub fn get(lang: Language) -> &'static Strings {
@@ -386,5 +416,12 @@ mod tests {
         assert_eq!(ru.settings_language_label, "ТЕКУЩИЙ ЯЗЫК:");
         assert_eq!(en.settings_eyebrow_language, "INTERFACE LANGUAGE");
         assert_eq!(ru.settings_eyebrow_language, "ЯЗЫК ИНТЕРФЕЙСА");
+
+        assert_eq!(en.settings_eyebrow_updates, "APPLICATION UPDATES");
+        assert_eq!(ru.settings_eyebrow_updates, "ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ");
+        assert_eq!(en.footer_btn_update, "UPDATE");
+        assert_eq!(ru.footer_btn_update, "ОБНОВИТЬ");
+        assert_eq!(en.footer_btn_info, "INFO");
+        assert_eq!(ru.footer_btn_info, "ИНФО");
     }
 }

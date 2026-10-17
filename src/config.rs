@@ -58,6 +58,13 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub language: crate::i18n::Language,
+
+    #[serde(default = "default_check_updates_on_startup")]
+    pub check_updates_on_startup: bool,
+}
+
+fn default_check_updates_on_startup() -> bool {
+    true
 }
 
 fn default_monitoring_mode() -> String {
@@ -78,6 +85,7 @@ impl Default for AppConfig {
             rules: Vec::new(),
             autorun_configured: false,
             language: crate::i18n::Language::English,
+            check_updates_on_startup: true,
         }
     }
 }
@@ -188,6 +196,7 @@ mod tests {
         let json = r#"{"monitoring_mode": "wmi", "poll_interval_sec": 2.0}"#;
         let cfg: AppConfig = serde_json::from_str(json).expect("deserialize");
         assert!(!cfg.autorun_configured);
+        assert!(cfg.check_updates_on_startup);
     }
 
     #[test]

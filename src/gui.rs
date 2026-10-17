@@ -8,6 +8,7 @@ use egui::{Color32, CornerRadius, Stroke, Ui, vec2};
 use components::widgets;
 use state::{ActiveView, GuiState};
 use theme::{Tokens, apply_theme};
+use views::changelog_modal::render_changelog_modal;
 use views::header_bar::render_header_bar;
 use views::inspector::render_inspector_drawer;
 use views::logs_view::render_logs_view;
@@ -32,6 +33,9 @@ impl ProcessHandlerApp {
         let mut state = GuiState::new();
         state.sync_with_daemon();
         let config = AppConfig::load_from_file(AppConfig::config_path());
+        if config.check_updates_on_startup {
+            state.check_for_updates(false);
+        }
         let last_window_state = config.window;
         Self {
             state,
@@ -41,7 +45,7 @@ impl ProcessHandlerApp {
         }
     }
 
-    fn render_footer(&self, ui: &mut Ui, t: &Tokens) {
+    fn render_footer(&mut self, ui: &mut Ui, t: &Tokens) {
         let loc = self.state.loc();
         let r = ui.max_rect();
         // Hairline top border across footer
@@ -58,15 +62,41 @@ impl ProcessHandlerApp {
 
             // Right-aligned status
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                widgets::hud(ui, "v1.0.0", t.faint);
-                widgets::rule(ui, 14.0);
-
                 let autorun = self.state.daemon_state.as_ref().map(|s| s.autorun_enabled).unwrap_or(false);
                 widgets::hud(
                     ui,
                     if autorun { loc.footer_autorun_on } else { loc.footer_autorun_off },
                     if autorun { t.good } else { t.muted },
                 );
+
+                widgets::rule(ui, 14.0);
+                widgets::hud(ui, &format!("v{}", env!("CARGO_PKG_VERSION")), t.faint);
+
+                if self.state.is_downloading_update {
+                    widgets::rule(ui, 14.0);
+                    let pct = (self.state.update_download_progress * 100.0).clamp(0.0, 100.0);
+                    let progress_text = loc.footer_downloading_progress.replace("{:.0}", &format!("{:.0}", pct));
+                    widgets::hud(ui, &progress_text, t.accent_ink);
+                } else if let Some(info) = self.state.available_update.clone() {
+                    widgets::rule(ui, 14.0);
+
+                    if widgets::compact_button(ui, loc.footer_btn_update, widgets::Kind::Primary, 22.0)
+                        .on_hover_text(loc.footer_btn_update_tip)
+                        .clicked()
+                    {
+                        self.state.start_update(info.clone());
+                    }
+
+                    if widgets::compact_button(ui, loc.footer_btn_info, widgets::Kind::Secondary, 22.0)
+                        .on_hover_text(loc.footer_btn_info_tip)
+                        .clicked()
+                    {
+                        self.state.show_changelog_modal = true;
+                    }
+
+                    let update_label = loc.footer_update_available.replace("{}", &info.version);
+                    widgets::hud(ui, &update_label, t.good);
+                }
             });
         });
     }
@@ -133,6 +163,7 @@ impl App for ProcessHandlerApp {
 
         // Sync with daemon state
         self.state.sync_with_daemon();
+        self.state.poll_update_events();
         let tokens = Tokens::get(&ctx);
 
         // 1. Top Header Bar (Title Bar & Navigation)
@@ -174,7 +205,10 @@ impl App for ProcessHandlerApp {
         // 5. Centered Expanded Script Canvas (modal popup for pwsh / cmd editing)
         render_script_editor_canvas(&ctx, &mut self.state);
 
-        // 6. Borderless Window Edges (8-direction border resize & hairline stroke)
+        // 6. Centered Changelog & Release Notes Modal
+        render_changelog_modal(&ctx, &mut self.state);
+
+        // 7. Borderless Window Edges (8-direction border resize & hairline stroke)
         widgets::window_edges(&ctx);
 
         // Track window size and position for persistence across restarts

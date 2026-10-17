@@ -168,6 +168,47 @@ pub fn button(ui: &mut Ui, text: &str, kind: Kind, width: f32) -> Response {
     }
 }
 
+/// A compact button with specified height (e.g. for status/footer bars).
+pub fn compact_button(ui: &mut Ui, text: &str, kind: Kind, height: f32) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let galley = caps(ui, text, 10.0, theme::mono_bold(), theme::BUTTON_SPACING, t.ink);
+    let size = vec2(galley.size().x + 14.0, height);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let enabled = ui.is_enabled();
+    let hovered = resp.hovered() && enabled;
+
+    let (fill, stroke, color) = match kind {
+        Kind::Primary => (
+            t.accent.gamma_multiply(if hovered { 0.85 } else { 1.0 }),
+            Stroke::NONE,
+            Color32::WHITE,
+        ),
+        Kind::Danger => (
+            t.bad.gamma_multiply(if hovered { 0.85 } else { 1.0 }),
+            Stroke::NONE,
+            Color32::WHITE,
+        ),
+        Kind::Secondary if hovered => (t.invert_bg, Stroke::NONE, t.invert_fg),
+        Kind::Secondary => (t.sunken, Stroke::new(1.0, t.line_strong), t.ink),
+    };
+
+    let fade = |c: Color32| if enabled { c } else { c.gamma_multiply(0.4) };
+    ui.painter().rect(
+        rect,
+        CornerRadius::ZERO,
+        fade(fill),
+        Stroke::new(stroke.width, fade(stroke.color)),
+        egui::StrokeKind::Inside,
+    );
+    paint_centred(ui, rect, galley, fade(color));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
+    if enabled {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp
+    }
+}
+
 /// One option in a segmented [`cells`] group.
 pub struct Cell<'a> {
     pub label: &'a str,

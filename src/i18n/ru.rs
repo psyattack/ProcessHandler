@@ -318,4 +318,34 @@ pub static STRINGS: Strings = Strings {
     toast_autorun_enabled: "Автозапуск добавлен в реестр Windows",
     toast_autorun_disabled: "Автозапуск удален из реестра Windows",
     toast_lang_changed: "Язык интерфейса изменен на русский",
+
+    // Settings Updates (settings_view.rs)
+    settings_eyebrow_updates: "ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ",
+    settings_check_startup_checkbox: "Проверять при запуске программы",
+    settings_btn_check_updates: "ПРОВЕРИТЬ ОБНОВЛЕНИЯ",
+    settings_btn_checking_updates: "ПРОВЕРКА ОБНОВЛЕНИЙ...",
+    settings_last_checked: "ТЕКУЩАЯ ВЕРСИЯ: {}",
+
+    // Footer Updates (gui.rs)
+    footer_update_available: "[ДОСТУПНО ОБНОВЛЕНИЕ v{}]",
+    footer_btn_update: "ОБНОВИТЬ",
+    footer_btn_info: "ИНФО",
+    footer_btn_info_tip: "Посмотреть список изменений",
+    footer_btn_update_tip: "Загрузить и установить обновление",
+    footer_downloading_progress: "[ОБНОВЛЕНИЕ {:.0}%]",
+
+    // Changelog Modal (changelog_modal.rs)
+    changelog_eyebrow: "СПИСОК ИЗМЕНЕНИЙ",
+    changelog_modal_title: "ЧТО НОВОГО",
+    changelog_btn_close: "ЗАКРЫТЬ",
+    changelog_btn_update: "УСТАНОВИТЬ ОБНОВЛЕНИЕ",
+    changelog_open_github: "ОТКРЫТЬ НА GITHUB",
+    changelog_no_notes: "Для этой версии описание изменений отсутствует.",
+
+    // Update Toasts
+    toast_update_available: "Доступно обновление: v{}",
+    toast_latest_version: "У вас установлена последняя версия (v{})",
+    toast_update_check_failed: "Ошибка проверки обновлений: {}",
+    toast_update_downloading: "Загрузка обновления v{}...",
+    toast_update_failed: "Сбой при установке обновления: {}",
 };

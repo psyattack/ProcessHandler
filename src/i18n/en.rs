@@ -318,4 +318,34 @@ pub static STRINGS: Strings = Strings {
     toast_autorun_enabled: "Autorun enabled in Windows Registry",
     toast_autorun_disabled: "Autorun removed from Windows Registry",
     toast_lang_changed: "Language changed to English",
+
+    // Settings Updates (settings_view.rs)
+    settings_eyebrow_updates: "APPLICATION UPDATES",
+    settings_check_startup_checkbox: "Check for updates on application startup",
+    settings_btn_check_updates: "CHECK FOR UPDATES",
+    settings_btn_checking_updates: "CHECKING FOR UPDATES...",
+    settings_last_checked: "CURRENT VERSION: {}",
+
+    // Footer Updates (gui.rs)
+    footer_update_available: "[UPDATE v{} AVAILABLE]",
+    footer_btn_update: "UPDATE",
+    footer_btn_info: "INFO",
+    footer_btn_info_tip: "View release changelog",
+    footer_btn_update_tip: "Download and install update",
+    footer_downloading_progress: "[UPDATING {:.0}%]",
+
+    // Changelog Modal (changelog_modal.rs)
+    changelog_eyebrow: "RELEASE CHANGELOG",
+    changelog_modal_title: "WHAT'S NEW",
+    changelog_btn_close: "CLOSE",
+    changelog_btn_update: "INSTALL UPDATE",
+    changelog_open_github: "VIEW ON GITHUB",
+    changelog_no_notes: "No release notes provided for this version.",
+
+    // Update Toasts
+    toast_update_available: "New update available: v{}",
+    toast_latest_version: "You are running the latest version (v{})",
+    toast_update_check_failed: "Failed to check for updates: {}",
+    toast_update_downloading: "Downloading update v{}...",
+    toast_update_failed: "Update failed: {}",
 };
