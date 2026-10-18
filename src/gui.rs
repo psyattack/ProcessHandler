@@ -165,6 +165,9 @@ impl App for ProcessHandlerApp {
         // Sync with daemon state
         self.state.sync_with_daemon();
         self.state.poll_update_events();
+        if self.state.is_any_rule_executing() {
+            ctx.request_repaint();
+        }
         let tokens = Tokens::get(&ctx);
 
         // 1. Top Header Bar (Title Bar & Navigation)

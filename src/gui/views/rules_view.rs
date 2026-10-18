@@ -2,8 +2,8 @@
 //! precision segmented cells, hairline cards, numbered section eyebrows,
 //! uppercase mono badges, and inverted action buttons.
 
-use egui::{CornerRadius, Ui, vec2};
-use crate::gui::components::widgets::{self, Cell, Kind};
+use egui::{CornerRadius, pos2, Rect, Ui, vec2};
+use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
 use crate::models::{Action, ProcessAudioActionType, Rule, Trigger};
@@ -33,7 +33,7 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
         let active_count = rules.iter().filter(|r| r.is_enabled).count();
         let paused_count = total.saturating_sub(active_count);
 
-        // 1. Toolbar with Filter Cells & New Rule Button
+        // 1. Toolbar with Filter Cells, Search, Import/Export & New Rule Button
         ui.horizontal(|ui| {
             let mut filter = match ui.data(|d| d.get_temp::<RuleFilter>(egui::Id::new("rule_filter"))) {
                 Some(f) => f,
@@ -90,7 +90,29 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                         actions: Vec::new(),
                         on_exit_actions: Vec::new(),
                         execution_count: 0,
+                        custom_icon_path: None,
+                        auto_process_icon: false,
                     });
+                }
+
+                ui.add_space(4.0);
+
+                // Export All Rules Button
+                if widgets::button(ui, loc.rules_btn_copy_all, Kind::Secondary, 0.0)
+                    .on_hover_text(loc.rules_btn_copy_all_tip)
+                    .clicked()
+                {
+                    state.copy_all_rules_to_clipboard(ui.ctx());
+                }
+
+                ui.add_space(4.0);
+
+                // Import Automations Button
+                if widgets::button(ui, loc.rules_btn_import, Kind::Secondary, 0.0)
+                    .on_hover_text(loc.rules_btn_import_tip)
+                    .clicked()
+                {
+                    state.import_automations_from_clipboard(ui.ctx());
                 }
 
                 ui.add_space(8.0);
@@ -99,7 +121,7 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                 ui.add(
                     egui::TextEdit::singleline(&mut state.search_query)
                         .hint_text(loc.rules_search_placeholder)
-                        .desired_width(240.0)
+                        .desired_width(200.0)
                         .min_size(vec2(0.0, theme::CONTROL_H))
                         .vertical_align(egui::Align::Center)
                         .margin(vec2(10.0, 8.0)),
@@ -149,6 +171,8 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                         actions: Vec::new(),
                         on_exit_actions: Vec::new(),
                         execution_count: 0,
+                        custom_icon_path: None,
+                        auto_process_icon: false,
                     });
                 }
             });
@@ -184,11 +208,13 @@ fn render_rule_card(
         .corner_radius(CornerRadius::ZERO)
         .inner_margin(egui::Margin::symmetric(16, 14));
 
+    let exec_opt = state.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
+
     frame.show(ui, |ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
 
-            // Top strip: Eyebrow + Status Badge + Actions
+            // 1. Top strip: Eyebrow + Status Badge + Cooldown + Execution badge + Actions
             ui.horizontal(|ui| {
                 widgets::eyebrow(ui, &format!("{:02}", idx + 1), loc.rules_badge_automation);
                 ui.add_space(8.0);
@@ -200,10 +226,30 @@ fn render_rule_card(
                 ui.add_space(6.0);
                 widgets::badge(ui, &format!("{:.1}{}", rule.cooldown_seconds, loc.rules_badge_cooldown_suffix), t.accent_ink);
 
+                if let Some(exec) = exec_opt {
+                    ui.add_space(6.0);
+                    let count_suffix = if exec.active_count > 1 {
+                        format!(" (x{})", exec.active_count)
+                    } else {
+                        String::new()
+                    };
+                    let running_label = format!(
+                        "{}{}: {}/{}",
+                        loc.rules_badge_running,
+                        count_suffix,
+                        exec.current_step + 1,
+                        exec.total_steps
+                    );
+                    widgets::badge(ui, &running_label, t.accent_ink);
+                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
 
-                    // Delete
+                    let anim_id = egui::Id::new(("rule_card_actions_expanded", &rule.id));
+                    let mut is_expanded = ui.data(|d| d.get_temp::<bool>(anim_id)).unwrap_or(false);
+
+                    // 1. Delete button (always on far right)
                     if widgets::button(ui, loc.rules_btn_delete, Kind::Danger, 0.0)
                         .on_hover_text(loc.rules_btn_delete_tip)
                         .clicked()
@@ -211,67 +257,211 @@ fn render_rule_card(
                         state.delete_rule(&rule.id);
                     }
 
-                    // Edit
-                    if widgets::button(ui, loc.rules_btn_edit, Kind::Secondary, 0.0)
-                        .on_hover_text(loc.rules_btn_edit_tip)
-                        .clicked()
-                    {
-                        state.selected_rule_id = Some(rule.id.clone());
-                        state.editing_rule = Some(rule.clone());
-                        state.is_creating_new_rule = false;
-                    }
-
-                    // Clone
-                    if widgets::button(ui, loc.rules_btn_clone, Kind::Secondary, 0.0)
-                        .on_hover_text(loc.rules_btn_clone_tip)
-                        .clicked()
-                    {
-                        state.clone_rule(rule);
-                    }
-
-                    // Toggle Pause / Enable
+                    // 2. Toggle Pause / Resume (always visible, directly to the left of Delete)
                     let toggle_label = if rule.is_enabled { loc.rules_btn_pause } else { loc.rules_btn_resume };
                     if widgets::button(ui, toggle_label, Kind::Secondary, 0.0).clicked() {
                         state.toggle_rule(&rule.id, !rule.is_enabled);
                     }
 
-                    // Test Run
-                    if widgets::button(ui, loc.rules_btn_test_run, Kind::Secondary, 0.0)
-                        .on_hover_text(loc.rules_btn_test_run_tip)
-                        .clicked()
-                    {
-                        state.test_run_rule(&rule.id);
+                    // 3. More icon button (located to the left of Pause / Resume)
+                    if widgets::glyph_button_active(ui, Glyph::More, is_expanded, loc.rules_btn_more_tip).clicked() {
+                        is_expanded = !is_expanded;
+                        ui.data_mut(|d| d.insert_temp(anim_id, is_expanded));
+                    }
+
+                    // 4. Smooth horizontal expansion to the left of More icon button
+                    let k = ui.ctx().animate_bool_with_time_and_easing(anim_id, is_expanded, 0.20, egui::emath::easing::cubic_out);
+                    if k > 0.001 {
+                        let btn_spacing = 6.0;
+                        let w_edit = widgets::button_width(ui, loc.rules_btn_edit, 0.0);
+                        let w_clone = widgets::button_width(ui, loc.rules_btn_clone, 0.0);
+                        let w_test = widgets::button_width(ui, loc.rules_btn_test_run, 0.0);
+                        let w_share = widgets::button_width(ui, loc.rules_btn_copy_single, 0.0);
+                        let full_w = w_edit + w_clone + w_test + w_share + 3.0 * btn_spacing;
+                        let anim_w = (full_w * k).min(full_w);
+
+                        ui.allocate_ui_with_layout(
+                            vec2(anim_w, theme::CONTROL_H),
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.set_clip_rect(ui.max_rect());
+                                ui.spacing_mut().item_spacing.x = btn_spacing;
+
+                                // In right-to-left, Edit is closest to More button:
+                                if widgets::button(ui, loc.rules_btn_edit, Kind::Secondary, 0.0)
+                                    .on_hover_text(loc.rules_btn_edit_tip)
+                                    .clicked()
+                                {
+                                    state.selected_rule_id = Some(rule.id.clone());
+                                    state.editing_rule = Some(rule.clone());
+                                    state.is_creating_new_rule = false;
+                                }
+
+                                // Clone
+                                if widgets::button(ui, loc.rules_btn_clone, Kind::Secondary, 0.0)
+                                    .on_hover_text(loc.rules_btn_clone_tip)
+                                    .clicked()
+                                {
+                                    state.clone_rule(rule);
+                                }
+
+                                // Test Run
+                                if widgets::button(ui, loc.rules_btn_test_run, Kind::Secondary, 0.0)
+                                    .on_hover_text(loc.rules_btn_test_run_tip)
+                                    .clicked()
+                                {
+                                    state.test_run_rule(&rule.id);
+                                }
+
+                                // Share / Copy Single Rule
+                                if widgets::button(ui, loc.rules_btn_copy_single, Kind::Secondary, 0.0)
+                                    .on_hover_text(loc.rules_btn_copy_single_tip)
+                                    .clicked()
+                                {
+                                    state.copy_single_rule_to_clipboard(ui.ctx(), rule);
+                                }
+                            },
+                        );
                     }
                 });
             });
 
-            // Rule Title
-            ui.label(
-                egui::RichText::new(&rule.name)
-                    .family(theme::semibold())
-                    .size(15.0)
-                    .color(t.ink_strong),
-            );
+            // 2. Title row with Rule Icon
+            let has_desc = !rule.description.is_empty();
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
 
-            if !rule.description.is_empty() {
-                ui.label(
-                    egui::RichText::new(&rule.description)
-                        .family(theme::medium())
-                        .size(12.5)
-                        .color(t.muted),
-                );
-            }
+                // Rule Icon Box (28x28)
+                let icon_size = vec2(28.0, 28.0);
+                let (icon_rect, icon_resp) = ui.allocate_exact_size(icon_size, egui::Sense::click());
+                ui.painter().rect_filled(icon_rect, CornerRadius::ZERO, t.sunken);
+                ui.painter().rect_stroke(icon_rect, CornerRadius::ZERO, t.hairline(), egui::StrokeKind::Inside);
 
-            // Pipeline summary
-            ui.add_space(4.0);
-            render_pipeline_summary(ui, loc, rule, t);
+                let mut loaded_texture = false;
+                if let Some(path) = &rule.custom_icon_path {
+                    if let Some(tex) = state.icon_cache.get_icon_from_path(ui.ctx(), path) {
+                        let size = tex.size_vec2();
+                        let max_dim = size.x.max(size.y).max(1.0);
+                        let scale = 20.0 / max_dim;
+                        let render_size = vec2((size.x * scale).round().max(1.0), (size.y * scale).round().max(1.0));
+                        let img_rect = Rect::from_center_size(icon_rect.center(), render_size);
+                        ui.painter().image(
+                            tex.id(),
+                            img_rect,
+                            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                        loaded_texture = true;
+                    }
+                }
+
+                if !loaded_texture {
+                    let glyph = rule.default_icon_glyph();
+                    ui.painter().text(
+                        icon_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        glyph,
+                        egui::FontId::proportional(15.0),
+                        t.ink_strong,
+                    );
+                }
+
+                if icon_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
+                    state.selected_rule_id = Some(rule.id.clone());
+                    state.editing_rule = Some(rule.clone());
+                    state.is_creating_new_rule = false;
+                }
+
+                if has_desc {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+
+                        let title_resp = ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&rule.name)
+                                    .family(theme::semibold())
+                                    .size(15.0)
+                                    .color(t.ink_strong),
+                            ).sense(egui::Sense::click())
+                        );
+                        if title_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
+                            state.selected_rule_id = Some(rule.id.clone());
+                            state.editing_rule = Some(rule.clone());
+                            state.is_creating_new_rule = false;
+                        }
+
+                        ui.label(
+                            egui::RichText::new(&rule.description)
+                                .family(theme::medium())
+                                .size(12.0)
+                                .color(t.muted),
+                        );
+                    });
+                } else {
+                    let format = egui::TextFormat {
+                        font_id: egui::FontId::new(15.0, theme::semibold()),
+                        color: t.ink_strong,
+                        ..Default::default()
+                    };
+                    let max_w = ui.available_width().max(60.0);
+                    let mut job = egui::text::LayoutJob::single_section(rule.name.clone(), format);
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(max_w);
+                    let galley = ui.painter().layout_job(job);
+                    let (title_rect, title_resp) = ui.allocate_exact_size(
+                        vec2(galley.size().x, icon_size.y),
+                        egui::Sense::click(),
+                    );
+                    widgets::paint_left(ui, title_rect, galley, t.ink_strong);
+                    let title_resp = title_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if title_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
+                        state.selected_rule_id = Some(rule.id.clone());
+                        state.editing_rule = Some(rule.clone());
+                        state.is_creating_new_rule = false;
+                    }
+                }
+            });
+
+            // 3. Pipeline summary with step highlighting
+            ui.add_space(2.0);
+            render_pipeline_summary(ui, loc, rule, exec_opt, t);
         });
     });
 }
 
-fn render_pipeline_summary(ui: &mut Ui, loc: &crate::i18n::Strings, rule: &Rule, t: &Tokens) {
+fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
+    match action {
+        Action::StartProcess { file_path, .. } => {
+            let fname = std::path::Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
+            format!("{} {}", loc.summary_action_launch, fname)
+        }
+        Action::KillProcess { process_name, .. } => format!("{} {}", loc.summary_action_kill, process_name),
+        Action::PowerShell { .. } => "POWERSHELL".to_string(),
+        Action::Cmd { .. } => "CMD".to_string(),
+        Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
+        Action::Sound { .. } => "SOUND".to_string(),
+        Action::ProcessAudio { process_name, action_type, volume_level } => {
+            match action_type {
+                ProcessAudioActionType::Mute => format!("{} {}", loc.summary_action_mute, process_name),
+                ProcessAudioActionType::Unmute => format!("{} {}", loc.summary_action_unmute, process_name),
+                ProcessAudioActionType::ToggleMute => format!("{} {}", loc.summary_action_toggle, process_name),
+                ProcessAudioActionType::SetVolume => format!("{} {}% {}", loc.summary_action_vol, volume_level, process_name),
+            }
+        }
+        Action::SystemPower { power_type } => format!("{} {:?}", loc.summary_action_power, power_type),
+        Action::Delay { seconds } => format!("{} {:.1}S", loc.summary_action_wait, seconds),
+        Action::HttpWebhook { .. } => "WEBHOOK".to_string(),
+    }
+}
+
+fn render_pipeline_summary(
+    ui: &mut Ui,
+    loc: &crate::i18n::Strings,
+    rule: &Rule,
+    exec_opt: Option<crate::ipc::protocol::ActiveRuleExecutionState>,
+    t: &Tokens,
+) {
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+        ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
 
         let prefix = if loc.rules_summary_trigger_process.starts_with("ТРИГГЕР") { "ТРИГГЕР: " } else { "TRIGGER: " };
 
@@ -322,36 +512,25 @@ fn render_pipeline_summary(ui: &mut Ui, loc: &crate::i18n::Strings, rule: &Rule,
 
         widgets::hud(ui, "➔", t.faint);
 
-        // Actions Count & Preview
-        let actions_count = rule.actions.len();
-        let actions_summary = if actions_count == 0 {
-            loc.rules_summary_no_actions.to_string()
+        // Actions Steps with Active Highlight
+        if rule.actions.is_empty() {
+            widgets::badge(ui, loc.rules_summary_no_actions, t.muted);
         } else {
-            let names: Vec<_> = rule.actions.iter().map(|a| match a {
-                Action::StartProcess { file_path, .. } => {
-                    let fname = std::path::Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
-                    format!("{} {}", loc.summary_action_launch, fname)
+            for (a_idx, action) in rule.actions.iter().enumerate() {
+                if a_idx > 0 {
+                    widgets::hud(ui, "→", t.faint);
                 }
-                Action::KillProcess { process_name, .. } => format!("{} {}", loc.summary_action_kill, process_name),
-                Action::PowerShell { .. } => "POWERSHELL".to_string(),
-                Action::Cmd { .. } => "CMD".to_string(),
-                Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
-                Action::Sound { .. } => "SOUND".to_string(),
-                Action::ProcessAudio { process_name, action_type, volume_level } => {
-                    match action_type {
-                        ProcessAudioActionType::Mute => format!("{} {}", loc.summary_action_mute, process_name),
-                        ProcessAudioActionType::Unmute => format!("{} {}", loc.summary_action_unmute, process_name),
-                        ProcessAudioActionType::ToggleMute => format!("{} {}", loc.summary_action_toggle, process_name),
-                        ProcessAudioActionType::SetVolume => format!("{} {}% {}", loc.summary_action_vol, volume_level, process_name),
-                    }
+                let is_current = exec_opt.map_or(false, |e| !e.is_exit && e.current_step == a_idx);
+                let brief = format_action_brief(action, loc);
+                if is_current {
+                    let label = format!("▶ [{}/{}] {}", a_idx + 1, rule.actions.len(), brief);
+                    widgets::badge(ui, &label, t.accent_ink);
+                } else {
+                    let label = format!("[{}/{}] {}", a_idx + 1, rule.actions.len(), brief);
+                    widgets::badge(ui, &label, t.muted);
                 }
-                Action::SystemPower { power_type } => format!("{} {:?}", loc.summary_action_power, power_type),
-                Action::Delay { seconds } => format!("{} {:.1}S", loc.summary_action_wait, seconds),
-                Action::HttpWebhook { .. } => "WEBHOOK".to_string(),
-            }).collect();
-            format!("{} {}: {}", loc.rules_summary_actions, actions_count, names.join(" | "))
-        };
-        widgets::badge(ui, &actions_summary, t.muted);
+            }
+        }
 
         let has_companion = rule.actions.iter().any(|a| matches!(a, Action::StartProcess { close_on_exit: true, .. }));
         if has_companion {
@@ -360,30 +539,21 @@ fn render_pipeline_summary(ui: &mut Ui, loc: &crate::i18n::Strings, rule: &Rule,
 
         if !rule.on_exit_actions.is_empty() {
             widgets::hud(ui, "➔", t.faint);
-            let exit_names: Vec<_> = rule.on_exit_actions.iter().map(|a| match a {
-                Action::StartProcess { file_path, .. } => {
-                    let fname = std::path::Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
-                    format!("{} {}", loc.summary_action_launch, fname)
+            widgets::hud(ui, loc.rules_summary_on_exit, t.accent_ink);
+            for (e_idx, action) in rule.on_exit_actions.iter().enumerate() {
+                if e_idx > 0 {
+                    widgets::hud(ui, "→", t.faint);
                 }
-                Action::KillProcess { process_name, .. } => format!("{} {}", loc.summary_action_kill, process_name),
-                Action::PowerShell { .. } => "POWERSHELL".to_string(),
-                Action::Cmd { .. } => "CMD".to_string(),
-                Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
-                Action::Sound { .. } => "SOUND".to_string(),
-                Action::ProcessAudio { process_name, action_type, volume_level } => {
-                    match action_type {
-                        ProcessAudioActionType::Mute => format!("{} {}", loc.summary_action_mute, process_name),
-                        ProcessAudioActionType::Unmute => format!("{} {}", loc.summary_action_unmute, process_name),
-                        ProcessAudioActionType::ToggleMute => format!("{} {}", loc.summary_action_toggle, process_name),
-                        ProcessAudioActionType::SetVolume => format!("{} {}% {}", loc.summary_action_vol, volume_level, process_name),
-                    }
+                let is_current = exec_opt.map_or(false, |e| e.is_exit && e.current_step == e_idx);
+                let brief = format_action_brief(action, loc);
+                if is_current {
+                    let label = format!("▶ [{}/{}] {}", e_idx + 1, rule.on_exit_actions.len(), brief);
+                    widgets::badge(ui, &label, t.accent_ink);
+                } else {
+                    let label = format!("[{}/{}] {}", e_idx + 1, rule.on_exit_actions.len(), brief);
+                    widgets::badge(ui, &label, t.faint);
                 }
-                Action::SystemPower { power_type } => format!("{} {:?}", loc.summary_action_power, power_type),
-                Action::Delay { seconds } => format!("{} {:.1}S", loc.summary_action_wait, seconds),
-                Action::HttpWebhook { .. } => "WEBHOOK".to_string(),
-            }).collect();
-            let exit_summary = format!("{} {}: {}", loc.rules_summary_on_exit, rule.on_exit_actions.len(), exit_names.join(" | "));
-            widgets::badge(ui, &exit_summary, t.accent_ink);
+            }
         }
     });
 }

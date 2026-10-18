@@ -82,6 +82,7 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
 
             if let Some(rule) = &state.editing_rule {
                 let rule_name = rule.name.clone();
+                let exec_opt = state.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
                 egui::Frame::new()
                     .fill(t.sunken)
                     .stroke(t.hairline())
@@ -94,6 +95,22 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
                         ui.horizontal(|ui| {
                             ui.set_width(ui.available_width());
                             widgets::eyebrow(ui, "01", loc.inspector_eyebrow_builder);
+                            if let Some(exec) = exec_opt {
+                                ui.add_space(8.0);
+                                let count_suffix = if exec.active_count > 1 {
+                                    format!(" (x{})", exec.active_count)
+                                } else {
+                                    String::new()
+                                };
+                                let running_label = format!(
+                                    "{}{}: {}/{}",
+                                    loc.rules_badge_running,
+                                    count_suffix,
+                                    exec.current_step + 1,
+                                    exec.total_steps
+                                );
+                                widgets::badge(ui, &running_label, t.accent_ink);
+                            }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if widgets::glyph_button(ui, Glyph::Close, loc.inspector_btn_close_tip).clicked() {
                                     close_editor = true;
@@ -220,6 +237,91 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                 ui.add(egui::DragValue::new(&mut rule.cooldown_seconds).speed(0.1).range(0.0..=60.0).suffix(" s"));
                 ui.add_space(16.0);
                 ui.checkbox(&mut rule.is_enabled, loc.inspector_checkbox_rule_active);
+            });
+
+            widgets::hrule(ui);
+
+            // Rule Icon
+            widgets::hud(ui, loc.inspector_sec_icon, t.muted);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+
+                // Icon Preview Box (36x36)
+                let icon_box_size = vec2(36.0, 36.0);
+                let (icon_rect, _) = ui.allocate_exact_size(icon_box_size, Sense::hover());
+                ui.painter().rect_filled(icon_rect, CornerRadius::ZERO, t.sunken);
+                ui.painter().rect_stroke(icon_rect, CornerRadius::ZERO, t.hairline(), egui::StrokeKind::Inside);
+
+                let mut rendered = false;
+                if let Some(path) = &rule.custom_icon_path {
+                    if let Some(tex) = state.icon_cache.get_icon_from_path(ui.ctx(), path) {
+                        let size = tex.size_vec2();
+                        let max_dim = size.x.max(size.y).max(1.0);
+                        let scale = 26.0 / max_dim;
+                        let render_size = vec2((size.x * scale).round().max(1.0), (size.y * scale).round().max(1.0));
+                        let img_rect = Rect::from_center_size(icon_rect.center(), render_size);
+                        ui.painter().image(
+                            tex.id(),
+                            img_rect,
+                            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                        rendered = true;
+                    }
+                }
+
+                if !rendered {
+                    let glyph = rule.default_icon_glyph();
+                    ui.painter().text(
+                        icon_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        glyph,
+                        egui::FontId::proportional(18.0),
+                        t.ink_strong,
+                    );
+                }
+
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+
+                    let icon_status_text = match &rule.custom_icon_path {
+                        Some(p) => {
+                            let fname = std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy();
+                            format!("{}: {}", loc.inspector_icon_custom_label, fname)
+                        }
+                        None => loc.inspector_icon_default_label.to_string(),
+                    };
+                    widgets::hud(ui, &icon_status_text, t.muted);
+
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+
+                        if widgets::button(ui, loc.inspector_icon_browse, Kind::Secondary, 0.0)
+                            .on_hover_text(loc.inspector_icon_browse_tip)
+                            .clicked()
+                        {
+                            if let Some(picked) = rfd::FileDialog::new()
+                                .set_title("Select Rule Icon")
+                                .add_filter("Icon / Image / Exe", &["exe", "ico", "png", "jpg", "jpeg", "dll"])
+                                .pick_file()
+                            {
+                                rule.custom_icon_path = Some(picked.to_string_lossy().to_string());
+                            }
+                        }
+
+                        if rule.custom_icon_path.is_some() {
+                            if widgets::button(ui, loc.inspector_icon_reset, Kind::Danger, 0.0)
+                                .on_hover_text(loc.inspector_icon_reset_tip)
+                                .clicked()
+                            {
+                                rule.custom_icon_path = None;
+                            }
+                        }
+                    });
+
+                    ui.checkbox(&mut rule.auto_process_icon, loc.inspector_icon_auto_process)
+                        .on_hover_text(loc.inspector_icon_auto_process_tip);
+                });
             });
 
             widgets::hrule(ui);
@@ -371,12 +473,15 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
             };
             widgets::eyebrow(ui, "03", action_header);
 
+            let exec_opt = state.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
+
             render_actions_pipeline(
                 ui,
                 state,
                 &mut rule.actions,
                 "main_actions",
                 false,
+                exec_opt,
                 t,
             );
 
@@ -391,6 +496,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                     &mut rule.on_exit_actions,
                     "exit_actions",
                     true,
+                    exec_opt,
                     t,
                 );
             }
@@ -757,6 +863,7 @@ fn render_actions_pipeline(
     actions: &mut Vec<Action>,
     pipeline_id: &str,
     is_exit_pipeline: bool,
+    exec_opt: Option<crate::ipc::protocol::ActiveRuleExecutionState>,
     t: &Tokens,
 ) {
     let dnd_id = ui.id().with(("action_pipeline_dnd", pipeline_id));
@@ -824,6 +931,7 @@ fn render_actions_pipeline(
 
         // Render card idx
         let is_ghost = active_src == Some(idx);
+        let is_executing = exec_opt.map_or(false, |e| e.is_exit == is_exit_pipeline && e.current_step == idx);
         let resp = render_action_card(
             ui,
             state,
@@ -832,6 +940,7 @@ fn render_actions_pipeline(
             t,
             is_exit_pipeline,
             is_ghost,
+            is_executing,
         );
 
         current_centers.push(resp.card_rect.center().y);
@@ -959,6 +1068,7 @@ fn render_action_card(
     t: &Tokens,
     is_exit_pipeline: bool,
     is_being_dragged: bool,
+    is_executing: bool,
 ) -> ActionCardResponse {
     let loc = state.loc();
     let mut remove_clicked = false;
@@ -969,7 +1079,9 @@ fn render_action_card(
     let ghost_id = ui.id().with(("card_ghost", is_exit_pipeline, idx));
     let ghost_anim = ui.ctx().animate_bool_with_time_and_easing(ghost_id, is_being_dragged, 0.15, easing::cubic_out);
 
-    let (fill, stroke) = if ghost_anim > 0.001 {
+    let (fill, stroke) = if is_executing {
+        (t.sunken, Stroke::new(1.5, t.accent_ink))
+    } else if ghost_anim > 0.001 {
         (
             t.sunken,
             Stroke::new(1.0, t.accent_ink.gamma_multiply(0.45 * ghost_anim)),
@@ -1015,7 +1127,9 @@ fn render_action_card(
                             widgets::hud(ui, &format!("{} {:02}", prefix, idx + 1), t.accent_ink);
 
                             let type_badge = action_type_badge(action, loc);
-                            if is_being_dragged {
+                            if is_executing {
+                                widgets::badge(ui, loc.inspector_badge_executing_now, t.accent_ink);
+                            } else if is_being_dragged {
                                 widgets::badge(ui, loc.inspector_badge_moving_step, t.accent_ink);
                             } else {
                                 widgets::badge(ui, type_badge, t.muted);
@@ -1385,6 +1499,8 @@ fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSna
                     actions: Vec::new(),
                     on_exit_actions: Vec::new(),
                     execution_count: 0,
+                    custom_icon_path: None,
+                    auto_process_icon: true,
                 });
             }
 

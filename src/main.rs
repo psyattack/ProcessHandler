@@ -6,7 +6,8 @@ mod daemon;
 mod gui;
 pub mod i18n;
 mod ipc;
-mod models;
+pub mod models;
+pub mod sharing;
 pub mod single_instance;
 pub mod updater;
 

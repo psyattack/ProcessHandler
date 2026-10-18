@@ -157,8 +157,16 @@ impl GuiState {
         self.sync_with_daemon();
     }
 
+    pub fn is_any_rule_executing(&self) -> bool {
+        self.daemon_state
+            .as_ref()
+            .map(|s| !s.active_rule_executions.is_empty())
+            .unwrap_or(false)
+    }
+
     pub fn sync_with_daemon(&mut self) {
-        if self.last_sync.elapsed().as_millis() < 400 {
+        let interval_ms = if self.is_any_rule_executing() { 80 } else { 400 };
+        if self.last_sync.elapsed().as_millis() < interval_ms {
             return;
         }
         self.last_sync = Instant::now();
@@ -176,6 +184,78 @@ impl GuiState {
         if self.active_view == ActiveView::Processes || self.editing_rule.is_some() || !self.search_query.is_empty() {
             if let Ok(IpcResponse::Processes(procs)) = IpcClient::call(&IpcRequest::GetProcesses) {
                 self.cached_processes = procs;
+            }
+        }
+    }
+
+    pub fn copy_single_rule_to_clipboard(&mut self, ctx: &egui::Context, rule: &Rule) {
+        match crate::sharing::compress_and_encode(&crate::sharing::SharedAutomation::Single(rule.clone())) {
+            Ok(encoded) => {
+                crate::sharing::copy_text_to_clipboard(ctx, &encoded);
+                self.set_toast(self.loc().toast_copy_single_success.replace("{}", &rule.name));
+            }
+            Err(e) => {
+                self.set_toast(format!("Error: {e}"));
+            }
+        }
+    }
+
+    pub fn copy_all_rules_to_clipboard(&mut self, ctx: &egui::Context) {
+        let rules = self.daemon_state.as_ref().map(|s| s.config.rules.clone()).unwrap_or_default();
+        if rules.is_empty() {
+            self.set_toast(self.loc().toast_copy_all_empty);
+            return;
+        }
+        match crate::sharing::compress_and_encode(&crate::sharing::SharedAutomation::Batch(rules.clone())) {
+            Ok(encoded) => {
+                crate::sharing::copy_text_to_clipboard(ctx, &encoded);
+                self.set_toast(self.loc().toast_copy_all_success.replace("{}", &rules.len().to_string()));
+            }
+            Err(e) => {
+                self.set_toast(format!("Error: {e}"));
+            }
+        }
+    }
+
+    pub fn import_automations_from_clipboard(&mut self, _ctx: &egui::Context) {
+        let text = match crate::sharing::read_text_from_clipboard() {
+            Ok(t) => t,
+            Err(e) => {
+                self.set_toast(format!("{}: {}", self.loc().toast_import_clipboard_err, e));
+                return;
+            }
+        };
+
+        match crate::sharing::decode_and_decompress(&text) {
+            Ok(rules) => {
+                if rules.is_empty() {
+                    self.set_toast(self.loc().toast_import_empty);
+                    return;
+                }
+
+                let existing_ids: std::collections::HashSet<String> = self.daemon_state
+                    .as_ref()
+                    .map(|s| s.config.rules.iter().map(|r| r.id.clone()).collect())
+                    .unwrap_or_default();
+
+                let mut prepared_rules = Vec::new();
+                for mut r in rules {
+                    if existing_ids.contains(&r.id) {
+                        static IMPORT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                        let count = IMPORT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        r.id = format!("rule_{:x}_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(), count);
+                        r.name = format!("{} (Imported)", r.name);
+                    }
+                    prepared_rules.push(r);
+                }
+
+                let count = prepared_rules.len();
+                let _ = IpcClient::call(&IpcRequest::ImportRules(prepared_rules));
+                self.set_toast(self.loc().toast_import_success.replace("{}", &count.to_string()));
+                self.sync_with_daemon();
+            }
+            Err(err) => {
+                self.set_toast(format!("{}: {}", self.loc().toast_import_invalid, err));
             }
         }
     }

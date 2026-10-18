@@ -357,6 +357,7 @@ mod tests {
             total_rules_count: 0,
             config: crate::config::AppConfig::default(),
             logs: vec![],
+            active_rule_executions: std::collections::HashMap::new(),
         });
 
         // Run frame 1

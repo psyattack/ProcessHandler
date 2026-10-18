@@ -15,6 +15,15 @@ pub struct BoundProcess {
     pub target_executable: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ActiveExecutionItem {
+    pub rule_id: String,
+    pub step_index: usize,
+    pub total_steps: usize,
+    pub is_exit: bool,
+    pub started_at: Instant,
+}
+
 #[derive(Debug)]
 pub enum ActionCompletionEvent {
     Log {
@@ -23,6 +32,28 @@ pub enum ActionCompletionEvent {
         message: String,
     },
     AddBoundProcess(BoundProcess),
+    RuleExecutionStarted {
+        execution_id: u64,
+        rule_id: String,
+        step_index: usize,
+        total_steps: usize,
+        is_exit: bool,
+    },
+    RuleExecutionStep {
+        execution_id: u64,
+        _rule_id: String,
+        step_index: usize,
+        total_steps: usize,
+        is_exit: bool,
+    },
+    RuleExecutionFinished {
+        execution_id: u64,
+        _rule_id: String,
+    },
+    SetRuleCustomIcon {
+        rule_id: String,
+        icon_path: String,
+    },
 }
 
 pub struct DaemonEngine {
@@ -33,6 +64,7 @@ pub struct DaemonEngine {
     pub active_bound_processes: Vec<BoundProcess>,
     pub rule_last_triggered: HashMap<String, Instant>,
     pub active_rule_pids: HashMap<String, HashSet<u32>>,
+    pub active_executions: HashMap<u64, ActiveExecutionItem>,
     action_tx: mpsc::UnboundedSender<ActionCompletionEvent>,
     action_rx: mpsc::UnboundedReceiver<ActionCompletionEvent>,
 }
@@ -50,6 +82,7 @@ impl DaemonEngine {
             active_bound_processes: Vec::new(),
             rule_last_triggered: HashMap::new(),
             active_rule_pids: HashMap::new(),
+            active_executions: HashMap::new(),
             action_tx,
             action_rx,
         }
@@ -63,6 +96,38 @@ impl DaemonEngine {
                 }
                 ActionCompletionEvent::AddBoundProcess(bp) => {
                     self.active_bound_processes.push(bp);
+                }
+                ActionCompletionEvent::RuleExecutionStarted { execution_id, rule_id, step_index, total_steps, is_exit } => {
+                    self.active_executions.insert(execution_id, ActiveExecutionItem {
+                        rule_id,
+                        step_index,
+                        total_steps,
+                        is_exit,
+                        started_at: Instant::now(),
+                    });
+                }
+                ActionCompletionEvent::RuleExecutionStep { execution_id, step_index, total_steps, is_exit, .. } => {
+                    if let Some(item) = self.active_executions.get_mut(&execution_id) {
+                        item.step_index = step_index;
+                        item.total_steps = total_steps;
+                        item.is_exit = is_exit;
+                    }
+                }
+                ActionCompletionEvent::RuleExecutionFinished { execution_id, .. } => {
+                    self.active_executions.remove(&execution_id);
+                }
+                ActionCompletionEvent::SetRuleCustomIcon { rule_id, icon_path } => {
+                    let mut updated_name = None;
+                    if let Some(r) = self.config.rules.iter_mut().find(|r| r.id == rule_id) {
+                        if r.custom_icon_path.is_none() {
+                            r.custom_icon_path = Some(icon_path.clone());
+                            updated_name = Some(r.name.clone());
+                        }
+                    }
+                    if let Some(name) = updated_name {
+                        let _ = self.config.save_to_file(AppConfig::config_path());
+                        self.log("INFO", "RULE", &format!("Set custom icon for rule '{}' from process: {}", name, icon_path));
+                    }
                 }
             }
         }
@@ -397,6 +462,20 @@ impl DaemonEngine {
         self.rule_last_triggered.insert(rule.id.clone(), Instant::now());
         self.log("TRIGGER", "RULE", &format!("Rule '{}' triggered by {}", rule.name, context_name));
 
+        if rule.auto_process_icon && rule.custom_icon_path.is_none() {
+            let exe_path = if pid > 0 {
+                ProcessWatcher::get_process_image_path(pid)
+            } else {
+                ProcessWatcher::find_exe_path_by_name(context_name)
+            };
+            if let Some(path) = exe_path {
+                let _ = self.action_tx.send(ActionCompletionEvent::SetRuleCustomIcon {
+                    rule_id: rule.id.clone(),
+                    icon_path: path,
+                });
+            }
+        }
+
         if rule.actions.is_empty() {
             return None;
         }
@@ -412,12 +491,47 @@ impl DaemonEngine {
         let context_name = context_name.to_string();
         let tx = self.action_tx.clone();
 
+        static EXECUTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let execution_id = EXECUTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let total_steps = actions.len();
+
+        let _ = tx.send(ActionCompletionEvent::RuleExecutionStarted {
+            execution_id,
+            rule_id: rule_id.clone(),
+            step_index: 0,
+            total_steps,
+            is_exit: false,
+        });
+
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let join_handle = handle.spawn(async move {
-                for action in actions {
-                    match ActionRunner::execute(&action, &ctx).await {
+                struct ExecGuard {
+                    id: u64,
+                    r_id: String,
+                    tx: mpsc::UnboundedSender<ActionCompletionEvent>,
+                }
+                impl Drop for ExecGuard {
+                    fn drop(&mut self) {
+                        let _ = self.tx.send(ActionCompletionEvent::RuleExecutionFinished {
+                            execution_id: self.id,
+                            _rule_id: self.r_id.clone(),
+                        });
+                    }
+                }
+                let _guard = ExecGuard { id: execution_id, r_id: rule_id.clone(), tx: tx.clone() };
+
+                for (step_idx, action) in actions.iter().enumerate() {
+                    let _ = tx.send(ActionCompletionEvent::RuleExecutionStep {
+                        execution_id,
+                        _rule_id: rule_id.clone(),
+                        step_index: step_idx,
+                        total_steps,
+                        is_exit: false,
+                    });
+
+                    match ActionRunner::execute(action, &ctx).await {
                         Ok(()) => {
-                            if let Action::StartProcess { file_path, close_on_exit: true, .. } = &action {
+                            if let Action::StartProcess { file_path, close_on_exit: true, .. } = action {
                                 let _ = tx.send(ActionCompletionEvent::AddBoundProcess(BoundProcess {
                                     rule_id: rule_id.clone(),
                                     primary_process_name: context_name.clone(),
@@ -438,6 +552,10 @@ impl DaemonEngine {
             });
             Some(join_handle)
         } else {
+            let _ = tx.send(ActionCompletionEvent::RuleExecutionFinished {
+                execution_id,
+                _rule_id: rule_id,
+            });
             None
         }
     }
@@ -462,12 +580,48 @@ impl DaemonEngine {
 
         let actions = rule.on_exit_actions.clone();
         let rule_name = rule.name.clone();
+        let rule_id = rule.id.clone();
         let tx = self.action_tx.clone();
+
+        static EXIT_EXECUTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let execution_id = EXIT_EXECUTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let total_steps = actions.len();
+
+        let _ = tx.send(ActionCompletionEvent::RuleExecutionStarted {
+            execution_id,
+            rule_id: rule_id.clone(),
+            step_index: 0,
+            total_steps,
+            is_exit: true,
+        });
 
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let join_handle = handle.spawn(async move {
-                for action in actions {
-                    if let Err(err) = ActionRunner::execute(&action, &ctx).await {
+                struct ExecGuard {
+                    id: u64,
+                    r_id: String,
+                    tx: mpsc::UnboundedSender<ActionCompletionEvent>,
+                }
+                impl Drop for ExecGuard {
+                    fn drop(&mut self) {
+                        let _ = self.tx.send(ActionCompletionEvent::RuleExecutionFinished {
+                            execution_id: self.id,
+                            _rule_id: self.r_id.clone(),
+                        });
+                    }
+                }
+                let _guard = ExecGuard { id: execution_id, r_id: rule_id.clone(), tx: tx.clone() };
+
+                for (step_idx, action) in actions.iter().enumerate() {
+                    let _ = tx.send(ActionCompletionEvent::RuleExecutionStep {
+                        execution_id,
+                        _rule_id: rule_id.clone(),
+                        step_index: step_idx,
+                        total_steps,
+                        is_exit: true,
+                    });
+
+                    if let Err(err) = ActionRunner::execute(action, &ctx).await {
                         let _ = tx.send(ActionCompletionEvent::Log {
                             level: "ERROR".to_string(),
                             category: "ACTION".to_string(),
@@ -478,6 +632,10 @@ impl DaemonEngine {
             });
             Some(join_handle)
         } else {
+            let _ = tx.send(ActionCompletionEvent::RuleExecutionFinished {
+                execution_id,
+                _rule_id: rule_id,
+            });
             None
         }
     }
@@ -584,6 +742,21 @@ impl DaemonEngine {
                 IpcResponse::Ok
             }
 
+            IpcRequest::ImportRules(imported) => {
+                let mut count = 0;
+                for rule in imported {
+                    if let Some(existing) = self.config.rules.iter_mut().find(|r| r.id == rule.id) {
+                        *existing = rule;
+                    } else {
+                        self.config.rules.push(rule);
+                    }
+                    count += 1;
+                }
+                let _ = self.config.save_to_file(AppConfig::config_path());
+                self.log("INFO", "CONFIG", &format!("Imported {count} automations"));
+                IpcResponse::Ok
+            }
+
             IpcRequest::ShutdownDaemon => {
                 self.execute_shutdown_rules().await;
                 std::process::exit(0);
@@ -621,6 +794,23 @@ impl DaemonEngine {
         let mem = Self::get_daemon_memory();
         let autorun_enabled = crate::autorun::is_autorun_enabled(crate::autorun::APP_NAME);
 
+        let mut active_rule_executions = HashMap::new();
+        let mut grouped: HashMap<String, Vec<&ActiveExecutionItem>> = HashMap::new();
+        for item in self.active_executions.values() {
+            grouped.entry(item.rule_id.clone()).or_default().push(item);
+        }
+        for (r_id, items) in grouped {
+            let active_count = items.len();
+            if let Some(latest) = items.into_iter().max_by_key(|i| i.started_at) {
+                active_rule_executions.insert(r_id, crate::ipc::ActiveRuleExecutionState {
+                    active_count,
+                    current_step: latest.step_index,
+                    total_steps: latest.total_steps,
+                    is_exit: latest.is_exit,
+                });
+            }
+        }
+
         DaemonState {
             autorun_enabled,
             uptime_secs: self.start_time.elapsed().as_secs(),
@@ -630,6 +820,7 @@ impl DaemonEngine {
             total_rules_count: total_rules,
             config: self.config.clone(),
             logs: self.logs.clone(),
+            active_rule_executions,
         }
     }
 
@@ -809,6 +1000,8 @@ mod tests {
             }],
             on_exit_actions: Vec::new(),
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -851,6 +1044,8 @@ mod tests {
             }],
             on_exit_actions: Vec::new(),
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -887,6 +1082,8 @@ mod tests {
             }],
             on_exit_actions: Vec::new(),
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -925,6 +1122,8 @@ mod tests {
             }],
             on_exit_actions: Vec::new(),
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -970,6 +1169,8 @@ mod tests {
             }],
             on_exit_actions: Vec::new(),
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1000,6 +1201,8 @@ mod tests {
                 message: "All instances exited".into(),
             }],
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1087,6 +1290,8 @@ mod tests {
                 message: "Closed".into(),
             }],
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1129,6 +1334,8 @@ mod tests {
             ],
             on_exit_actions: Vec::new(),
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1169,6 +1376,8 @@ mod tests {
             actions: vec![Action::Delay { seconds: 0.4 }],
             on_exit_actions: Vec::new(),
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         };
         let rule_short = Rule {
             id: "short_rule".into(),
@@ -1180,6 +1389,8 @@ mod tests {
             actions: vec![Action::Delay { seconds: 0.1 }],
             on_exit_actions: Vec::new(),
             execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
         };
 
         let mut engine = DaemonEngine::new(config);
@@ -1197,6 +1408,61 @@ mod tests {
         handle_long.await.unwrap();
         let total_duration = start.elapsed();
         assert!(total_duration >= std::time::Duration::from_millis(380), "Long rule finished too early: {:?}", total_duration);
+    }
+
+    #[tokio::test]
+    async fn test_rule_execution_tracking_concurrent_and_step() {
+        let config = AppConfig::default();
+        let rule = Rule {
+            id: "tracked_rule".into(),
+            name: "Tracked Multi-Step Rule".into(),
+            description: "Testing execution tracking".into(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: None,
+            actions: vec![
+                Action::Delay { seconds: 0.2 },
+                Action::Delay { seconds: 0.2 },
+            ],
+            on_exit_actions: Vec::new(),
+            execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
+        };
+
+        let mut engine = DaemonEngine::new(config);
+
+        // Initially no active executions
+        let state0 = engine.get_current_state();
+        assert!(!state0.active_rule_executions.contains_key("tracked_rule"));
+
+        // Launch instance 1
+        let h1 = engine.try_execute_rule(&rule, "MANUAL_TEST", 0).await.unwrap();
+        // Give tokio runtime a brief tick to process channel event
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let state1 = engine.get_current_state();
+        assert!(state1.active_rule_executions.contains_key("tracked_rule"));
+        let exec1 = &state1.active_rule_executions["tracked_rule"];
+        assert_eq!(exec1.active_count, 1);
+        assert_eq!(exec1.current_step, 0);
+        assert_eq!(exec1.total_steps, 2);
+
+        // Launch instance 2 concurrently
+        let h2 = engine.try_execute_rule(&rule, "MANUAL_TEST", 0).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let state2 = engine.get_current_state();
+        let exec2 = &state2.active_rule_executions["tracked_rule"];
+        assert_eq!(exec2.active_count, 2, "Must report 2 concurrent active executions");
+
+        // Wait for both to finish
+        let _ = h1.await;
+        let _ = h2.await;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let state_done = engine.get_current_state();
+        assert!(!state_done.active_rule_executions.contains_key("tracked_rule"));
     }
 }
 

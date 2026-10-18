@@ -425,20 +425,26 @@ pub enum Glyph {
     Close,
     Clone,
     Expand,
+    More,
 }
 
-/// Small outlined square button with a drawn glyph (X, Clone, Expand); inverts on hover.
+/// Small outlined square button with a drawn glyph (X, Clone, Expand, More); inverts on hover.
 pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
+    glyph_button_active(ui, glyph, false, tip)
+}
+
+/// Small outlined square button with a drawn glyph; supports active state.
+pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::click());
     let hovered = resp.hovered();
     let p = ui.painter();
-    if hovered {
-        p.rect_filled(rect, CornerRadius::ZERO, t.invert_bg);
+    let (fill, stroke, c) = if active || hovered {
+        (t.invert_bg, Stroke::NONE, t.invert_fg)
     } else {
-        p.rect_stroke(rect, CornerRadius::ZERO, t.hairline(), egui::StrokeKind::Inside);
-    }
-    let c = if hovered { t.invert_fg } else { t.muted };
+        (t.bg, Stroke::new(1.0, t.line_strong), t.ink)
+    };
+    p.rect(rect, CornerRadius::ZERO, fill, stroke, egui::StrokeKind::Inside);
     let m = rect.center();
     match glyph {
         Glyph::Close => {
@@ -463,6 +469,12 @@ pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
             p.line_segment([m + vec2(-s, s), m + vec2(-s + 3.2, s)], Stroke::new(1.3, c));
             p.line_segment([m + vec2(0.5, -0.5), m + vec2(s - 0.5, -s + 0.5)], Stroke::new(1.3, c));
             p.line_segment([m + vec2(-0.5, 0.5), m + vec2(-s + 0.5, s - 0.5)], Stroke::new(1.3, c));
+        }
+        Glyph::More => {
+            let r = 1.35;
+            p.circle_filled(m + vec2(0.0, -4.5), r, c);
+            p.circle_filled(m, r, c);
+            p.circle_filled(m + vec2(0.0, 4.5), r, c);
         }
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));

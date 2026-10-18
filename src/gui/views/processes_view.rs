@@ -153,6 +153,8 @@ pub fn render_processes_view(ui: &mut Ui, state: &mut GuiState) {
                                         actions: Vec::new(),
                                         on_exit_actions: Vec::new(),
                                         execution_count: 0,
+                                        custom_icon_path: None,
+                                        auto_process_icon: true,
                                     });
                                 }
                             });

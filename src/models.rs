@@ -203,6 +203,10 @@ pub struct Rule {
     pub on_exit_actions: Vec<Action>,
     #[serde(skip)]
     pub execution_count: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_icon_path: Option<String>,
+    #[serde(default)]
+    pub auto_process_icon: bool,
 }
 
 impl Rule {
@@ -221,7 +225,34 @@ impl Rule {
         cloned.name = new_name;
         cloned.is_enabled = false;
         cloned.execution_count = 0;
+        cloned.custom_icon_path = self.custom_icon_path.clone();
+        cloned.auto_process_icon = self.auto_process_icon;
         cloned
+    }
+
+    pub fn default_icon_glyph(&self) -> &'static str {
+        if let Some(action) = self.actions.first() {
+            match action {
+                Action::StartProcess { .. } => egui_phosphor::regular::ROCKET,
+                Action::KillProcess { .. } => egui_phosphor::regular::STOP,
+                Action::PowerShell { .. } => egui_phosphor::regular::CODE,
+                Action::Cmd { .. } => egui_phosphor::regular::TERMINAL_WINDOW,
+                Action::Notification { .. } => egui_phosphor::regular::BELL,
+                Action::Sound { .. } => egui_phosphor::regular::SPEAKER_HIGH,
+                Action::ProcessAudio { .. } => egui_phosphor::regular::FADERS,
+                Action::SystemPower { .. } => egui_phosphor::regular::POWER,
+                Action::Delay { .. } => egui_phosphor::regular::HOURGLASS,
+                Action::HttpWebhook { .. } => egui_phosphor::regular::GLOBE,
+            }
+        } else if let Some(trigger) = &self.trigger {
+            match trigger {
+                Trigger::Process { .. } => egui_phosphor::regular::CPU,
+                Trigger::SystemEvent { .. } => egui_phosphor::regular::LIGHTNING,
+                Trigger::Schedule { .. } => egui_phosphor::regular::CALENDAR,
+            }
+        } else {
+            egui_phosphor::regular::GEAR
+        }
     }
 }
 
@@ -299,6 +330,8 @@ mod tests {
             }],
             on_exit_actions: vec![],
             execution_count: 42,
+            custom_icon_path: Some("C:\\game.exe".into()),
+            auto_process_icon: true,
         };
 
         let cloned = original.clone_with_new_id();
@@ -310,5 +343,71 @@ mod tests {
         assert_eq!(cloned.trigger, original.trigger);
         assert_eq!(cloned.actions, original.actions);
         assert_eq!(cloned.execution_count, 0); // reset to 0
+        assert_eq!(cloned.custom_icon_path, Some("C:\\game.exe".into()));
+        assert!(cloned.auto_process_icon);
+    }
+
+    #[test]
+    fn test_rule_default_icon_glyph_per_action_and_trigger() {
+        let mut rule = Rule {
+            id: "r1".into(),
+            name: "Test".into(),
+            description: "".into(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: None,
+            actions: vec![],
+            on_exit_actions: vec![],
+            execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
+        };
+
+        // Fallback when empty
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::GEAR);
+
+        // Action icons
+        rule.actions = vec![Action::StartProcess {
+            file_path: "app.exe".into(),
+            arguments: "".into(),
+            working_directory: None,
+            run_as_admin: false,
+            only_if_not_running: false,
+            run_hidden: false,
+            close_on_exit: false,
+        }];
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::ROCKET);
+
+        rule.actions = vec![Action::KillProcess {
+            process_name: "app.exe".into(),
+            kill_tree: true,
+            force: false,
+        }];
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::STOP);
+
+        rule.actions = vec![Action::PowerShell {
+            script: "echo 1".into(),
+            run_in_window: false,
+        }];
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::CODE);
+
+        rule.actions = vec![Action::Delay { seconds: 5.0 }];
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::HOURGLASS);
+
+        // Trigger icons when actions empty
+        rule.actions.clear();
+        rule.trigger = Some(Trigger::Process {
+            process_name: "notepad.exe".into(),
+            match_mode: ProcessMatchMode::Exact,
+            single_instance: false,
+        });
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::CPU);
+
+        rule.trigger = Some(Trigger::SystemEvent {
+            event_type: SystemEventType::SessionLock,
+            idle_duration_sec: 0,
+            device_id_filter: None,
+        });
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::LIGHTNING);
     }
 }

@@ -11,7 +11,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 };
 #[cfg(windows)]
 use windows::Win32::System::Threading::{
-    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 #[cfg(windows)]
 use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
@@ -101,6 +101,53 @@ impl ProcessWatcher {
     #[cfg(not(windows))]
     pub fn snapshot_process_map() -> HashMap<u32, String> {
         HashMap::new()
+    }
+
+    #[cfg(windows)]
+    pub fn get_process_image_path(pid: u32) -> Option<String> {
+        unsafe {
+            if let Ok(h_proc) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                let mut buf = [0u16; 1024];
+                let mut size = buf.len() as u32;
+                let res = QueryFullProcessImageNameW(
+                    h_proc,
+                    PROCESS_NAME_FORMAT(0),
+                    windows::core::PWSTR(buf.as_mut_ptr()),
+                    &mut size,
+                );
+                let _ = CloseHandle(h_proc);
+                if res.is_ok() {
+                    return Some(String::from_utf16_lossy(&buf[..size as usize]));
+                }
+            }
+            None
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn get_process_image_path(_pid: u32) -> Option<String> {
+        None
+    }
+
+    pub fn find_exe_path_by_name(process_name: &str) -> Option<String> {
+        let lower = process_name.to_lowercase();
+        let map = Self::snapshot_process_map();
+        for (&pid, name) in &map {
+            if name.to_lowercase() == lower {
+                if let Some(path) = Self::get_process_image_path(pid) {
+                    return Some(path);
+                }
+            }
+        }
+        let sys_root = std::env::var_os("SystemRoot")
+            .or_else(|| std::env::var_os("WINDIR"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("C:\\Windows"));
+        let sys32_candidate = sys_root.join("System32").join(process_name);
+        if sys32_candidate.exists() {
+            return Some(sys32_candidate.to_string_lossy().to_string());
+        }
+        None
     }
 
     #[cfg(windows)]
