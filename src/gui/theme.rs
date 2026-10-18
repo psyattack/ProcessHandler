@@ -181,6 +181,11 @@ pub fn mono_bold() -> FontFamily {
     FontFamily::Name("mono-bold".into())
 }
 
+/// Phosphor icon font family.
+pub fn phosphor() -> FontFamily {
+    FontFamily::Name("phosphor".into())
+}
+
 type Face<'a> = (&'a str, &'static [u8], &'a [([u8; 4], f32)], FontFamily);
 
 pub fn install_fonts(ctx: &egui::Context) {
@@ -192,6 +197,7 @@ pub fn install_fonts(ctx: &egui::Context) {
     
     // Register Phosphor Icons into the font system
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    fonts.families.insert(phosphor(), vec!["phosphor".into()]);
 
     let fallback: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let mono_fallback: Vec<String> = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
@@ -218,6 +224,9 @@ pub fn install_fonts(ctx: &egui::Context) {
             stack.extend(mono_fallback.iter().cloned());
         } else {
             stack.extend(fallback.iter().cloned());
+        }
+        if !stack.iter().any(|f| f == "phosphor") {
+            stack.push("phosphor".into());
         }
         fonts.families.insert(family, stack);
     }

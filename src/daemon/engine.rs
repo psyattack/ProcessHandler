@@ -977,6 +977,45 @@ mod tests {
         assert!(serialized.contains("game.exe"));
     }
 
+    #[test]
+    fn test_microphone_rule_serde() {
+        use crate::models::MicrophoneActionType;
+
+        let json = r#"{
+            "id": "mic_rule_1",
+            "name": "Mic Muter",
+            "is_enabled": true,
+            "actions": [
+                {
+                    "$action_type": "microphone",
+                    "action_type": "toggle_mute",
+                    "volume_level": 80
+                }
+            ]
+        }"#;
+
+        let rule: Rule = serde_json::from_str(json).expect("deserialize mic rule");
+        assert_eq!(rule.name, "Mic Muter");
+        assert_eq!(rule.actions.len(), 1);
+
+        if let Action::Microphone { action_type, volume_level } = &rule.actions[0] {
+            assert_eq!(*action_type, MicrophoneActionType::ToggleMute);
+            assert_eq!(*volume_level, 80);
+        } else {
+            panic!("Expected Action::Microphone");
+        }
+
+        let serialized = serde_json::to_string(&rule).expect("serialize mic rule");
+        assert!(serialized.contains("microphone"));
+        assert!(serialized.contains("toggle_mute"));
+    }
+
+
+
+
+
+
+
     #[tokio::test]
     async fn test_schedule_trigger_interval() {
         let mut config = AppConfig::default();

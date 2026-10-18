@@ -229,6 +229,7 @@ pub static STRINGS: Strings = Strings {
     inspector_btn_clone: "CLONE",
     inspector_btn_clone_tip: "Duplicate this rule with a new ID",
     inspector_btn_cancel: "CANCEL",
+    inspector_btn_reset_tip: "Reset builder to initial state",
 
     // Inspector Action Dropdown Menu Options
     inspector_menu_launch_process: "Launch Process",
@@ -237,10 +238,13 @@ pub static STRINGS: Strings = Strings {
     inspector_menu_cmd: "Command Prompt",
     inspector_menu_notification: "Notification Toast",
     inspector_menu_sound: "Sound / Volume",
+    inspector_menu_microphone: "Microphone Control",
     inspector_menu_process_audio: "Process Audio (Mute/Vol)",
     inspector_menu_system_power: "System Power / Lock",
     inspector_menu_delay: "Delay Pause",
     inspector_menu_webhook: "HTTP Webhook",
+    inspector_search_action_hint: "Search action...",
+    inspector_no_matching_actions: "No matching actions found",
 
     // Inspector Action Cards & Badges
     inspector_tip_drag_step: "Drag to reorder step",
@@ -256,6 +260,7 @@ pub static STRINGS: Strings = Strings {
     inspector_badge_cmd: "CMD",
     inspector_badge_notification: "NOTIFICATION",
     inspector_badge_audio_volume: "AUDIO / VOLUME",
+    inspector_badge_microphone: "MICROPHONE",
     inspector_badge_process_audio: "PROCESS AUDIO",
     inspector_badge_system_power: "SYSTEM POWER",
     inspector_badge_delay: "DELAY",
@@ -291,6 +296,7 @@ pub static STRINGS: Strings = Strings {
     inspector_audio_toggle_mute: "Toggle Mute",
     inspector_audio_set_volume: "Set Volume",
     inspector_field_volume_level: "VOLUME LEVEL:",
+    inspector_field_mic_action_type: "MICROPHONE ACTION:",
     inspector_field_process_audio_action: "PROCESS AUDIO ACTION:",
     inspector_field_power_action: "POWER ACTION:",
     inspector_power_lock: "Lock Screen",

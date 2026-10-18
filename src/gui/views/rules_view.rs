@@ -6,7 +6,7 @@ use egui::{CornerRadius, pos2, Rect, Ui, vec2};
 use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
-use crate::models::{Action, ProcessAudioActionType, Rule, Trigger};
+use crate::models::{Action, MicrophoneActionType, ProcessAudioActionType, Rule, Trigger};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum RuleFilter {
@@ -74,25 +74,7 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Primary "+ NEW AUTOMATION" Button
                 if widgets::button(ui, loc.rules_btn_new, Kind::Primary, 0.0).clicked() {
-                    state.selected_rule_id = None;
-                    state.is_creating_new_rule = true;
-                    state.editing_rule = Some(Rule {
-                        id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-                        name: loc.rules_default_new_name.into(),
-                        description: String::new(),
-                        is_enabled: true,
-                        cooldown_seconds: 0.0,
-                        trigger: Some(crate::models::Trigger::Process {
-                            process_name: "notepad.exe".into(),
-                            match_mode: crate::models::ProcessMatchMode::Exact,
-                            single_instance: false,
-                        }),
-                        actions: Vec::new(),
-                        on_exit_actions: Vec::new(),
-                        execution_count: 0,
-                        custom_icon_path: None,
-                        auto_process_icon: false,
-                    });
+                    state.start_new_rule();
                 }
 
                 ui.add_space(4.0);
@@ -155,25 +137,7 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                 widgets::hud(ui, loc.rules_empty_title, t.muted);
                 ui.add_space(12.0);
                 if widgets::button(ui, loc.rules_btn_create_first, Kind::Secondary, 0.0).clicked() {
-                    state.selected_rule_id = None;
-                    state.is_creating_new_rule = true;
-                    state.editing_rule = Some(Rule {
-                        id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-                        name: loc.rules_default_new_name.into(),
-                        description: String::new(),
-                        is_enabled: true,
-                        cooldown_seconds: 0.0,
-                        trigger: Some(crate::models::Trigger::Process {
-                            process_name: "notepad.exe".into(),
-                            match_mode: crate::models::ProcessMatchMode::Exact,
-                            single_instance: false,
-                        }),
-                        actions: Vec::new(),
-                        on_exit_actions: Vec::new(),
-                        execution_count: 0,
-                        custom_icon_path: None,
-                        auto_process_icon: false,
-                    });
+                    state.start_new_rule();
                 }
             });
             return;
@@ -292,9 +256,7 @@ fn render_rule_card(
                                     .on_hover_text(loc.rules_btn_edit_tip)
                                     .clicked()
                                 {
-                                    state.selected_rule_id = Some(rule.id.clone());
-                                    state.editing_rule = Some(rule.clone());
-                                    state.is_creating_new_rule = false;
+                                    state.edit_rule(rule.clone());
                                 }
 
                                 // Clone
@@ -361,15 +323,13 @@ fn render_rule_card(
                         icon_rect.center(),
                         egui::Align2::CENTER_CENTER,
                         glyph,
-                        egui::FontId::proportional(15.0),
+                        egui::FontId::new(15.0, theme::phosphor()),
                         t.ink_strong,
                     );
                 }
 
                 if icon_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
-                    state.selected_rule_id = Some(rule.id.clone());
-                    state.editing_rule = Some(rule.clone());
-                    state.is_creating_new_rule = false;
+                    state.edit_rule(rule.clone());
                 }
 
                 if has_desc {
@@ -385,9 +345,7 @@ fn render_rule_card(
                             ).sense(egui::Sense::click())
                         );
                         if title_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
-                            state.selected_rule_id = Some(rule.id.clone());
-                            state.editing_rule = Some(rule.clone());
-                            state.is_creating_new_rule = false;
+                            state.edit_rule(rule.clone());
                         }
 
                         ui.label(
@@ -414,9 +372,7 @@ fn render_rule_card(
                     widgets::paint_left(ui, title_rect, galley, t.ink_strong);
                     let title_resp = title_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
                     if title_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
-                        state.selected_rule_id = Some(rule.id.clone());
-                        state.editing_rule = Some(rule.clone());
-                        state.is_creating_new_rule = false;
+                        state.edit_rule(rule.clone());
                     }
                 }
             });
@@ -439,6 +395,14 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
         Action::Cmd { .. } => "CMD".to_string(),
         Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
         Action::Sound { .. } => "SOUND".to_string(),
+        Action::Microphone { action_type, volume_level } => {
+            match action_type {
+                MicrophoneActionType::Mute => format!("{} MIC", loc.summary_action_mute),
+                MicrophoneActionType::Unmute => format!("{} MIC", loc.summary_action_unmute),
+                MicrophoneActionType::ToggleMute => format!("{} MIC", loc.summary_action_toggle),
+                MicrophoneActionType::SetVolume => format!("{} {}% MIC", loc.summary_action_vol, volume_level),
+            }
+        }
         Action::ProcessAudio { process_name, action_type, volume_level } => {
             match action_type {
                 ProcessAudioActionType::Mute => format!("{} {}", loc.summary_action_mute, process_name),

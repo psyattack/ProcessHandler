@@ -10,7 +10,7 @@ use crate::gui::components::widgets::{self, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
 use crate::models::{
-    Action, ProcessAudioActionType, ProcessMatchMode, ProcessSnapshotItem, Rule, ScheduleType, SoundActionType,
+    Action, MicrophoneActionType, ProcessAudioActionType, ProcessMatchMode, ProcessSnapshotItem, Rule, ScheduleType, SoundActionType,
     SystemEventType, SystemPowerType, Trigger,
 };
 use chrono::{Datelike, Timelike};
@@ -22,9 +22,8 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
 
     // Handle Esc key to close inspector (only if script canvas is NOT open)
     if is_open && state.expanded_script_editor.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        state.editing_rule = None;
+        state.close_editor();
         state.selected_process = None;
-        state.is_creating_new_rule = false;
     }
 
     let k = ctx.animate_bool_with_time_and_easing(Id::new("inspector-slide"), is_open, 0.22, easing::cubic_out);
@@ -51,9 +50,8 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
                 let (rect, resp) = ui.allocate_exact_size(scrim_size, Sense::click());
                 ui.painter().rect_filled(rect, CornerRadius::ZERO, theme::scrim(&t, k));
                 if resp.on_hover_cursor(egui::CursorIcon::Default).clicked() {
-                    state.editing_rule = None;
+                    state.close_editor();
                     state.selected_process = None;
-                    state.is_creating_new_rule = false;
                 }
             });
     }
@@ -79,6 +77,7 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
             // 1. Fixed Top Header Strip (anchored, spans full drawer width, never jumps)
             let mut close_editor = false;
             let mut close_process = false;
+            let mut reset_builder = false;
 
             if let Some(rule) = &state.editing_rule {
                 let rule_name = rule.name.clone();
@@ -114,6 +113,12 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if widgets::glyph_button(ui, Glyph::Close, loc.inspector_btn_close_tip).clicked() {
                                     close_editor = true;
+                                }
+                                if state.is_creating_new_rule {
+                                    ui.add_space(4.0);
+                                    if widgets::glyph_button(ui, Glyph::Reset, loc.inspector_btn_reset_tip).clicked() {
+                                        reset_builder = true;
+                                    }
                                 }
                             });
                         });
@@ -159,9 +164,11 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
                     });
             }
 
+            if reset_builder {
+                state.reset_builder_state();
+            }
             if close_editor {
-                state.editing_rule = None;
-                state.is_creating_new_rule = false;
+                state.close_editor();
             }
             if close_process {
                 state.selected_process = None;
@@ -276,7 +283,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                         icon_rect.center(),
                         egui::Align2::CENTER_CENTER,
                         glyph,
-                        egui::FontId::proportional(18.0),
+                        egui::FontId::new(18.0, theme::phosphor()),
                         t.ink_strong,
                     );
                 }
@@ -318,11 +325,11 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                             }
                         }
                     });
-
-                    ui.checkbox(&mut rule.auto_process_icon, loc.inspector_icon_auto_process)
-                        .on_hover_text(loc.inspector_icon_auto_process_tip);
                 });
             });
+
+            ui.checkbox(&mut rule.auto_process_icon, loc.inspector_icon_auto_process)
+                .on_hover_text(loc.inspector_icon_auto_process_tip);
 
             widgets::hrule(ui);
 
@@ -383,6 +390,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                     Trigger::Process { process_name, match_mode, single_instance } => {
                         is_process_trigger = true;
 
+                        ui.add_space(8.0);
                         widgets::hud(ui, loc.inspector_field_target_process, t.muted);
                         ui.horizontal(|ui| {
                             ui.set_width(ui.available_width());
@@ -413,6 +421,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                         });
                     }
                     Trigger::SystemEvent { event_type, idle_duration_sec, .. } => {
+                        ui.add_space(8.0);
                         widgets::hud(ui, loc.inspector_field_sys_event_type, t.muted);
                         let events = [
                             (SystemEventType::SessionLock, loc.inspector_sys_event_lock),
@@ -518,8 +527,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                 }
 
                 if widgets::button(ui, loc.inspector_btn_cancel, Kind::Secondary, 0.0).clicked() {
-                    state.editing_rule = None;
-                    state.is_creating_new_rule = false;
+                    state.close_editor();
                 }
             });
         });
@@ -527,75 +535,107 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 }
 
 fn render_add_action_button(ui: &mut Ui, loc: &crate::i18n::Strings, actions: &mut Vec<Action>, combo_id: &str, label: &str) {
+    let filter_id = ui.id().with(combo_id).with("action_search");
+    let mut filter_text: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
+
+    let options: [(&'static str, fn() -> Action); 11] = [
+        (loc.inspector_menu_launch_process, || Action::StartProcess {
+            file_path: String::new(),
+            arguments: String::new(),
+            working_directory: None,
+            run_as_admin: false,
+            only_if_not_running: false,
+            run_hidden: false,
+            close_on_exit: false,
+        }),
+        (loc.inspector_menu_kill_process, || Action::KillProcess {
+            process_name: "target.exe".into(),
+            kill_tree: true,
+            force: true,
+        }),
+        (loc.inspector_menu_powershell, || Action::PowerShell {
+            script: "Write-Output 'ProcessHandler'".into(),
+            run_in_window: false,
+        }),
+        (loc.inspector_menu_cmd, || Action::Cmd {
+            command: "echo ProcessHandler".into(),
+            run_in_window: false,
+        }),
+        (loc.inspector_menu_notification, || Action::Notification {
+            title: "ProcessHandler Alert".into(),
+            message: "Process event triggered".into(),
+        }),
+        (loc.inspector_menu_sound, || Action::Sound {
+            sound_type: SoundActionType::PlayBeep,
+            volume_level: 50,
+        }),
+        (loc.inspector_menu_microphone, || Action::Microphone {
+            action_type: MicrophoneActionType::ToggleMute,
+            volume_level: 100,
+        }),
+        (loc.inspector_menu_process_audio, || Action::ProcessAudio {
+            process_name: "notepad.exe".into(),
+            action_type: ProcessAudioActionType::Mute,
+            volume_level: 100,
+        }),
+        (loc.inspector_menu_system_power, || Action::SystemPower {
+            power_type: SystemPowerType::Lock,
+        }),
+        (loc.inspector_menu_delay, || Action::Delay { seconds: 1.0 }),
+        (loc.inspector_menu_webhook, || Action::HttpWebhook {
+            url: "http://localhost:8080/hook".into(),
+            method: "POST".into(),
+            headers: None,
+            payload: None,
+        }),
+    ];
+
     egui::ComboBox::from_id_salt(combo_id)
         .selected_text(label)
         .width(240.0)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show_ui(ui, |ui| {
-            if ui.button(loc.inspector_menu_launch_process).clicked() {
-                actions.push(Action::StartProcess {
-                    file_path: String::new(),
-                    arguments: String::new(),
-                    working_directory: None,
-                    run_as_admin: false,
-                    only_if_not_running: false,
-                    run_hidden: false,
-                    close_on_exit: false,
+            ui.set_max_height(320.0);
+            ui.set_min_width(240.0);
+
+            ui.horizontal(|ui| {
+                ui.label("🔍");
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut filter_text)
+                        .hint_text(loc.inspector_search_action_hint)
+                        .desired_width(180.0),
+                );
+                if resp.changed() {
+                    ui.data_mut(|d| d.insert_temp(filter_id, filter_text.clone()));
+                }
+            });
+
+            ui.separator();
+
+            egui::ScrollArea::vertical()
+                .max_height(260.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let search_lower = filter_text.to_lowercase();
+                    let mut count = 0;
+                    for (opt_label, make_action) in options {
+                        if !search_lower.is_empty() && !opt_label.to_lowercase().contains(&search_lower) {
+                            continue;
+                        }
+                        count += 1;
+                        if ui.selectable_label(false, opt_label).clicked() {
+                            actions.push(make_action());
+                            ui.close();
+                        }
+                    }
+                    if count == 0 {
+                        ui.label(
+                            egui::RichText::new(loc.inspector_no_matching_actions)
+                                .italics()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
                 });
-            }
-            if ui.button(loc.inspector_menu_kill_process).clicked() {
-                actions.push(Action::KillProcess {
-                    process_name: "target.exe".into(),
-                    kill_tree: true,
-                    force: true,
-                });
-            }
-            if ui.button(loc.inspector_menu_powershell).clicked() {
-                actions.push(Action::PowerShell {
-                    script: "Write-Output 'ProcessHandler'".into(),
-                    run_in_window: false,
-                });
-            }
-            if ui.button(loc.inspector_menu_cmd).clicked() {
-                actions.push(Action::Cmd {
-                    command: "echo ProcessHandler".into(),
-                    run_in_window: false,
-                });
-            }
-            if ui.button(loc.inspector_menu_notification).clicked() {
-                actions.push(Action::Notification {
-                    title: "ProcessHandler Alert".into(),
-                    message: "Process event triggered".into(),
-                });
-            }
-            if ui.button(loc.inspector_menu_sound).clicked() {
-                actions.push(Action::Sound {
-                    sound_type: SoundActionType::PlayBeep,
-                    volume_level: 50,
-                });
-            }
-            if ui.button(loc.inspector_menu_process_audio).clicked() {
-                actions.push(Action::ProcessAudio {
-                    process_name: "notepad.exe".into(),
-                    action_type: ProcessAudioActionType::Mute,
-                    volume_level: 100,
-                });
-            }
-            if ui.button(loc.inspector_menu_system_power).clicked() {
-                actions.push(Action::SystemPower {
-                    power_type: SystemPowerType::Lock,
-                });
-            }
-            if ui.button(loc.inspector_menu_delay).clicked() {
-                actions.push(Action::Delay { seconds: 1.0 });
-            }
-            if ui.button(loc.inspector_menu_webhook).clicked() {
-                actions.push(Action::HttpWebhook {
-                    url: "http://localhost:8080/hook".into(),
-                    method: "POST".into(),
-                    headers: None,
-                    payload: None,
-                });
-            }
         });
 }
 
@@ -620,6 +660,7 @@ fn action_type_badge(action: &Action, loc: &crate::i18n::Strings) -> &'static st
         Action::Cmd { .. } => loc.inspector_badge_cmd,
         Action::Notification { .. } => loc.inspector_badge_notification,
         Action::Sound { .. } => loc.inspector_badge_audio_volume,
+        Action::Microphone { .. } => loc.inspector_badge_microphone,
         Action::ProcessAudio { .. } => loc.inspector_badge_process_audio,
         Action::SystemPower { .. } => loc.inspector_badge_system_power,
         Action::Delay { .. } => loc.inspector_badge_delay,
@@ -670,6 +711,12 @@ fn action_summary_preview(action: &Action) -> String {
             SoundActionType::Unmute => "Unmute Master Audio".into(),
             SoundActionType::ToggleMute => "Toggle Master Mute".into(),
             SoundActionType::SetVolume => format!("Master Volume {}%", volume_level),
+        },
+        Action::Microphone { action_type, volume_level } => match action_type {
+            MicrophoneActionType::Mute => "Mute Microphone".into(),
+            MicrophoneActionType::Unmute => "Unmute Microphone".into(),
+            MicrophoneActionType::ToggleMute => "Toggle Microphone Mute".into(),
+            MicrophoneActionType::SetVolume => format!("Microphone Volume {}%", volume_level),
         },
         Action::ProcessAudio {
             process_name,
@@ -1333,6 +1380,22 @@ fn render_action_card(
                         }
                     }
 
+                    Action::Microphone { action_type, volume_level } => {
+                        widgets::hud(ui, loc.inspector_field_mic_action_type, t.muted);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.radio_value(action_type, MicrophoneActionType::Mute, loc.inspector_audio_mute);
+                            ui.radio_value(action_type, MicrophoneActionType::Unmute, loc.inspector_audio_unmute);
+                            ui.radio_value(action_type, MicrophoneActionType::ToggleMute, loc.inspector_audio_toggle_mute);
+                            ui.radio_value(action_type, MicrophoneActionType::SetVolume, loc.inspector_audio_set_volume);
+                        });
+                        if *action_type == MicrophoneActionType::SetVolume {
+                            ui.horizontal_wrapped(|ui| {
+                                widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
+                                ui.add(egui::Slider::new(volume_level, 0..=100).text("%"));
+                            });
+                        }
+                    }
+
                     Action::ProcessAudio {
                         process_name,
                         action_type,
@@ -1737,21 +1800,21 @@ fn render_datetime_picker(
             egui::DragValue::new(&mut sel_hour)
                 .range(0..=23)
                 .speed(0.1)
-                .custom_formatter(|n, _| format!("{:02}", n as u32)),
+                .suffix(" h"),
         ).changed();
         ui.label(":");
         let m_ch = ui.add(
             egui::DragValue::new(&mut sel_min)
                 .range(0..=59)
                 .speed(0.1)
-                .custom_formatter(|n, _| format!("{:02}", n as u32)),
+                .suffix(" m"),
         ).changed();
         ui.label(":");
         let s_ch = ui.add(
             egui::DragValue::new(&mut sel_sec)
                 .range(0..=59)
                 .speed(0.1)
-                .custom_formatter(|n, _| format!("{:02}", n as u32)),
+                .suffix(" s"),
         ).changed();
 
         if h_ch || m_ch || s_ch {
@@ -1854,25 +1917,20 @@ fn render_schedule_trigger(
             let mut secs = s % 60;
 
             ui.horizontal_wrapped(|ui| {
-                ui.label(egui::RichText::new(loc.inspector_interval_hours).monospace().size(12.0).color(t.ink));
                 let h_ch = ui.add(
                     egui::DragValue::new(&mut hours)
                         .range(0..=999_999)
                         .speed(0.2)
                         .suffix(" h"),
                 ).changed();
-
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new(loc.inspector_interval_minutes).monospace().size(12.0).color(t.ink));
+                ui.label(":");
                 let m_ch = ui.add(
                     egui::DragValue::new(&mut mins)
                         .range(0..=59)
                         .speed(0.2)
                         .suffix(" m"),
                 ).changed();
-
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new(loc.inspector_interval_seconds).monospace().size(12.0).color(t.ink));
+                ui.label(":");
                 let s_ch = ui.add(
                     egui::DragValue::new(&mut secs)
                         .range(0..=59)
@@ -1908,47 +1966,6 @@ fn render_schedule_trigger(
         }
 
         ScheduleType::Daily => {
-            if daily_time.is_none() {
-                *daily_time = Some("12:00:00".into());
-            }
-
-            let cur_str = daily_time.as_deref().unwrap_or("12:00:00");
-            let (mut hour, mut min, mut sec) = {
-                let parts: Vec<&str> = cur_str.split(':').collect();
-                let h = parts.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(12);
-                let m = parts.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-                let s = parts.get(2).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-                (h, m, s)
-            };
-
-            widgets::hud(ui, loc.inspector_daily_execution_time, t.muted);
-            ui.horizontal_wrapped(|ui| {
-                let h_ch = ui.add(
-                    egui::DragValue::new(&mut hour)
-                        .range(0..=23)
-                        .speed(0.1)
-                        .custom_formatter(|n, _| format!("{:02}", n as u32)),
-                ).changed();
-                ui.label(":");
-                let m_ch = ui.add(
-                    egui::DragValue::new(&mut min)
-                        .range(0..=59)
-                        .speed(0.1)
-                        .custom_formatter(|n, _| format!("{:02}", n as u32)),
-                ).changed();
-                ui.label(":");
-                let s_ch = ui.add(
-                    egui::DragValue::new(&mut sec)
-                        .range(0..=59)
-                        .speed(0.1)
-                        .custom_formatter(|n, _| format!("{:02}", n as u32)),
-                ).changed();
-
-                if h_ch || m_ch || s_ch {
-                    *daily_time = Some(format!("{:02}:{:02}:{:02}", hour, min, sec));
-                }
-            });
-
             widgets::hud(ui, loc.inspector_active_days_of_week, t.muted);
             let dow_names = [
                 (1, loc.inspector_dow_mon),
@@ -1979,6 +1996,49 @@ fn render_schedule_trigger(
                 let all_active = days_of_week.is_empty() || days_of_week.len() == 7;
                 if widgets::button(ui, loc.inspector_btn_all_days, if all_active { Kind::Primary } else { Kind::Secondary }, 0.0).clicked() {
                     days_of_week.clear();
+                }
+            });
+
+            ui.add_space(4.0);
+
+            if daily_time.is_none() {
+                *daily_time = Some("12:00:00".into());
+            }
+
+            let cur_str = daily_time.as_deref().unwrap_or("12:00:00");
+            let (mut hour, mut min, mut sec) = {
+                let parts: Vec<&str> = cur_str.split(':').collect();
+                let h = parts.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(12);
+                let m = parts.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                let s = parts.get(2).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                (h, m, s)
+            };
+
+            widgets::hud(ui, loc.inspector_daily_execution_time, t.muted);
+            ui.horizontal_wrapped(|ui| {
+                let h_ch = ui.add(
+                    egui::DragValue::new(&mut hour)
+                        .range(0..=23)
+                        .speed(0.1)
+                        .suffix(" h"),
+                ).changed();
+                ui.label(":");
+                let m_ch = ui.add(
+                    egui::DragValue::new(&mut min)
+                        .range(0..=59)
+                        .speed(0.1)
+                        .suffix(" m"),
+                ).changed();
+                ui.label(":");
+                let s_ch = ui.add(
+                    egui::DragValue::new(&mut sec)
+                        .range(0..=59)
+                        .speed(0.1)
+                        .suffix(" s"),
+                ).changed();
+
+                if h_ch || m_ch || s_ch {
+                    *daily_time = Some(format!("{:02}:{:02}:{:02}", hour, min, sec));
                 }
             });
         }

@@ -46,6 +46,7 @@ pub struct GuiState {
     pub selected_rule_id: Option<String>,
     pub is_creating_new_rule: bool,
     pub editing_rule: Option<Rule>,
+    pub builder_draft: Option<Rule>,
     pub expanded_script_editor: Option<ExpandedScriptEditorState>,
     pub last_script_editor: Option<ExpandedScriptEditorState>,
     pub language: crate::i18n::Language,
@@ -79,6 +80,7 @@ impl GuiState {
             selected_rule_id: None,
             is_creating_new_rule: false,
             editing_rule: None,
+            builder_draft: None,
             expanded_script_editor: None,
             last_script_editor: None,
             language: config.language,
@@ -269,10 +271,66 @@ impl GuiState {
     }
 
 
+    pub fn initial_new_rule(&self) -> Rule {
+        Rule {
+            id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
+            name: self.loc().rules_default_new_name.into(),
+            description: String::new(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: Some(crate::models::Trigger::Process {
+                process_name: "notepad.exe".into(),
+                match_mode: crate::models::ProcessMatchMode::Exact,
+                single_instance: false,
+            }),
+            actions: Vec::new(),
+            on_exit_actions: Vec::new(),
+            execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
+        }
+    }
+
+    pub fn start_new_rule(&mut self) {
+        self.selected_rule_id = None;
+        self.selected_process = None;
+        self.is_creating_new_rule = true;
+        let rule = self.builder_draft.take().unwrap_or_else(|| self.initial_new_rule());
+        self.editing_rule = Some(rule);
+    }
+
+    pub fn reset_builder_state(&mut self) {
+        self.builder_draft = None;
+        if self.is_creating_new_rule {
+            self.editing_rule = Some(self.initial_new_rule());
+        }
+    }
+
+    pub fn close_editor(&mut self) {
+        if self.is_creating_new_rule {
+            self.builder_draft = self.editing_rule.take();
+        } else {
+            self.editing_rule = None;
+        }
+        self.is_creating_new_rule = false;
+        self.selected_rule_id = None;
+    }
+
+    pub fn edit_rule(&mut self, rule: Rule) {
+        if self.is_creating_new_rule {
+            self.builder_draft = self.editing_rule.take();
+        }
+        self.selected_rule_id = Some(rule.id.clone());
+        self.editing_rule = Some(rule);
+        self.is_creating_new_rule = false;
+        self.selected_process = None;
+    }
+
     pub fn save_rule(&mut self, rule: Rule) {
         let _ = IpcClient::call(&IpcRequest::SaveRule(rule));
         self.editing_rule = None;
         self.is_creating_new_rule = false;
+        self.builder_draft = None;
         self.set_toast(self.loc().toast_rule_saved);
         self.sync_with_daemon();
     }

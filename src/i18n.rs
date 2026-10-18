@@ -246,6 +246,7 @@ pub struct Strings {
     pub inspector_btn_clone: &'static str,
     pub inspector_btn_clone_tip: &'static str,
     pub inspector_btn_cancel: &'static str,
+    pub inspector_btn_reset_tip: &'static str,
 
     // Inspector Action Dropdown Menu Options
     pub inspector_menu_launch_process: &'static str,
@@ -254,10 +255,13 @@ pub struct Strings {
     pub inspector_menu_cmd: &'static str,
     pub inspector_menu_notification: &'static str,
     pub inspector_menu_sound: &'static str,
+    pub inspector_menu_microphone: &'static str,
     pub inspector_menu_process_audio: &'static str,
     pub inspector_menu_system_power: &'static str,
     pub inspector_menu_delay: &'static str,
     pub inspector_menu_webhook: &'static str,
+    pub inspector_search_action_hint: &'static str,
+    pub inspector_no_matching_actions: &'static str,
 
     // Inspector Action Cards & Badges
     pub inspector_tip_drag_step: &'static str,
@@ -273,6 +277,7 @@ pub struct Strings {
     pub inspector_badge_cmd: &'static str,
     pub inspector_badge_notification: &'static str,
     pub inspector_badge_audio_volume: &'static str,
+    pub inspector_badge_microphone: &'static str,
     pub inspector_badge_process_audio: &'static str,
     pub inspector_badge_system_power: &'static str,
     pub inspector_badge_delay: &'static str,
@@ -308,6 +313,7 @@ pub struct Strings {
     pub inspector_audio_toggle_mute: &'static str,
     pub inspector_audio_set_volume: &'static str,
     pub inspector_field_volume_level: &'static str,
+    pub inspector_field_mic_action_type: &'static str,
     pub inspector_field_process_audio_action: &'static str,
     pub inspector_field_power_action: &'static str,
     pub inspector_power_lock: &'static str,

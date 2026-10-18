@@ -229,6 +229,7 @@ pub static STRINGS: Strings = Strings {
     inspector_btn_clone: "КЛОНИРОВАТЬ",
     inspector_btn_clone_tip: "Дублировать это правило с новым ID",
     inspector_btn_cancel: "ОТМЕНА",
+    inspector_btn_reset_tip: "Сбросить состояние билдера",
 
     // Inspector Action Dropdown Menu Options
     inspector_menu_launch_process: "Запуск процесса",
@@ -237,10 +238,13 @@ pub static STRINGS: Strings = Strings {
     inspector_menu_cmd: "Командная строка (CMD)",
     inspector_menu_notification: "Всплывающее уведомление",
     inspector_menu_sound: "Звук / Громкость",
+    inspector_menu_microphone: "Управление микрофоном",
     inspector_menu_process_audio: "Аудио процесса (Глушение/Громкость)",
     inspector_menu_system_power: "Управление питанием / Блокировка",
     inspector_menu_delay: "Задержка (пауза)",
     inspector_menu_webhook: "HTTP Webhook",
+    inspector_search_action_hint: "Поиск действия...",
+    inspector_no_matching_actions: "Подходящих действий не найдено",
 
     // Inspector Action Cards & Badges
     inspector_tip_drag_step: "Потяните для изменения порядка шагов",
@@ -256,6 +260,7 @@ pub static STRINGS: Strings = Strings {
     inspector_badge_cmd: "CMD",
     inspector_badge_notification: "УВЕДОМЛЕНИЕ",
     inspector_badge_audio_volume: "АУДИО / ГРОМКОСТЬ",
+    inspector_badge_microphone: "МИКРОФОН",
     inspector_badge_process_audio: "АУДИО ПРОЦЕССА",
     inspector_badge_system_power: "ПИТАНИЕ СИСТЕМЫ",
     inspector_badge_delay: "ЗАДЕРЖКА",
@@ -291,6 +296,7 @@ pub static STRINGS: Strings = Strings {
     inspector_audio_toggle_mute: "Переключить звук",
     inspector_audio_set_volume: "Задать громкость",
     inspector_field_volume_level: "УРОВЕНЬ ГРОМКОСТИ:",
+    inspector_field_mic_action_type: "ДЕЙСТВИЕ С МИКРОФОНОМ:",
     inspector_field_process_audio_action: "ДЕЙСТВИЕ С АУДИО ПРОЦЕССА:",
     inspector_field_power_action: "ДЕЙСТВИЕ С ПИТАНИЕМ:",
     inspector_power_lock: "Блокировка экрана",

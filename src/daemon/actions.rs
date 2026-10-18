@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::process::Command;
-use crate::models::{Action, ProcessAudioActionType, SoundActionType, SystemPowerType};
+use crate::models::{Action, MicrophoneActionType, ProcessAudioActionType, SoundActionType, SystemPowerType};
 
 #[cfg(windows)]
 use windows::Win32::System::Shutdown::LockWorkStation;
@@ -221,6 +221,16 @@ impl ActionRunner {
                 Ok(())
             }
 
+            Action::Microphone { action_type, volume_level } => {
+                #[cfg(windows)]
+                {
+                    if let Err(e) = set_microphone_volume_or_mute(*action_type, *volume_level) {
+                        eprintln!("Microphone action error: {e}");
+                    }
+                }
+                Ok(())
+            }
+
             Action::SystemPower { power_type } => {
                 match power_type {
                     SystemPowerType::Lock => {
@@ -351,6 +361,60 @@ fn set_audio_volume_or_mute(sound_type: SoundActionType, volume_level: u8) -> Re
                         .map_err(|e| format!("SetMasterVolumeLevelScalar failed: {e}"))?;
                 }
                 SoundActionType::PlayBeep => {}
+            }
+            Ok(())
+        })();
+
+        if must_uninit {
+            CoUninitialize();
+        }
+
+        res
+    }
+}
+
+#[cfg(windows)]
+fn set_microphone_volume_or_mute(action_type: MicrophoneActionType, volume_level: u8) -> Result<(), String> {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::Media::Audio::{eCapture, eCommunications, eConsole, eMultimedia, IMMDeviceEnumerator, MMDeviceEnumerator};
+    use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+
+    unsafe {
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let must_uninit = hr.is_ok();
+
+        let res = (|| -> Result<(), String> {
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| format!("CoCreateInstance MMDeviceEnumerator failed: {e}"))?;
+
+            let device = enumerator.GetDefaultAudioEndpoint(eCapture, eConsole)
+                .or_else(|_| enumerator.GetDefaultAudioEndpoint(eCapture, eCommunications))
+                .or_else(|_| enumerator.GetDefaultAudioEndpoint(eCapture, eMultimedia))
+                .map_err(|e| format!("GetDefaultAudioEndpoint (eCapture) failed: {e}"))?;
+
+            let endpoint_volume: IAudioEndpointVolume = device.Activate(CLSCTX_ALL, None)
+                .map_err(|e| format!("Activate IAudioEndpointVolume failed: {e}"))?;
+
+            match action_type {
+                MicrophoneActionType::Mute => {
+                    endpoint_volume.SetMute(true, std::ptr::null())
+                        .map_err(|e| format!("SetMute failed: {e}"))?;
+                }
+                MicrophoneActionType::Unmute => {
+                    endpoint_volume.SetMute(false, std::ptr::null())
+                        .map_err(|e| format!("SetMute failed: {e}"))?;
+                }
+                MicrophoneActionType::ToggleMute => {
+                    let current = endpoint_volume.GetMute()
+                        .map_err(|e| format!("GetMute failed: {e}"))?;
+                    endpoint_volume.SetMute(!current.as_bool(), std::ptr::null())
+                        .map_err(|e| format!("SetMute failed: {e}"))?;
+                }
+                MicrophoneActionType::SetVolume => {
+                    let scalar = (volume_level.min(100) as f32) / 100.0;
+                    endpoint_volume.SetMasterVolumeLevelScalar(scalar, std::ptr::null())
+                        .map_err(|e| format!("SetMasterVolumeLevelScalar failed: {e}"))?;
+                }
             }
             Ok(())
         })();

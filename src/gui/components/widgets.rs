@@ -426,9 +426,10 @@ pub enum Glyph {
     Clone,
     Expand,
     More,
+    Reset,
 }
 
-/// Small outlined square button with a drawn glyph (X, Clone, Expand, More); inverts on hover.
+/// Small outlined square button with a drawn glyph (X, Clone, Expand, More, Reset); inverts on hover.
 pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
     glyph_button_active(ui, glyph, false, tip)
 }
@@ -475,6 +476,15 @@ pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -
             p.circle_filled(m + vec2(0.0, -4.5), r, c);
             p.circle_filled(m, r, c);
             p.circle_filled(m + vec2(0.0, 4.5), r, c);
+        }
+        Glyph::Reset => {
+            p.text(
+                m,
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE,
+                egui::FontId::new(15.0, theme::phosphor()),
+                c,
+            );
         }
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));

@@ -134,6 +134,12 @@ pub enum Action {
         #[serde(default)]
         volume_level: u8, // 0..100
     },
+    #[serde(rename = "microphone")]
+    Microphone {
+        action_type: MicrophoneActionType,
+        #[serde(default)]
+        volume_level: u8, // 0..100
+    },
     #[serde(rename = "process_audio")]
     ProcessAudio {
         process_name: String,
@@ -153,6 +159,16 @@ pub enum Action {
 
 fn default_http_method() -> String {
     "POST".to_string()
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MicrophoneActionType {
+    #[default]
+    Mute,
+    Unmute,
+    ToggleMute,
+    SetVolume,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -239,6 +255,7 @@ impl Rule {
                 Action::Cmd { .. } => egui_phosphor::regular::TERMINAL_WINDOW,
                 Action::Notification { .. } => egui_phosphor::regular::BELL,
                 Action::Sound { .. } => egui_phosphor::regular::SPEAKER_HIGH,
+                Action::Microphone { .. } => egui_phosphor::regular::MICROPHONE,
                 Action::ProcessAudio { .. } => egui_phosphor::regular::FADERS,
                 Action::SystemPower { .. } => egui_phosphor::regular::POWER,
                 Action::Delay { .. } => egui_phosphor::regular::HOURGLASS,
@@ -393,6 +410,12 @@ mod tests {
 
         rule.actions = vec![Action::Delay { seconds: 5.0 }];
         assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::HOURGLASS);
+
+        rule.actions = vec![Action::Microphone {
+            action_type: MicrophoneActionType::Mute,
+            volume_level: 100,
+        }];
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::MICROPHONE);
 
         // Trigger icons when actions empty
         rule.actions.clear();
