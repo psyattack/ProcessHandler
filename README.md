@@ -22,6 +22,11 @@
 
 Whether you need to boost game performance by binding companion utilities, safeguard your PC from rogue memory leaks, or automate daily workflow scripts, ProcessHandler delivers full control with near-zero resource utilization (<0.1% CPU, ~2MB RAM).
 
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/aed3d00b-0900-4943-8c79-a048bfdadedc" width="49%"> <img src="https://github.com/user-attachments/assets/3531872c-a57b-4bfc-ba6b-943f0f4678b1" width="49%">
+  <img src="https://github.com/user-attachments/assets/50e4c8b5-88f8-425d-85c3-6d301ee51e7a" width="49%"> <img src="https://github.com/user-attachments/assets/0d0021eb-757f-42d4-9080-f2e5e604e978" width="49%">
+</div>
+
 ---
 
 ## ✨ Key Features
