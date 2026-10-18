@@ -31,83 +31,70 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 ## ✨ Key Features
 
-* **Instant process lifecycle detection** via native Windows WMI event notifications
-* **Flexible trigger & action pipeline** supporting multi-step automations with per-process audio control
-* **Live execution tracking** with real-time pipeline step highlighting and concurrency counters
-* **Portable automation sharing** via compact, compressed clipboard codes (single & batch import/export)
-* **Custom rule icon system** with automatic target process detection and Win32 icon extraction
-* **Companion process mode** with automated startup and exit cleanup
-* **Interactive process manager** with real Win32 icon extraction and metrics
-* **Modern visual studio & themes** with Dark, Light, and Chocolate palettes in English & Russian
-* **Built-in auto-updater** with GitHub release checks and changelog modal
-* **Zero-spin background daemon** sitting quietly in the system tray
+* **Instant process lifecycle detection** via native Windows WMI event notifications and low-latency snapshotting
+* **Flexible multi-action pipeline** combining process control, PowerShell/CMD scripts, webhooks, and delays
+* **Deep Windows audio control** covering per-process volume/mute, master sound, and microphone devices (WASAPI)
+* **Comprehensive trigger engine** spanning process events, scheduled timers, user idle states, and system power transitions
+* **Companion process mode** with automated lifecycle coupling and graceful exit cleanup
+* **Ultra-lightweight daemon architecture** with background tray operation (<0.1% CPU, ~2MB RAM) and named-pipe IPC
+* **Portable rule sharing** via compressed, self-contained clipboard codes (single and batch import/export)
 
 *Specifically:*
 
 <details>
 <summary><b>Process Monitoring & Detection</b></summary>
 
-- **WMI Event Subscriptions**: Subscribes directly to Windows Management Instrumentation (`__InstanceCreationEvent` and `__InstanceDeletionEvent` for `Win32_Process`) for instant, event-driven launch and termination detection.
-- **Fallback Polling Engine**: High-frequency snapshotting via `CreateToolhelp32Snapshot` for constrained environments or custom polling intervals.
-- **Win32 Icon Rasterization**: Extracts high-fidelity application icons on-the-fly (`ExtractIconExW` + GDI DIBs with 1-bit transparency mask support and proportional aspect ratio scaling) rendered directly into the UI texture cache.
+- **Event-Driven Subscriptions**: Direct Windows WMI hooks for instant process start/exit detection without CPU-heavy polling loops.
+- **Fallback Polling Engine**: High-frequency snapshotting fallback for restricted or custom environments.
+- **Native Icon Extraction**: Real-time extraction of high-resolution Win32 application icons rendered directly into the interface.
 
 </details>
 
 <details>
 <summary><b>Automation & Rules Engine</b></summary>
 
-- **Comprehensive Triggers**:
-  - *Process Lifecycle*: Target process launch, process termination, or sustained running time.
-  - *Time & Schedules*: Fixed intervals (seconds/minutes/hours), daily schedules at exact times, one-shot date/time alarms, app startup, and app shutdown.
-  - *System Events*: User idle state (custom inactivity threshold), user resume active, AC power plug-in, and battery power switch.
-- **Multi-Action Pipelines**:
-  - *Process Management*: Launch executable (custom arguments, working directory), terminate process (graceful or forced kill), restart process.
-  - *Per-Process Audio Control (WASAPI)*: Direct per-application audio session management via Windows WASAPI (`IAudioSessionManager2` & `ISimpleAudioVolume`). Mute, unmute, toggle mute, or set volume (0–100%) for specific processes or wildcards, with automatic retry polling for newly launched apps.
-  - *Master Audio & Multimedia*: Master system sound control via Windows Core Audio `IAudioEndpointVolume` (Mute, Unmute, Toggle Mute, Set Volume 0–100%) and frequency-tuned audible beeps.
-  - *System Alerts*: Native Windows balloon / toast notifications with custom title and body text.
-  - *Shell Commands & Scripts*: Execute custom PowerShell commands, CLI scripts, or batch files with dynamic parameter expansion, supported by an expandable modal editor with syntax highlighting.
-  - *Timing Delays*: Configurable pause intervals between pipeline execution steps.
-- **Rule Safeguards & Execution**:
-  - *Non-Blocking Asynchronous Engine*: Rule actions and delays execute in decoupled background Tokio tasks, ensuring heavy commands or delays never freeze the daemon or the UI.
-  - *Live Execution Tracking*: Daemon tracks active rule execution IDs, running pipeline steps, and concurrent executions (`active_count`) in real time, dynamically accelerating UI refresh rates (80ms sync intervals) during execution.
-  - *Portable Rule Sharing*: One-click sharing of individual automations or full automation libraries using compressed, self-contained base64 clipboard payloads (`PH1:` format) with automatic conflict resolution upon import.
-  - *Execution Controls*: Configurable cooldown intervals to prevent rapid re-trigger storms, execution counters, one-click rule cloning, and non-destructive pause toggles.
+- **Triggers**:
+  - *Process Lifecycle*: Target application launch, termination, or running duration (exact match, wildcards, regex).
+  - *Schedules & Alarms*: Fixed intervals, daily recurring schedules, and one-shot date/time alarms.
+  - *System & Power Events*: User idle/active state, session lock/unlock, system sleep/wake, and AC/battery power transitions.
+- **Action Pipelines**:
+  - *Process Management*: Launch applications (custom arguments, working directory, admin rights, hidden mode), terminate process trees, or restart.
+  - *Audio & Microphone Control*: Control master volume, per-application audio sessions (WASAPI mute/volume), and microphone recording endpoints.
+  - *PowerShell & CMD Scripts*: Execute custom scripts and CLI commands with an integrated syntax-highlighting editor.
+  - *Alerts & Webhooks*: Native Windows toast notifications and outbound HTTP REST webhooks (POST/GET/PUT).
+  - *Flow & System*: Screen locking and configurable pause intervals between steps.
+- **Execution & Safeguards**:
+  - Non-blocking asynchronous task execution ensuring the daemon and UI never freeze.
+  - Cooldown timers, execution counters, rule cloning, and pause toggles.
+  - One-click clipboard import/export of rules via compressed portable payloads.
 
 </details>
 
 <details>
 <summary><b>Companion Process Mode</b></summary>
 
-- **Coupled Lifecycle**: Attach one or more companion utilities to a parent application (e.g., launching fan control, overlay recorders, or audio tools alongside games).
-- **Graceful Cleanup**: Automatically executes specialized on-exit actions when the primary application closes, shutting down companion processes and reverting system states.
+- **Lifecycle Binding**: Attach companion utilities, overlays, or performance monitors to a primary game or application.
+- **Automated Cleanup**: Automatically terminates companion processes and reverts system state when the primary application closes.
 
 </details>
 
 <details>
-<summary><b>Architecture & IPC</b></summary>
+<summary><b>Architecture & System Integration</b></summary>
 
-- **Windows Named Pipes**: Reliable, bidirectional client-daemon communication over `\\.\pipe\ProcessHandler_daemon` using strongly-typed Serde JSON payloads.
-- **Single-Instance Enforcement**: Global Windows mutex prevents duplicate daemon instances; running an extra instance brings the existing GUI window to the foreground.
-- **System Tray Integration**: Unobtrusive tray icon with quick-action context menu (Open GUI, Exit), double-click activation, and dynamic language localization.
-- **Registry Autorun**: Seamless 1-click startup registration in `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
-- **Integrated Auto-Updater**: Built-in GitHub Releases checker, streaming binary downloads, and zero-downtime in-place self-replacement with automated daemon and GUI restarts.
+- **Dual-Tier Decoupled Architecture**: Lightweight background daemon (<0.1% CPU, ~2MB RAM) running continuously in the system tray, separated from the desktop GUI.
+- **Named Pipes IPC**: Fast, thread-safe local communication between interface and daemon.
+- **Tray & Startup Control**: Unobtrusive system tray icon with quick actions and one-click Windows startup registration.
+- **In-App Auto-Updater**: Built-in GitHub Releases checker with zero-downtime binary updates.
 
 </details>
 
 <details>
-<summary><b>User Interface & Design</b></summary>
+<summary><b>User Interface & Workspace</b></summary>
 
-- **Design System & Themes**: Sleek industrial aesthetic with custom typography (Archivo, Inter, GeistMono), subtle hairline borders, and three built-in color themes (**Dark**, **Light**, and **Chocolate**) with instant live switching.
-- **Full Internationalization (i18n)**: Comprehensive English and Russian localization covering all interface views, inspector controls, logs, settings, modals, and tray menus.
-- **Interactive Rule Builder**:
-  - *Animated Drag-and-Drop*: Reorder pipeline action steps smoothly with 6-dot drag handles, drop slot indicators, live previews, and viewport edge auto-scrolling.
-  - *Live Step Highlighting*: Highlights currently running actions in real time directly within both the rule card summaries and the Inspector pipeline editor.
-  - *Custom Rule Icons & Auto-Detection*: Assign custom icons (`.exe`, `.ico`, `.dll`, or image files) to rules, or enable automatic icon discovery from target processes upon initial trigger, with contextual Phosphor icon fallbacks.
-  - *Step Cloning*: One-click action step duplication directly beneath the source step.
-  - *Modal Script Editor*: Centered expandable modal for PowerShell and Batch scripts with custom syntax highlighting, live two-way sync, and backdrop dimming.
-- **Release Changelog Modal**: In-app viewer for GitHub release notes with rich Markdown/HTML formatting and 1-click update installation.
-- **Live Process Table**: Filter by application category (All, Apps, Background, Windows) and sort by Name, PID, Memory, or CPU.
-- **Execution Log Inspector**: Real-time diagnostic activity feed capturing trigger evaluations, action results, and system events.
+- **Visual Studio**: Hardware-accelerated interface with Dark, Light, and Chocolate palettes, plus full English and Russian localization.
+- **Interactive Rule Builder**: Drag-and-drop step reordering, real-time step execution highlighting, automatic target process icon detection, and builder draft preservation.
+- **Action Catalog & Process Picker**: Fast in-context modal dialogs to browse available actions and select active processes without losing editor state.
+- **Activity Feed**: Real-time diagnostic logs capturing trigger evaluations, action outputs, and system events.
 
 </details>
 
@@ -219,7 +206,7 @@ ProcessHandler/
 │   └── app.svg                       # Vector logo
 ├── src/                              # Source code
 │   ├── daemon/                       # Background daemon service
-│   │   ├── actions.rs                # Execution handlers (Process, Master Audio, Process Audio, Toast, Commands)
+│   │   ├── actions.rs                # Execution handlers (Process, Master/Mic/Process Audio, Toast, Commands)
 │   │   ├── engine.rs                 # Central automation state engine & rule evaluator
 │   │   ├── ipc_server.rs             # Named pipe listener & connection worker
 │   │   ├── system_events.rs          # Win32 idle time & AC/battery power monitor
@@ -231,11 +218,12 @@ ProcessHandler/
 │   │   │   ├── script_highlighter.rs # PowerShell & Batch syntax highlighter
 │   │   │   └── widgets.rs            # Custom canvas controls (buttons, inputs, cards, drag handles, glyphs)
 │   │   ├── views/                    # Application screens & panels
+│   │   │   ├── action_catalog_modal.rs # Studio modal for categorized action browsing & search
 │   │   │   ├── changelog_modal.rs    # GitHub release notes & changelog viewer
 │   │   │   ├── header_bar.rs         # Custom window titlebar & controls
 │   │   │   ├── inspector.rs          # Rule inspector, trigger & action editor (drag-and-drop)
 │   │   │   ├── logs_view.rs          # Real-time event & action logs
-│   │   │   ├── processes_view.rs     # Live process table with search & sorting
+│   │   │   ├── process_picker_modal.rs # In-context process picker modal with filter & sorting
 │   │   │   ├── rules_view.rs         # Rule management list & cards
 │   │   │   ├── script_modal.rs       # Expandable script editor modal
 │   │   │   └── settings_view.rs      # Balanced 2x2 settings (System, Engine, Appearance, Updates)
