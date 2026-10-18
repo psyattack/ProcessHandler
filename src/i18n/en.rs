@@ -245,6 +245,36 @@ pub static STRINGS: Strings = Strings {
     inspector_menu_webhook: "HTTP Webhook",
     inspector_search_action_hint: "Search action...",
     inspector_no_matching_actions: "No matching actions found",
+    inspector_btn_add_action_tip: "Open action library to add a new step",
+    inspector_btn_open_catalog: "OPEN ACTION LIBRARY",
+
+    // Action Catalog Modal
+    catalog_modal_eyebrow: "ACTION LIBRARY",
+    catalog_modal_title: "Select Action to Add",
+    catalog_target_start: "TARGET: MAIN PIPELINE",
+    catalog_target_exit: "TARGET: ON EXIT PIPELINE",
+    catalog_search_hint: "Search action by name, keyword, or description...",
+    catalog_cat_all: "All Actions",
+    catalog_cat_process: "Processes",
+    catalog_cat_audio: "Audio & Media",
+    catalog_cat_automation: "Automation & Web",
+    catalog_cat_system: "System & Control",
+    catalog_no_matches: "No actions found matching your query",
+    catalog_esc_hint: "ESC to close",
+    catalog_actions_count: "{} actions available",
+
+    // Action Descriptions for Catalog
+    catalog_desc_launch_process: "Launch an executable with custom arguments, admin rights, or hidden mode",
+    catalog_desc_kill_process: "Forcefully terminate a process by name, with process tree kill option",
+    catalog_desc_sound: "Adjust system master volume, mute, unmute, or play system alert beep",
+    catalog_desc_microphone: "Mute, unmute, toggle, or set default input microphone volume level",
+    catalog_desc_process_audio: "Control mute status or volume level for an individual application",
+    catalog_desc_powershell: "Execute PowerShell script commands in console or silently in background",
+    catalog_desc_cmd: "Run Windows Command Prompt commands or batch script files (.bat / .cmd)",
+    catalog_desc_notification: "Display a Windows notification toast banner with custom title and message",
+    catalog_desc_webhook: "Send HTTP request (GET/POST/PUT) with custom headers and JSON payload",
+    catalog_desc_system_power: "Lock computer, sleep, restart, shut down, or turn off monitors",
+    catalog_desc_delay: "Pause execution pipeline for a specified duration in seconds",
 
     // Inspector Action Cards & Badges
     inspector_tip_drag_step: "Drag to reorder step",

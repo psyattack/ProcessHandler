@@ -1,3 +1,4 @@
+pub mod action_catalog_modal;
 pub mod changelog_modal;
 pub mod header_bar;
 pub mod inspector;

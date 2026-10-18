@@ -34,6 +34,21 @@ pub struct ExpandedScriptEditorState {
     pub language: crate::gui::components::script_highlighter::ScriptLanguage,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessPickerTarget {
+    Trigger,
+    Action(usize),
+    ExitAction(usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionCatalogModalState {
+    pub is_exit_pipeline: bool,
+    pub insert_idx: Option<usize>,
+    pub selected_category: usize,
+    pub search_query: String,
+}
+
 pub struct GuiState {
     pub active_view: ActiveView,
     pub search_query: String,
@@ -47,8 +62,11 @@ pub struct GuiState {
     pub is_creating_new_rule: bool,
     pub editing_rule: Option<Rule>,
     pub builder_draft: Option<Rule>,
+    pub picker_target: Option<ProcessPickerTarget>,
     pub expanded_script_editor: Option<ExpandedScriptEditorState>,
     pub last_script_editor: Option<ExpandedScriptEditorState>,
+    pub action_catalog: Option<ActionCatalogModalState>,
+    pub last_action_catalog: Option<ActionCatalogModalState>,
     pub language: crate::i18n::Language,
     pub theme: crate::config::AppTheme,
     pub last_sync: Instant,
@@ -81,8 +99,11 @@ impl GuiState {
             is_creating_new_rule: false,
             editing_rule: None,
             builder_draft: None,
+            picker_target: None,
             expanded_script_editor: None,
             last_script_editor: None,
+            action_catalog: None,
+            last_action_catalog: None,
             language: config.language,
             theme: config.theme,
             last_sync: Instant::now() - std::time::Duration::from_secs(10),
@@ -140,6 +161,43 @@ impl GuiState {
 
     pub fn close_script_editor(&mut self) {
         self.expanded_script_editor = None;
+    }
+
+    pub fn open_action_catalog(&mut self, is_exit_pipeline: bool, insert_idx: Option<usize>) {
+        let catalog = ActionCatalogModalState {
+            is_exit_pipeline,
+            insert_idx,
+            selected_category: 0,
+            search_query: String::new(),
+        };
+        self.action_catalog = Some(catalog.clone());
+        self.last_action_catalog = Some(catalog);
+    }
+
+    pub fn close_action_catalog(&mut self) {
+        self.action_catalog = None;
+    }
+
+    pub fn add_action_from_catalog(
+        &mut self,
+        action: crate::models::Action,
+        is_exit_pipeline: bool,
+        insert_idx: Option<usize>,
+    ) {
+        if let Some(rule) = &mut self.editing_rule {
+            let list = if is_exit_pipeline {
+                &mut rule.on_exit_actions
+            } else {
+                &mut rule.actions
+            };
+            if let Some(idx) = insert_idx {
+                let clamped = idx.min(list.len());
+                list.insert(clamped, action);
+            } else {
+                list.push(action);
+            }
+        }
+        self.close_action_catalog();
     }
 
     pub fn set_toast(&mut self, msg: impl Into<String>) {
@@ -301,12 +359,14 @@ impl GuiState {
 
     pub fn reset_builder_state(&mut self) {
         self.builder_draft = None;
+        self.close_action_catalog();
         if self.is_creating_new_rule {
             self.editing_rule = Some(self.initial_new_rule());
         }
     }
 
     pub fn close_editor(&mut self) {
+        self.close_action_catalog();
         if self.is_creating_new_rule {
             self.builder_draft = self.editing_rule.take();
         } else {
@@ -314,6 +374,90 @@ impl GuiState {
         }
         self.is_creating_new_rule = false;
         self.selected_rule_id = None;
+        self.picker_target = None;
+    }
+
+    pub fn switch_to_hunter_from_picker(&mut self, target: ProcessPickerTarget) {
+        self.close_action_catalog();
+        if let Some(rule) = self.editing_rule.take() {
+            self.builder_draft = Some(rule);
+        }
+        self.picker_target = Some(target);
+        self.selected_process = None;
+        self.active_view = ActiveView::Processes;
+    }
+
+    pub fn apply_process_to_draft_or_new_rule(&mut self, proc_name: &str) {
+        let loc = self.loc();
+        let mut rule = if let Some(draft) = self.builder_draft.take().or_else(|| self.editing_rule.take()) {
+            draft
+        } else {
+            self.initial_new_rule()
+        };
+
+        match self.picker_target.take() {
+            Some(ProcessPickerTarget::Action(idx)) => {
+                if let Some(action) = rule.actions.get_mut(idx) {
+                    match action {
+                        crate::models::Action::KillProcess { process_name, .. } => {
+                            *process_name = proc_name.to_string();
+                        }
+                        crate::models::Action::ProcessAudio { process_name, .. } => {
+                            *process_name = proc_name.to_string();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Some(ProcessPickerTarget::ExitAction(idx)) => {
+                if let Some(action) = rule.on_exit_actions.get_mut(idx) {
+                    match action {
+                        crate::models::Action::KillProcess { process_name, .. } => {
+                            *process_name = proc_name.to_string();
+                        }
+                        crate::models::Action::ProcessAudio { process_name, .. } => {
+                            *process_name = proc_name.to_string();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Some(ProcessPickerTarget::Trigger) | None => {
+                match &mut rule.trigger {
+                    Some(crate::models::Trigger::Process { process_name, .. }) => {
+                        *process_name = proc_name.to_string();
+                    }
+                    _ => {
+                        rule.trigger = Some(crate::models::Trigger::Process {
+                            process_name: proc_name.to_string(),
+                            match_mode: crate::models::ProcessMatchMode::Exact,
+                            single_instance: false,
+                        });
+                    }
+                }
+
+                if rule.name.is_empty()
+                    || rule.name == loc.rules_default_new_name
+                    || rule.name.starts_with(loc.inspector_rule_track_prefix)
+                {
+                    rule.name = format!("{} {}", loc.inspector_rule_track_prefix, proc_name);
+                }
+            }
+        }
+
+        rule.auto_process_icon = true;
+
+        let is_new = if let Some(ds) = &self.daemon_state {
+            !ds.config.rules.iter().any(|r| r.id == rule.id)
+        } else {
+            true
+        };
+
+        self.active_view = ActiveView::Rules;
+        self.is_creating_new_rule = is_new;
+        self.selected_rule_id = if is_new { None } else { Some(rule.id.clone()) };
+        self.editing_rule = Some(rule);
+        self.selected_process = None;
     }
 
     pub fn edit_rule(&mut self, rule: Rule) {

@@ -245,6 +245,36 @@ pub static STRINGS: Strings = Strings {
     inspector_menu_webhook: "HTTP Webhook",
     inspector_search_action_hint: "Поиск действия...",
     inspector_no_matching_actions: "Подходящих действий не найдено",
+    inspector_btn_add_action_tip: "Открыть библиотеку действий для добавления нового шага",
+    inspector_btn_open_catalog: "ОТКРЫТЬ БИБЛИОТЕКУ ДЕЙСТВИЙ",
+
+    // Action Catalog Modal
+    catalog_modal_eyebrow: "БИБЛИОТЕКА ДЕЙСТВИЙ",
+    catalog_modal_title: "Выбор действия для добавления",
+    catalog_target_start: "КУДА: ОСНОВНАЯ ЦЕПОЧКА",
+    catalog_target_exit: "КУДА: ПРИ ВЫХОДЕ",
+    catalog_search_hint: "Поиск действия по имени, ключевому слову или описанию...",
+    catalog_cat_all: "Все действия",
+    catalog_cat_process: "Процессы",
+    catalog_cat_audio: "Аудио и медиа",
+    catalog_cat_automation: "Автоматизация и сеть",
+    catalog_cat_system: "Система и управление",
+    catalog_no_matches: "Действий по вашему запросу не найдено",
+    catalog_esc_hint: "ESC для закрытия",
+    catalog_actions_count: "Доступно действий: {}",
+
+    // Action Descriptions for Catalog
+    catalog_desc_launch_process: "Запуск исполняемого файла с аргументами, правами админа или в скрытом режиме",
+    catalog_desc_kill_process: "Принудительное завершение процесса по имени с возможностью закрытия дерева",
+    catalog_desc_sound: "Управление общей громкостью системы, глушение или системный звуковой сигнал",
+    catalog_desc_microphone: "Глушение, включение, переключение или регулировка громкости микрофона",
+    catalog_desc_process_audio: "Индивидуальное глушение или регулировка громкости конкретного приложения",
+    catalog_desc_powershell: "Выполнение скриптов и команд PowerShell в окне консоли или скрытно в фоне",
+    catalog_desc_cmd: "Запуск команд классической командной строки Windows (CMD) или bat-скриптов",
+    catalog_desc_notification: "Показ системного всплывающего уведомления Windows с заголовком и текстом",
+    catalog_desc_webhook: "Отправка HTTP вебхука (GET/POST/PUT) с заголовками и JSON-телом",
+    catalog_desc_system_power: "Блокировка экрана, спящий режим, перезагрузка, выключение или гашение монитора",
+    catalog_desc_delay: "Приостановка выполнения цепочки действий на заданное количество секунд",
 
     // Inspector Action Cards & Badges
     inspector_tip_drag_step: "Потяните для изменения порядка шагов",

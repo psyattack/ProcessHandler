@@ -262,6 +262,36 @@ pub struct Strings {
     pub inspector_menu_webhook: &'static str,
     pub inspector_search_action_hint: &'static str,
     pub inspector_no_matching_actions: &'static str,
+    pub inspector_btn_add_action_tip: &'static str,
+    pub inspector_btn_open_catalog: &'static str,
+
+    // Action Catalog Modal
+    pub catalog_modal_eyebrow: &'static str,
+    pub catalog_modal_title: &'static str,
+    pub catalog_target_start: &'static str,
+    pub catalog_target_exit: &'static str,
+    pub catalog_search_hint: &'static str,
+    pub catalog_cat_all: &'static str,
+    pub catalog_cat_process: &'static str,
+    pub catalog_cat_audio: &'static str,
+    pub catalog_cat_automation: &'static str,
+    pub catalog_cat_system: &'static str,
+    pub catalog_no_matches: &'static str,
+    pub catalog_esc_hint: &'static str,
+    pub catalog_actions_count: &'static str,
+
+    // Action Descriptions for Catalog
+    pub catalog_desc_launch_process: &'static str,
+    pub catalog_desc_kill_process: &'static str,
+    pub catalog_desc_sound: &'static str,
+    pub catalog_desc_microphone: &'static str,
+    pub catalog_desc_process_audio: &'static str,
+    pub catalog_desc_powershell: &'static str,
+    pub catalog_desc_cmd: &'static str,
+    pub catalog_desc_notification: &'static str,
+    pub catalog_desc_webhook: &'static str,
+    pub catalog_desc_system_power: &'static str,
+    pub catalog_desc_delay: &'static str,
 
     // Inspector Action Cards & Badges
     pub inspector_tip_drag_step: &'static str,

@@ -8,6 +8,7 @@ use egui::{Color32, CornerRadius, Stroke, Ui, vec2};
 use components::widgets;
 use state::{ActiveView, GuiState};
 use theme::{Tokens, apply_theme};
+use views::action_catalog_modal::render_action_catalog_modal;
 use views::changelog_modal::render_changelog_modal;
 use views::header_bar::render_header_bar;
 use views::inspector::render_inspector_drawer;
@@ -205,6 +206,9 @@ impl App for ProcessHandlerApp {
 
         // 4. Sliding Inspector Drawer (slides in from right with cubic easing)
         render_inspector_drawer(&ctx, &mut self.state);
+
+        // 5. Action Catalog Modal (library for selecting rule actions)
+        render_action_catalog_modal(&ctx, &mut self.state);
 
         // 5. Centered Expanded Script Canvas (modal popup for pwsh / cmd editing)
         render_script_editor_canvas(&ctx, &mut self.state);

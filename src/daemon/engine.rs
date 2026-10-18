@@ -1088,6 +1088,13 @@ mod tests {
         });
 
         let mut engine = DaemonEngine::new(config);
+        let tick_now = chrono::Local::now();
+        let tick_time_str = format!("{:02}:{:02}:{:02}", tick_now.hour(), tick_now.minute(), tick_now.second());
+        if let Some(r) = engine.config.rules.first_mut() {
+            if let Some(Trigger::Schedule { daily_time, .. }) = &mut r.trigger {
+                *daily_time = Some(tick_time_str);
+            }
+        }
         engine.tick_schedule().await;
         assert!(engine.logs.iter().any(|l| l.category == "RULE" && l.message.contains("Daily Rule")));
     }

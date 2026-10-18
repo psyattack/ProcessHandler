@@ -58,6 +58,17 @@ pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
 
         let resp = ui.interact(tab_rect, ui.id().with(view as usize), egui::Sense::click());
         if resp.clicked() {
+            if view != state.active_view {
+                if let Some(rule) = state.editing_rule.take() {
+                    state.builder_draft = Some(rule);
+                }
+                state.selected_process = None;
+                if view == ActiveView::Rules && (state.is_creating_new_rule || state.selected_rule_id.is_some()) {
+                    if let Some(draft) = state.builder_draft.take() {
+                        state.editing_rule = Some(draft);
+                    }
+                }
+            }
             state.active_view = view;
         }
         let on = state.active_view == view || resp.hovered();

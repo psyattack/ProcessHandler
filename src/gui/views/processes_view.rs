@@ -7,7 +7,7 @@ use egui_extras::{Column, TableBuilder};
 use crate::gui::components::widgets::{self, Cell, Kind};
 use crate::gui::state::{GuiState, ProcessCategoryFilter, ProcessSortColumn};
 use crate::gui::theme::{self, Tokens};
-use crate::models::{ProcessSnapshotItem, Rule, Trigger};
+use crate::models::ProcessSnapshotItem;
 
 pub fn render_processes_view(ui: &mut Ui, state: &mut GuiState) {
     let t = Tokens::get(ui.ctx());
@@ -137,25 +137,7 @@ pub fn render_processes_view(ui: &mut Ui, state: &mut GuiState) {
                                     .on_hover_text(loc.hunter_btn_rule_tip)
                                     .clicked()
                                 {
-                                    state.active_view = crate::gui::state::ActiveView::Rules;
-                                    state.is_creating_new_rule = true;
-                                    state.editing_rule = Some(Rule {
-                                        id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-                                        name: format!("{} {}", loc.inspector_rule_track_prefix, proc.name),
-                                        description: String::new(),
-                                        is_enabled: true,
-                                        cooldown_seconds: 0.0,
-                                        trigger: Some(Trigger::Process {
-                                            process_name: proc.name.clone(),
-                                            match_mode: crate::models::ProcessMatchMode::Exact,
-                                            single_instance: false,
-                                        }),
-                                        actions: Vec::new(),
-                                        on_exit_actions: Vec::new(),
-                                        execution_count: 0,
-                                        custom_icon_path: None,
-                                        auto_process_icon: true,
-                                    });
+                                    state.apply_process_to_draft_or_new_rule(&proc.name);
                                 }
                             });
                         });

@@ -20,8 +20,12 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
 
     let is_open = state.editing_rule.is_some() || state.selected_process.is_some();
 
-    // Handle Esc key to close inspector (only if script canvas is NOT open)
-    if is_open && state.expanded_script_editor.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // Handle Esc key to close inspector (only if script canvas and action catalog are NOT open)
+    if is_open
+        && state.expanded_script_editor.is_none()
+        && state.action_catalog.is_none()
+        && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+    {
         state.close_editor();
         state.selected_process = None;
     }
@@ -384,6 +388,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
             });
 
             let mut is_process_trigger = false;
+            let mut switch_trigger_to_hunter = false;
 
             if let Some(trig) = &mut rule.trigger {
                 match trig {
@@ -395,7 +400,9 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                         ui.horizontal(|ui| {
                             ui.set_width(ui.available_width());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                render_process_picker(ui, state, loc, process_name, "rule_proc_combo");
+                                if render_process_picker(ui, loc) {
+                                    switch_trigger_to_hunter = true;
+                                }
                                 ui.add(
                                     egui::TextEdit::singleline(process_name)
                                         .hint_text(loc.inspector_field_target_process_hint)
@@ -472,6 +479,11 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                 }
             }
 
+            if switch_trigger_to_hunter {
+                state.editing_rule = Some(rule.clone());
+                state.switch_to_hunter_from_picker(crate::gui::state::ProcessPickerTarget::Trigger);
+            }
+
             widgets::hrule(ui);
 
             // 2. Action Sequence Builder (Execution on trigger)
@@ -484,7 +496,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
             let exec_opt = state.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
 
-            render_actions_pipeline(
+            if let Some(idx) = render_actions_pipeline(
                 ui,
                 state,
                 &mut rule.actions,
@@ -492,14 +504,17 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                 false,
                 exec_opt,
                 t,
-            );
+            ) {
+                state.editing_rule = Some(rule.clone());
+                state.switch_to_hunter_from_picker(crate::gui::state::ProcessPickerTarget::Action(idx));
+            }
 
             // 3. Actions on Process Exit
             if is_process_trigger {
                 widgets::hrule(ui);
                 widgets::eyebrow(ui, "04", loc.inspector_eyebrow_actions_exit);
 
-                render_actions_pipeline(
+                if let Some(idx) = render_actions_pipeline(
                     ui,
                     state,
                     &mut rule.on_exit_actions,
@@ -507,7 +522,10 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                     true,
                     exec_opt,
                     t,
-                );
+                ) {
+                    state.editing_rule = Some(rule.clone());
+                    state.switch_to_hunter_from_picker(crate::gui::state::ProcessPickerTarget::ExitAction(idx));
+                }
             }
 
             widgets::hrule(ui);
@@ -534,109 +552,52 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
     });
 }
 
-fn render_add_action_button(ui: &mut Ui, loc: &crate::i18n::Strings, actions: &mut Vec<Action>, combo_id: &str, label: &str) {
-    let filter_id = ui.id().with(combo_id).with("action_search");
-    let mut filter_text: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
+fn render_add_action_button(
+    ui: &mut Ui,
+    state: &mut GuiState,
+    loc: &crate::i18n::Strings,
+    is_exit_pipeline: bool,
+    t: &Tokens,
+) {
+    ui.add_space(2.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
+    let is_hov = resp.hovered();
+    let p = ui.painter();
 
-    let options: [(&'static str, fn() -> Action); 11] = [
-        (loc.inspector_menu_launch_process, || Action::StartProcess {
-            file_path: String::new(),
-            arguments: String::new(),
-            working_directory: None,
-            run_as_admin: false,
-            only_if_not_running: false,
-            run_hidden: false,
-            close_on_exit: false,
-        }),
-        (loc.inspector_menu_kill_process, || Action::KillProcess {
-            process_name: "target.exe".into(),
-            kill_tree: true,
-            force: true,
-        }),
-        (loc.inspector_menu_powershell, || Action::PowerShell {
-            script: "Write-Output 'ProcessHandler'".into(),
-            run_in_window: false,
-        }),
-        (loc.inspector_menu_cmd, || Action::Cmd {
-            command: "echo ProcessHandler".into(),
-            run_in_window: false,
-        }),
-        (loc.inspector_menu_notification, || Action::Notification {
-            title: "ProcessHandler Alert".into(),
-            message: "Process event triggered".into(),
-        }),
-        (loc.inspector_menu_sound, || Action::Sound {
-            sound_type: SoundActionType::PlayBeep,
-            volume_level: 50,
-        }),
-        (loc.inspector_menu_microphone, || Action::Microphone {
-            action_type: MicrophoneActionType::ToggleMute,
-            volume_level: 100,
-        }),
-        (loc.inspector_menu_process_audio, || Action::ProcessAudio {
-            process_name: "notepad.exe".into(),
-            action_type: ProcessAudioActionType::Mute,
-            volume_level: 100,
-        }),
-        (loc.inspector_menu_system_power, || Action::SystemPower {
-            power_type: SystemPowerType::Lock,
-        }),
-        (loc.inspector_menu_delay, || Action::Delay { seconds: 1.0 }),
-        (loc.inspector_menu_webhook, || Action::HttpWebhook {
-            url: "http://localhost:8080/hook".into(),
-            method: "POST".into(),
-            headers: None,
-            payload: None,
-        }),
-    ];
+    let border = if is_hov {
+        Stroke::new(1.0, t.accent_ink)
+    } else {
+        Stroke::new(1.0, t.muted.gamma_multiply(0.35))
+    };
+    p.rect_stroke(rect, CornerRadius::same(2), border, egui::StrokeKind::Inside);
 
-    egui::ComboBox::from_id_salt(combo_id)
-        .selected_text(label)
-        .width(240.0)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show_ui(ui, |ui| {
-            ui.set_max_height(320.0);
-            ui.set_min_width(240.0);
+    let text_color = if is_hov { t.accent_ink } else { t.faint };
+    let plus_galley = p.layout_no_wrap(
+        egui_phosphor::regular::PLUS.to_string(),
+        egui::FontId::new(12.0, theme::phosphor()),
+        text_color,
+    );
+    let label_galley = widgets::caps(ui, loc.inspector_btn_open_catalog, 10.0, theme::mono(), 0.8, text_color);
 
-            ui.horizontal(|ui| {
-                ui.label("🔍");
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut filter_text)
-                        .hint_text(loc.inspector_search_action_hint)
-                        .desired_width(180.0),
-                );
-                if resp.changed() {
-                    ui.data_mut(|d| d.insert_temp(filter_id, filter_text.clone()));
-                }
-            });
+    let spacing = 8.0;
+    let plus_w = plus_galley.size().x;
+    let plus_h = plus_galley.size().y;
+    let total_w = plus_w + spacing + label_galley.size().x;
+    let start_x = rect.center().x - total_w * 0.5;
 
-            ui.separator();
+    let plus_pos = pos2(start_x, rect.center().y - plus_h * 0.5);
+    p.galley(plus_pos, plus_galley, text_color);
 
-            egui::ScrollArea::vertical()
-                .max_height(260.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let search_lower = filter_text.to_lowercase();
-                    let mut count = 0;
-                    for (opt_label, make_action) in options {
-                        if !search_lower.is_empty() && !opt_label.to_lowercase().contains(&search_lower) {
-                            continue;
-                        }
-                        count += 1;
-                        if ui.selectable_label(false, opt_label).clicked() {
-                            actions.push(make_action());
-                            ui.close();
-                        }
-                    }
-                    if count == 0 {
-                        ui.label(
-                            egui::RichText::new(loc.inspector_no_matching_actions)
-                                .italics()
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                    }
-                });
-        });
+    let label_pos = pos2(start_x + plus_w + spacing, rect.center().y - label_galley.size().y * 0.5);
+    p.galley_with_override_text_color(label_pos, label_galley, text_color);
+
+    let resp = resp
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(loc.inspector_btn_add_action_tip);
+
+    if resp.clicked() {
+        state.open_action_catalog(is_exit_pipeline, None);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -912,7 +873,7 @@ fn render_actions_pipeline(
     is_exit_pipeline: bool,
     exec_opt: Option<crate::ipc::protocol::ActiveRuleExecutionState>,
     t: &Tokens,
-) {
+) -> Option<usize> {
     let dnd_id = ui.id().with(("action_pipeline_dnd", pipeline_id));
 
     let mut dnd_session: Option<DndDragSession> = ui.data_mut(|d| d.get_temp(dnd_id));
@@ -968,6 +929,7 @@ fn render_actions_pipeline(
     let mut remove_idx = None;
     let mut clone_idx = None;
     let mut drag_started_idx = None;
+    let mut switch_to_hunter_idx = None;
     let mut current_centers = Vec::with_capacity(actions.len());
 
     let loc = state.loc();
@@ -1003,6 +965,9 @@ fn render_actions_pipeline(
         }
         if resp.drag_started {
             drag_started_idx = Some(idx);
+        }
+        if resp.switch_to_hunter {
+            switch_to_hunter_idx = Some(idx);
         }
     }
 
@@ -1092,11 +1057,13 @@ fn render_actions_pipeline(
     // Add action button at the bottom of the pipeline
     render_add_action_button(
         ui,
+        state,
         loc,
-        actions,
-        &format!("add_action_{}", pipeline_id),
-        loc.inspector_btn_add_action,
+        is_exit_pipeline,
+        t,
     );
+
+    switch_to_hunter_idx
 }
 
 struct ActionCardResponse {
@@ -1104,6 +1071,7 @@ struct ActionCardResponse {
     pub clone_clicked: bool,
     pub expand_script: Option<ScriptLanguage>,
     pub drag_started: bool,
+    pub switch_to_hunter: bool,
     pub card_rect: Rect,
 }
 
@@ -1122,6 +1090,7 @@ fn render_action_card(
     let mut clone_clicked = false;
     let mut expand_script = None;
     let mut drag_started = false;
+    let mut switch_to_hunter = false;
 
     let ghost_id = ui.id().with(("card_ghost", is_exit_pipeline, idx));
     let ghost_anim = ui.ctx().animate_bool_with_time_and_easing(ghost_id, is_being_dragged, 0.15, easing::cubic_out);
@@ -1282,7 +1251,9 @@ fn render_action_card(
                         ui.horizontal(|ui| {
                             ui.set_width(ui.available_width());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                render_process_picker(ui, state, loc, process_name, &format!("kill_proc_{idx}"));
+                                if render_process_picker(ui, loc) {
+                                    switch_to_hunter = true;
+                                }
                                 ui.add(
                                     egui::TextEdit::singleline(process_name)
                                         .hint_text(loc.inspector_field_terminate_hint)
@@ -1405,7 +1376,9 @@ fn render_action_card(
                         ui.horizontal(|ui| {
                             ui.set_width(ui.available_width());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                render_process_picker(ui, state, loc, process_name, &format!("audio_proc_{idx}"));
+                                if render_process_picker(ui, loc) {
+                                    switch_to_hunter = true;
+                                }
                                 ui.add(
                                     egui::TextEdit::singleline(process_name)
                                         .hint_text("e.g. notepad.exe or game.exe")
@@ -1497,6 +1470,7 @@ fn render_action_card(
         clone_clicked,
         expand_script,
         drag_started,
+        switch_to_hunter,
         card_rect: card_response.response.rect,
     }
 }
@@ -1546,25 +1520,7 @@ fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSna
             widgets::eyebrow(ui, "02", loc.inspector_eyebrow_quick_actions);
 
             if widgets::button(ui, loc.inspector_btn_create_automation, Kind::Secondary, 0.0).clicked() {
-                state.active_view = crate::gui::state::ActiveView::Rules;
-                state.is_creating_new_rule = true;
-                state.editing_rule = Some(Rule {
-                    id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-                    name: format!("{} {}", loc.inspector_rule_track_prefix, proc.name),
-                    description: String::new(),
-                    is_enabled: true,
-                    cooldown_seconds: 0.0,
-                    trigger: Some(Trigger::Process {
-                        process_name: proc.name.clone(),
-                        match_mode: ProcessMatchMode::Exact,
-                        single_instance: false,
-                    }),
-                    actions: Vec::new(),
-                    on_exit_actions: Vec::new(),
-                    execution_count: 0,
-                    custom_icon_path: None,
-                    auto_process_icon: true,
-                });
+                state.apply_process_to_draft_or_new_rule(&proc.name);
             }
 
             widgets::hrule(ui);
@@ -1581,74 +1537,10 @@ fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSna
     });
 }
 
-fn render_process_picker(
-    ui: &mut Ui,
-    state: &GuiState,
-    loc: &crate::i18n::Strings,
-    target_process: &mut String,
-    id_salt: &str,
-) {
-    let mut names: Vec<String> = state
-        .cached_processes
-        .iter()
-        .map(|p| p.name.clone())
-        .filter(|n| !n.trim().is_empty())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    names.sort_by_key(|a| a.to_lowercase());
-
-    let filter_id = ui.id().with(id_salt).with("proc_search");
-    let mut filter_text: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
-
-    egui::ComboBox::from_id_salt(id_salt)
-        .selected_text(loc.inspector_pick_running)
-        .width(135.0)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show_ui(ui, |ui| {
-            ui.set_max_height(320.0);
-            ui.set_min_width(240.0);
-
-            ui.horizontal(|ui| {
-                ui.label("🔍");
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut filter_text)
-                        .hint_text(loc.inspector_search_process_hint)
-                        .desired_width(180.0),
-                );
-                if resp.changed() {
-                    ui.data_mut(|d| d.insert_temp(filter_id, filter_text.clone()));
-                }
-            });
-
-            ui.separator();
-
-            egui::ScrollArea::vertical()
-                .max_height(260.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let search_lower = filter_text.to_lowercase();
-                    let mut count = 0;
-                    for name in &names {
-                        if !search_lower.is_empty() && !name.to_lowercase().contains(&search_lower) {
-                            continue;
-                        }
-                        count += 1;
-                        let is_sel = target_process == name;
-                        if ui.selectable_label(is_sel, name).clicked() {
-                            *target_process = name.clone();
-                            ui.close();
-                        }
-                    }
-                    if count == 0 {
-                        ui.label(
-                            egui::RichText::new(loc.inspector_no_matching_processes)
-                                .italics()
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                    }
-                });
-        });
+fn render_process_picker(ui: &mut Ui, loc: &crate::i18n::Strings) -> bool {
+    widgets::button(ui, loc.inspector_pick_running, Kind::Secondary, 0.0)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }
 
 fn days_in_month(year: i32, month: u32) -> u32 {
