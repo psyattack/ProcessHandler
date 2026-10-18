@@ -28,6 +28,9 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 * **Instant process lifecycle detection** via native Windows WMI event notifications
 * **Flexible trigger & action pipeline** supporting multi-step automations with per-process audio control
+* **Live execution tracking** with real-time pipeline step highlighting and concurrency counters
+* **Portable automation sharing** via compact, compressed clipboard codes (single & batch import/export)
+* **Custom rule icon system** with automatic target process detection and Win32 icon extraction
 * **Companion process mode** with automated startup and exit cleanup
 * **Interactive process manager** with real Win32 icon extraction and metrics
 * **Modern visual studio & themes** with Dark, Light, and Chocolate palettes in English & Russian
@@ -41,7 +44,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 - **WMI Event Subscriptions**: Subscribes directly to Windows Management Instrumentation (`__InstanceCreationEvent` and `__InstanceDeletionEvent` for `Win32_Process`) for instant, event-driven launch and termination detection.
 - **Fallback Polling Engine**: High-frequency snapshotting via `CreateToolhelp32Snapshot` for constrained environments or custom polling intervals.
-- **Win32 Icon Rasterization**: Extracts high-fidelity 32-bit application icons on-the-fly (`ExtractIconExW` + GDI DIBs) rendered directly into the UI texture cache.
+- **Win32 Icon Rasterization**: Extracts high-fidelity application icons on-the-fly (`ExtractIconExW` + GDI DIBs with 1-bit transparency mask support and proportional aspect ratio scaling) rendered directly into the UI texture cache.
 
 </details>
 
@@ -61,6 +64,8 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Timing Delays*: Configurable pause intervals between pipeline execution steps.
 - **Rule Safeguards & Execution**:
   - *Non-Blocking Asynchronous Engine*: Rule actions and delays execute in decoupled background Tokio tasks, ensuring heavy commands or delays never freeze the daemon or the UI.
+  - *Live Execution Tracking*: Daemon tracks active rule execution IDs, running pipeline steps, and concurrent executions (`active_count`) in real time, dynamically accelerating UI refresh rates (80ms sync intervals) during execution.
+  - *Portable Rule Sharing*: One-click sharing of individual automations or full automation libraries using compressed, self-contained base64 clipboard payloads (`PH1:` format) with automatic conflict resolution upon import.
   - *Execution Controls*: Configurable cooldown intervals to prevent rapid re-trigger storms, execution counters, one-click rule cloning, and non-destructive pause toggles.
 
 </details>
@@ -91,6 +96,8 @@ Whether you need to boost game performance by binding companion utilities, safeg
 - **Full Internationalization (i18n)**: Comprehensive English and Russian localization covering all interface views, inspector controls, logs, settings, modals, and tray menus.
 - **Interactive Rule Builder**:
   - *Animated Drag-and-Drop*: Reorder pipeline action steps smoothly with 6-dot drag handles, drop slot indicators, live previews, and viewport edge auto-scrolling.
+  - *Live Step Highlighting*: Highlights currently running actions in real time directly within both the rule card summaries and the Inspector pipeline editor.
+  - *Custom Rule Icons & Auto-Detection*: Assign custom icons (`.exe`, `.ico`, `.dll`, or image files) to rules, or enable automatic icon discovery from target processes upon initial trigger, with contextual Phosphor icon fallbacks.
   - *Step Cloning*: One-click action step duplication directly beneath the source step.
   - *Modal Script Editor*: Centered expandable modal for PowerShell and Batch scripts with custom syntax highlighting, live two-way sync, and backdrop dimming.
 - **Release Changelog Modal**: In-app viewer for GitHub release notes with rich Markdown/HTML formatting and 1-click update installation.
@@ -168,7 +175,8 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 - **Custom Design Tokens & Themes** (Dark, Light, Chocolate palettes)
 - **i18n Localization Engine** (Full English & Russian support)
 - **Script Syntax Highlighter** (PowerShell & Batch lexer)
-- **Win32 Shell GDI** (Native icon rasterization & textures)
+- **Win32 Shell GDI & image crate** (Native icon rasterization, PNG/JPEG decoding & textures)
+- **arboard** (Cross-platform system clipboard integration)
 - **Named Pipe Client** (Thread-safe IPC client)
 
 </td>
@@ -183,6 +191,7 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 - **reqwest** (Async HTTP client for GitHub releases & binary updates)
 - **Named Pipes Server** (Multi-client background IPC listener)
 - **Serde + Serde JSON** (Strongly-typed state persistence)
+- **flate2 & Base64** (Zlib compression for portable rule sharing payloads)
 - **Windows Registry API** (System autorun persistence)
 
 </td>
@@ -213,9 +222,9 @@ ProcessHandler/
 │   │   └── watcher.rs                # WMI events & Toolhelp32 process snapshotting
 │   ├── gui/                          # egui desktop user interface
 │   │   ├── components/               # UI components
-│   │   │   ├── icons.rs              # Win32 shell icon extractor & texture cache
+│   │   │   ├── icons.rs              # Win32 shell icon extractor, image loader & texture cache
 │   │   │   ├── script_highlighter.rs # PowerShell & Batch syntax highlighter
-│   │   │   └── widgets.rs            # Custom canvas controls (buttons, inputs, cards, drag handles)
+│   │   │   └── widgets.rs            # Custom canvas controls (buttons, inputs, cards, drag handles, glyphs)
 │   │   ├── views/                    # Application screens & panels
 │   │   │   ├── changelog_modal.rs    # GitHub release notes & changelog viewer
 │   │   │   ├── header_bar.rs         # Custom window titlebar & controls
@@ -239,6 +248,7 @@ ProcessHandler/
 │   ├── gui.rs                        # GUI entrypoint & eframe application loop
 │   ├── i18n.rs                       # Internationalization loader & language switcher
 │   ├── models.rs                     # Domain data models (Rule, Trigger, Action, Process)
+│   ├── sharing.rs                    # Portable automation compression, encoding & clipboard sharing
 │   ├── updater.rs                    # GitHub releases auto-update & self-replacement engine
 │   └── main.rs                       # CLI dispatcher (--daemon, --gui, default)
 ├── build.rs                          # Windows resource compilation (icon, manifest)
