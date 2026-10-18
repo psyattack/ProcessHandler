@@ -110,6 +110,10 @@ pub static STRINGS: Strings = Strings {
     hunter_col_quick_actions: "QUICK ACTIONS",
     hunter_btn_rule: "+ RULE",
     hunter_btn_rule_tip: "Create an automation rule triggered by this process",
+    hunter_btn_select: "SELECT",
+    hunter_btn_select_tip: "Select this process for the current rule slot",
+    hunter_modal_title: "SELECT RUNNING PROCESS",
+    hunter_modal_subtitle: "Choose an active Windows process to bind to this trigger or action",
 
     // Activity Log Stream View (logs_view.rs)
     logs_cell_all: "ALL EVENTS",
@@ -167,6 +171,17 @@ pub static STRINGS: Strings = Strings {
     inspector_trigger_process: "Process Event",
     inspector_trigger_system: "System Event",
     inspector_trigger_timer: "Periodic Timer",
+    inspector_trigger_tab_process: "PROCESS",
+    inspector_trigger_tab_schedule: "SCHEDULE",
+    inspector_trigger_tab_events: "EVENTS",
+    inspector_match_tab_exact: "EXACT",
+    inspector_match_tab_wildcard: "WILDCARD (*)",
+    inspector_match_tab_regex: "REGEX",
+    inspector_sched_tab_interval: "INTERVAL",
+    inspector_sched_tab_daily: "DAILY",
+    inspector_sched_tab_specific: "SPECIFIC DATE",
+    inspector_sched_tab_app_start: "ON APP START",
+    inspector_sched_tab_app_close: "ON APP CLOSE",
     inspector_field_target_process: "TARGET PROCESS:",
     inspector_field_target_process_hint: "e.g. game.exe, chrome.exe, *discord*",
     inspector_field_match_mode: "MATCH MODE:",
@@ -229,6 +244,7 @@ pub static STRINGS: Strings = Strings {
     inspector_btn_clone: "CLONE",
     inspector_btn_clone_tip: "Duplicate this rule with a new ID",
     inspector_btn_cancel: "CANCEL",
+    inspector_btn_reset: "RESET",
     inspector_btn_reset_tip: "Reset builder to initial state",
 
     // Inspector Action Dropdown Menu Options

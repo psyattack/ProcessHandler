@@ -34,7 +34,6 @@ pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
     // 4. Center: Navigation Tabs (strictly centered in the middle of the window)
     let tabs = [
         (ActiveView::Rules, loc.tab_automations, loc.tab_automations_tip),
-        (ActiveView::Processes, loc.tab_hunter, loc.tab_hunter_tip),
         (ActiveView::LiveStream, loc.tab_logs, loc.tab_logs_tip),
         (ActiveView::Settings, loc.tab_settings, loc.tab_settings_tip),
     ];

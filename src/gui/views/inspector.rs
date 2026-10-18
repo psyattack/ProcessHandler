@@ -6,7 +6,7 @@ use egui::{
     CornerRadius, Id, LayerId, Order, Pos2, Rect, Sense, Stroke, Ui, emath::easing, pos2, vec2,
 };
 use crate::gui::components::script_highlighter::{create_script_layouter, ScriptLanguage};
-use crate::gui::components::widgets::{self, Glyph, Kind};
+use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
 use crate::models::{
@@ -14,6 +14,27 @@ use crate::models::{
     SystemEventType, SystemPowerType, Trigger,
 };
 use chrono::{Datelike, Timelike};
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum TriggerCategory {
+    Process,
+    Schedule,
+    Events,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum EventTriggerKind {
+    SessionLock,
+    SessionUnlock,
+    SystemSleep,
+    SystemResume,
+    PowerAc,
+    PowerBattery,
+    UserIdle,
+    UserActive,
+    AppStartup,
+    AppShutdown,
+}
 
 pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
     let t = Tokens::get(ctx);
@@ -78,126 +99,148 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
             ui.set_max_width(width);
             ui.set_clip_rect(panel);
 
-            // 1. Fixed Top Header Strip (anchored, spans full drawer width, never jumps)
-            let mut close_editor = false;
+            // 1. Top Header Strip (only for selected_process inspection)
             let mut close_process = false;
-            let mut reset_builder = false;
 
-            if let Some(rule) = &state.editing_rule {
-                let rule_name = rule.name.clone();
-                let exec_opt = state.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
-                egui::Frame::new()
-                    .fill(t.sunken)
-                    .stroke(t.hairline())
-                    .corner_radius(CornerRadius::ZERO)
-                    .inner_margin(egui::Margin::symmetric(20, 14))
-                    .show(ui, |ui| {
-                        let loc = state.loc();
-                        ui.set_width(ui.available_width());
-                        ui.set_max_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            ui.set_width(ui.available_width());
-                            widgets::eyebrow(ui, "01", loc.inspector_eyebrow_builder);
-                            if let Some(exec) = exec_opt {
-                                ui.add_space(8.0);
-                                let count_suffix = if exec.active_count > 1 {
-                                    format!(" (x{})", exec.active_count)
-                                } else {
-                                    String::new()
-                                };
-                                let running_label = format!(
-                                    "{}{}: {}/{}",
-                                    loc.rules_badge_running,
-                                    count_suffix,
-                                    exec.current_step + 1,
-                                    exec.total_steps
-                                );
-                                widgets::badge(ui, &running_label, t.accent_ink);
-                            }
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if widgets::glyph_button(ui, Glyph::Close, loc.inspector_btn_close_tip).clicked() {
-                                    close_editor = true;
-                                }
-                                if state.is_creating_new_rule {
-                                    ui.add_space(4.0);
-                                    if widgets::glyph_button(ui, Glyph::Reset, loc.inspector_btn_reset_tip).clicked() {
-                                        reset_builder = true;
-                                    }
-                                }
-                            });
-                        });
-                        ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(&rule_name)
-                                .family(theme::semibold())
-                                .size(17.0)
-                                .color(t.ink_strong),
-                        );
-                    });
-            } else if let Some(proc) = &state.selected_process {
+            let header_resp = if let Some(proc) = &state.selected_process {
                 let proc_name = proc.name.clone();
                 let proc_pid = proc.pid;
-                egui::Frame::new()
+                Some(egui::Frame::new()
                     .fill(t.sunken)
                     .stroke(t.hairline())
                     .corner_radius(CornerRadius::ZERO)
-                    .inner_margin(egui::Margin::symmetric(20, 14))
+                    .inner_margin(egui::Margin {
+                        left: 20,
+                        right: 14,
+                        top: 3,
+                        bottom: 3,
+                    })
                     .show(ui, |ui| {
                         let loc = state.loc();
+                        ui.spacing_mut().interact_size.y = 0.0;
+                        ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
                         ui.set_width(ui.available_width());
                         ui.set_max_width(ui.available_width());
                         ui.horizontal(|ui| {
+                            ui.spacing_mut().interact_size.y = 0.0;
                             ui.set_width(ui.available_width());
-                            widgets::eyebrow(ui, "01", loc.inspector_eyebrow_task_details);
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().interact_size.y = 0.0;
+                                ui.spacing_mut().item_spacing.y = 1.0;
+                                widgets::hud(ui, loc.inspector_eyebrow_task_details, t.muted);
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().interact_size.y = 0.0;
+                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&proc_name)
+                                                .family(theme::semibold())
+                                                .size(14.5)
+                                                .color(t.ink_strong),
+                                        )
+                                        .truncate(),
+                                    );
+                                    widgets::hud(ui, &format!("#{}", proc_pid), t.muted);
+                                });
+                            });
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if widgets::glyph_button(ui, Glyph::Close, loc.inspector_btn_close_tip).clicked() {
                                     close_process = true;
                                 }
                             });
                         });
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(&proc_name)
-                                    .family(theme::semibold())
-                                    .size(17.0)
-                                    .color(t.ink_strong),
-                            );
-                            widgets::hud(ui, &format!("#{}", proc_pid), t.muted);
-                        });
-                    });
-            }
+                    }))
+            } else {
+                None
+            };
 
-            if reset_builder {
-                state.reset_builder_state();
-            }
-            if close_editor {
-                state.close_editor();
-            }
             if close_process {
                 state.selected_process = None;
             }
 
-            // 2. Scrollable Body with strictly pinned width
-            ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
-            egui::ScrollArea::vertical()
-                .id_salt("inspector_scroll_area")
-                .max_width(width)
-                .auto_shrink([false, false])
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.set_max_width(ui.available_width());
+            let header_bottom = header_resp.map(|r| r.response.rect.bottom()).unwrap_or(panel.top());
+            let is_editing_rule = state.editing_rule.is_some();
+            let footer_h = if is_editing_rule { 52.0 } else { 0.0 };
+            let body_rect = Rect::from_min_max(
+                pos2(panel.left(), header_bottom),
+                pos2(panel.right(), (panel.bottom() - footer_h).max(header_bottom)),
+            );
+            let footer_rect = Rect::from_min_max(
+                pos2(panel.left(), panel.bottom() - footer_h),
+                panel.max,
+            );
 
-                    if let Some(mut rule) = state.editing_rule.clone() {
-                        render_rule_editor(ui, state, &mut rule, &t);
-                        if state.editing_rule.is_some() {
-                            state.editing_rule = Some(rule);
+            // 2. Scrollable Body with strictly pinned width and height
+            ui.scope_builder(egui::UiBuilder::new().max_rect(body_rect), |ui| {
+                ui.set_width(body_rect.width());
+                ui.set_max_width(body_rect.width());
+                ui.set_height(body_rect.height());
+                ui.set_max_height(body_rect.height());
+
+                ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+                egui::ScrollArea::vertical()
+                    .id_salt("inspector_scroll_area")
+                    .max_width(body_rect.width())
+                    .max_height(body_rect.height())
+                    .auto_shrink([false, false])
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.set_max_width(ui.available_width());
+
+                        if let Some(mut rule) = state.editing_rule.clone() {
+                            render_rule_editor(ui, state, &mut rule, &t);
+                            if state.editing_rule.is_some() {
+                                state.editing_rule = Some(rule);
+                            }
+                        } else if let Some(proc) = state.selected_process.clone() {
+                            render_process_inspector(ui, state, &proc, &t);
                         }
-                    } else if let Some(proc) = state.selected_process.clone() {
-                        render_process_inspector(ui, state, &proc, &t);
-                    }
+                    });
+            });
+
+            // 3. Fixed Bottom Action Strip (Save / Cancel / Clone always visible and strictly pinned to drawer bottom)
+            if let Some(rule) = state.editing_rule.clone() {
+                ui.scope_builder(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
+                    egui::Frame::new()
+                        .fill(t.sunken)
+                        .stroke(t.hairline())
+                        .corner_radius(CornerRadius::ZERO)
+                        .inner_margin(egui::Margin::symmetric(20, 10))
+                        .show(ui, |ui| {
+                            let loc = state.loc();
+                            ui.set_width(ui.available_width());
+                            ui.set_max_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+
+                                if widgets::button(ui, loc.inspector_btn_save_rule, Kind::Primary, 120.0).clicked() {
+                                    state.save_rule(rule.clone());
+                                }
+
+                                if !state.is_creating_new_rule
+                                    && widgets::button(ui, loc.inspector_btn_clone, Kind::Secondary, 0.0)
+                                        .on_hover_text(loc.inspector_btn_clone_tip)
+                                        .clicked()
+                                {
+                                    state.clone_rule(&rule);
+                                }
+
+                                if state.is_creating_new_rule
+                                    && widgets::button(ui, loc.inspector_btn_reset, Kind::Secondary, 0.0)
+                                        .on_hover_text(loc.inspector_btn_reset_tip)
+                                        .clicked()
+                                {
+                                    state.reset_builder_state();
+                                }
+
+                                if widgets::button(ui, loc.inspector_btn_cancel, Kind::Secondary, 0.0).clicked() {
+                                    state.close_editor();
+                                }
+                            });
+                        });
                 });
+            }
         });
 }
 
@@ -211,7 +254,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
         .inner_margin(egui::Margin {
             left: 20,
             right: right_m,
-            top: 20,
+            top: 14,
             bottom: 20,
         })
         .show(ui, |ui| {
@@ -222,269 +265,342 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
             ui.set_max_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 12.0;
 
-            // Basic Info
+            // 1. Basic Info & Icon Avatar
             let loc = state.loc();
-            widgets::hud(ui, loc.inspector_field_rule_name, t.muted);
-            ui.add(
-                egui::TextEdit::singleline(&mut rule.name)
-                    .desired_width(ui.available_width())
-                    .min_size(vec2(0.0, theme::CONTROL_H))
-                    .vertical_align(egui::Align::Center)
-                    .margin(vec2(10.0, 8.0)),
-            );
+            widgets::eyebrow(ui, "01", loc.inspector_eyebrow_task_details);
 
-            widgets::hud(ui, loc.inspector_field_description, t.muted);
-            ui.add(
-                egui::TextEdit::singleline(&mut rule.description)
-                    .hint_text(loc.inspector_field_description_hint)
-                    .desired_width(ui.available_width())
-                    .min_size(vec2(0.0, theme::CONTROL_H))
-                    .vertical_align(egui::Align::Center)
-                    .margin(vec2(10.0, 8.0)),
-            );
+            egui::Frame::new()
+                .fill(t.sunken)
+                .stroke(t.hairline())
+                .corner_radius(CornerRadius::ZERO)
+                .inner_margin(egui::Margin::symmetric(14, 12))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.set_max_width(ui.available_width());
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 8.0;
 
-            ui.horizontal_wrapped(|ui| {
-                widgets::hud(ui, loc.inspector_field_cooldown, t.muted);
-                ui.add(egui::DragValue::new(&mut rule.cooldown_seconds).speed(0.1).range(0.0..=60.0).suffix(" s"));
-                ui.add_space(16.0);
-                ui.checkbox(&mut rule.is_enabled, loc.inspector_checkbox_rule_active);
-            });
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
 
-            widgets::hrule(ui);
+                            // Interactive Icon Avatar Box (38x38)
+                            let icon_box_size = vec2(38.0, 38.0);
+                            let (icon_rect, icon_resp) = ui.allocate_exact_size(icon_box_size, Sense::click());
+                            let is_hovered = icon_resp.hovered();
+                            let p = ui.painter();
 
-            // Rule Icon
-            widgets::hud(ui, loc.inspector_sec_icon, t.muted);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
+                            p.rect_filled(icon_rect, CornerRadius::ZERO, if is_hovered { t.sunken } else { t.bg });
+                            let stroke_color = if is_hovered { t.accent_ink } else { t.line_strong };
+                            p.rect_stroke(icon_rect, CornerRadius::ZERO, Stroke::new(1.0, stroke_color), egui::StrokeKind::Inside);
 
-                // Icon Preview Box (36x36)
-                let icon_box_size = vec2(36.0, 36.0);
-                let (icon_rect, _) = ui.allocate_exact_size(icon_box_size, Sense::hover());
-                ui.painter().rect_filled(icon_rect, CornerRadius::ZERO, t.sunken);
-                ui.painter().rect_stroke(icon_rect, CornerRadius::ZERO, t.hairline(), egui::StrokeKind::Inside);
-
-                let mut rendered = false;
-                if let Some(path) = &rule.custom_icon_path {
-                    if let Some(tex) = state.icon_cache.get_icon_from_path(ui.ctx(), path) {
-                        let size = tex.size_vec2();
-                        let max_dim = size.x.max(size.y).max(1.0);
-                        let scale = 26.0 / max_dim;
-                        let render_size = vec2((size.x * scale).round().max(1.0), (size.y * scale).round().max(1.0));
-                        let img_rect = Rect::from_center_size(icon_rect.center(), render_size);
-                        ui.painter().image(
-                            tex.id(),
-                            img_rect,
-                            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                        rendered = true;
-                    }
-                }
-
-                if !rendered {
-                    let glyph = rule.default_icon_glyph();
-                    ui.painter().text(
-                        icon_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        glyph,
-                        egui::FontId::new(18.0, theme::phosphor()),
-                        t.ink_strong,
-                    );
-                }
-
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 4.0;
-
-                    let icon_status_text = match &rule.custom_icon_path {
-                        Some(p) => {
-                            let fname = std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy();
-                            format!("{}: {}", loc.inspector_icon_custom_label, fname)
-                        }
-                        None => loc.inspector_icon_default_label.to_string(),
-                    };
-                    widgets::hud(ui, &icon_status_text, t.muted);
-
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-
-                        if widgets::button(ui, loc.inspector_icon_browse, Kind::Secondary, 0.0)
-                            .on_hover_text(loc.inspector_icon_browse_tip)
-                            .clicked()
-                        {
-                            if let Some(picked) = rfd::FileDialog::new()
-                                .set_title("Select Rule Icon")
-                                .add_filter("Icon / Image / Exe", &["exe", "ico", "png", "jpg", "jpeg", "dll"])
-                                .pick_file()
-                            {
-                                rule.custom_icon_path = Some(picked.to_string_lossy().to_string());
+                            let mut rendered = false;
+                            if let Some(path) = &rule.custom_icon_path {
+                                if let Some(tex) = state.icon_cache.get_icon_from_path(ui.ctx(), path) {
+                                    let size = tex.size_vec2();
+                                    let max_dim = size.x.max(size.y).max(1.0);
+                                    let scale = 26.0 / max_dim;
+                                    let render_size = vec2((size.x * scale).round().max(1.0), (size.y * scale).round().max(1.0));
+                                    let img_rect = Rect::from_center_size(icon_rect.center(), render_size);
+                                    p.image(tex.id(), img_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
+                                    rendered = true;
+                                }
                             }
-                        }
+                            if !rendered {
+                                let glyph = rule.default_icon_glyph();
+                                p.text(icon_rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::new(18.0, theme::phosphor()), if is_hovered { t.accent_ink } else { t.ink_strong });
+                            }
 
-                        if rule.custom_icon_path.is_some() {
-                            if widgets::button(ui, loc.inspector_icon_reset, Kind::Danger, 0.0)
-                                .on_hover_text(loc.inspector_icon_reset_tip)
-                                .clicked()
-                            {
+                            let icon_tooltip = match &rule.custom_icon_path {
+                                Some(p) => {
+                                    let fname = std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy();
+                                    format!("{}: {}\n{}", loc.inspector_icon_custom_label, fname, loc.inspector_icon_browse_tip)
+                                }
+                                None => format!("{}\n{}", loc.inspector_icon_default_label, loc.inspector_icon_browse_tip),
+                            };
+                            let icon_resp = icon_resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(icon_tooltip);
+
+                            if icon_resp.clicked() {
+                                if let Some(picked) = rfd::FileDialog::new()
+                                    .set_title("Select Rule Icon")
+                                    .add_filter("Icon / Image / Exe", &["exe", "ico", "png", "jpg", "jpeg", "dll"])
+                                    .pick_file()
+                                {
+                                    rule.custom_icon_path = Some(picked.to_string_lossy().to_string());
+                                }
+                            }
+                            if icon_resp.secondary_clicked() && rule.custom_icon_path.is_some() {
                                 rule.custom_icon_path = None;
                             }
-                        }
+
+                            // Name Input taking remaining available width
+                            let input_w = if rule.custom_icon_path.is_some() {
+                                (ui.available_width() - 36.0).max(100.0)
+                            } else {
+                                ui.available_width()
+                            };
+
+                            ui.add(
+                                egui::TextEdit::singleline(&mut rule.name)
+                                    .hint_text(loc.rules_default_new_name)
+                                    .desired_width(input_w)
+                                    .min_size(vec2(0.0, 38.0))
+                                    .font(egui::FontId::new(14.0, theme::semibold()))
+                                    .vertical_align(egui::Align::Center)
+                                    .margin(vec2(10.0, 9.0)),
+                            );
+
+                            if rule.custom_icon_path.is_some() {
+                                if widgets::glyph_button(ui, Glyph::Reset, loc.inspector_icon_reset_tip).clicked() {
+                                    rule.custom_icon_path = None;
+                                }
+                            }
+                        });
+
+                        // Description Input
+                        ui.add(
+                            egui::TextEdit::singleline(&mut rule.description)
+                                .hint_text(loc.inspector_field_description_hint)
+                                .desired_width(ui.available_width())
+                                .min_size(vec2(0.0, theme::CONTROL_H))
+                                .vertical_align(egui::Align::Center)
+                                .margin(vec2(10.0, 8.0)),
+                        );
+
+                        // Metadata row: Cooldown + Status + Auto process icon
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 16.0;
+                            ui.horizontal(|ui| {
+                                widgets::hud(ui, loc.inspector_field_cooldown, t.muted);
+                                ui.add(egui::DragValue::new(&mut rule.cooldown_seconds).speed(0.1).range(0.0..=60.0).suffix(" s"));
+                            });
+                            ui.checkbox(&mut rule.is_enabled, loc.inspector_checkbox_rule_active);
+                            ui.checkbox(&mut rule.auto_process_icon, loc.inspector_icon_auto_process)
+                                .on_hover_text(loc.inspector_icon_auto_process_tip);
+                        });
                     });
                 });
-            });
 
-            ui.checkbox(&mut rule.auto_process_icon, loc.inspector_icon_auto_process)
-                .on_hover_text(loc.inspector_icon_auto_process_tip);
-
-            widgets::hrule(ui);
-
-            // 1. Trigger
+            // 2. Trigger Section
             widgets::eyebrow(ui, "02", loc.inspector_eyebrow_trigger);
 
-            if rule.trigger.is_none() {
-                rule.trigger = Some(Trigger::Process {
-                    process_name: "notepad.exe".into(),
-                    match_mode: ProcessMatchMode::Exact,
-                    single_instance: false,
-                });
-            }
-
-            let trigger_types = [loc.inspector_trigger_process, loc.inspector_trigger_system, loc.inspector_trigger_timer];
-            let mut current_idx = match &rule.trigger {
-                Some(Trigger::Process { .. }) => 0,
-                Some(Trigger::SystemEvent { .. }) => 1,
-                Some(Trigger::Schedule { .. }) => 2,
-                None => 0,
-            };
-
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                for (idx, label) in trigger_types.iter().enumerate() {
-                    let on = current_idx == idx;
-                    if widgets::button(ui, label, if on { Kind::Primary } else { Kind::Secondary }, 0.0).clicked() {
-                        current_idx = idx;
-                        rule.trigger = match idx {
-                            0 => Some(Trigger::Process {
-                                process_name: "notepad.exe".into(),
-                                match_mode: ProcessMatchMode::Exact,
-                                single_instance: false,
-                            }),
-                            1 => Some(Trigger::SystemEvent {
-                                event_type: SystemEventType::SessionLock,
-                                idle_duration_sec: 300,
-                                device_id_filter: None,
-                            }),
-                            2 => Some(Trigger::Schedule {
-                                schedule_type: ScheduleType::Interval,
-                                interval_sec: 60,
-                                daily_time: Some("12:00:00".into()),
-                                days_of_week: Vec::new(),
-                                delay_sec: 0,
-                                target_datetime: None,
-                            }),
-                            _ => None,
-                        };
-                    }
-                }
-            });
-
-            let mut is_process_trigger = false;
             let mut switch_trigger_to_hunter = false;
 
-            if let Some(trig) = &mut rule.trigger {
-                match trig {
-                    Trigger::Process { process_name, match_mode, single_instance } => {
-                        is_process_trigger = true;
+            egui::Frame::new()
+                .fill(t.sunken)
+                .stroke(t.hairline())
+                .corner_radius(CornerRadius::ZERO)
+                .inner_margin(egui::Margin::symmetric(14, 12))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.set_max_width(ui.available_width());
 
-                        ui.add_space(8.0);
-                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
-                        ui.horizontal(|ui| {
-                            ui.set_width(ui.available_width());
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if render_process_picker(ui, loc) {
-                                    switch_trigger_to_hunter = true;
-                                }
-                                ui.add(
-                                    egui::TextEdit::singleline(process_name)
-                                        .hint_text(loc.inspector_field_target_process_hint)
-                                        .desired_width(ui.available_width())
-                                        .min_size(vec2(0.0, theme::CONTROL_H))
-                                        .vertical_align(egui::Align::Center)
-                                        .margin(vec2(10.0, 8.0)),
-                                );
-                            });
-                        });
+                    let mut category = match &rule.trigger {
+                        Some(Trigger::Process { .. }) => TriggerCategory::Process,
+                        Some(Trigger::Schedule { schedule_type, .. }) => match schedule_type {
+                            ScheduleType::AppStartup | ScheduleType::AppShutdown => TriggerCategory::Events,
+                            _ => TriggerCategory::Schedule,
+                        },
+                        Some(Trigger::SystemEvent { .. }) => TriggerCategory::Events,
+                        None => TriggerCategory::Process,
+                    };
 
-                        ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 2.0;
+                    let cat_options = [
+                        (TriggerCategory::Process, Cell::new(loc.inspector_trigger_tab_process, "")),
+                        (TriggerCategory::Schedule, Cell::new(loc.inspector_trigger_tab_schedule, "")),
+                        (TriggerCategory::Events, Cell::new(loc.inspector_trigger_tab_events, "")),
+                    ];
 
-                            ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, loc.inspector_field_match_mode, t.muted);
-                                ui.radio_value(match_mode, ProcessMatchMode::Exact, loc.inspector_match_mode_exact);
-                                ui.radio_value(match_mode, ProcessMatchMode::Wildcard, loc.inspector_match_mode_wildcard);
-                                ui.radio_value(match_mode, ProcessMatchMode::Regex, loc.inspector_match_mode_contains);
-                            });
-
-                            ui.checkbox(single_instance, loc.inspector_checkbox_single_instance);
-                        });
-                    }
-                    Trigger::SystemEvent { event_type, idle_duration_sec, .. } => {
-                        ui.add_space(8.0);
-                        widgets::hud(ui, loc.inspector_field_sys_event_type, t.muted);
-                        let events = [
-                            (SystemEventType::SessionLock, loc.inspector_sys_event_lock),
-                            (SystemEventType::SessionUnlock, loc.inspector_sys_event_unlock),
-                            (SystemEventType::SystemSleep, loc.inspector_sys_event_sleep),
-                            (SystemEventType::SystemResume, loc.inspector_sys_event_resume),
-                            (SystemEventType::PowerSourceAc, loc.inspector_sys_event_ac),
-                            (SystemEventType::PowerSourceBattery, loc.inspector_sys_event_battery),
-                            (SystemEventType::UserIdle, loc.inspector_sys_event_idle),
-                            (SystemEventType::UserActive, loc.inspector_sys_event_active),
-                        ];
-
-                        egui::ComboBox::from_id_salt("sys_event_combo")
-                            .selected_text(format!("{:?}", event_type))
-                            .width(260.0)
-                            .show_ui(ui, |ui| {
-                                for (ev, label) in events {
-                                    ui.selectable_value(event_type, ev, label);
-                                }
-                            });
-
-                        if *event_type == SystemEventType::UserIdle {
-                            ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, loc.inspector_field_idle_duration, t.muted);
-                                ui.add(egui::DragValue::new(idle_duration_sec).range(10..=3600).suffix(" s"));
-                            });
+                    let prev_cat = category;
+                    if widgets::cells(ui, &mut category, &cat_options) && category != prev_cat {
+                        match category {
+                            TriggerCategory::Process => {
+                                rule.trigger = Some(Trigger::Process {
+                                    process_name: "notepad.exe".into(),
+                                    match_mode: ProcessMatchMode::Exact,
+                                    single_instance: false,
+                                });
+                            }
+                            TriggerCategory::Schedule => {
+                                rule.trigger = Some(Trigger::Schedule {
+                                    schedule_type: ScheduleType::Interval,
+                                    interval_sec: 60,
+                                    daily_time: Some("12:00:00".into()),
+                                    days_of_week: Vec::new(),
+                                    delay_sec: 0,
+                                    target_datetime: None,
+                                });
+                            }
+                            TriggerCategory::Events => {
+                                rule.trigger = Some(Trigger::Schedule {
+                                    schedule_type: ScheduleType::AppStartup,
+                                    interval_sec: 0,
+                                    daily_time: None,
+                                    days_of_week: Vec::new(),
+                                    delay_sec: 0,
+                                    target_datetime: None,
+                                });
+                            }
                         }
                     }
-                    Trigger::Schedule {
-                        schedule_type,
-                        interval_sec,
-                        daily_time,
-                        days_of_week,
-                        target_datetime,
-                        ..
-                    } => {
-                        render_schedule_trigger(
-                            ui,
-                            loc,
-                            schedule_type,
-                            interval_sec,
-                            daily_time,
-                            days_of_week,
-                            target_datetime,
-                            t,
-                        );
+
+                    ui.add_space(10.0);
+
+                    match category {
+                        TriggerCategory::Process => {
+                            if let Some(Trigger::Process { process_name, match_mode, single_instance }) = &mut rule.trigger {
+                                widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+                                ui.horizontal(|ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if render_process_picker(ui, loc) {
+                                            switch_trigger_to_hunter = true;
+                                        }
+                                        ui.add(
+                                            egui::TextEdit::singleline(process_name)
+                                                .hint_text(loc.inspector_field_target_process_hint)
+                                                .desired_width(ui.available_width())
+                                                .min_size(vec2(0.0, theme::CONTROL_H))
+                                                .vertical_align(egui::Align::Center)
+                                                .margin(vec2(10.0, 8.0)),
+                                        );
+                                    });
+                                });
+
+                                ui.add_space(6.0);
+                                widgets::hud(ui, loc.inspector_field_match_mode, t.muted);
+                                let match_options = [
+                                    (ProcessMatchMode::Exact, Cell::new(loc.inspector_match_tab_exact, "")),
+                                    (ProcessMatchMode::Wildcard, Cell::new(loc.inspector_match_tab_wildcard, "")),
+                                    (ProcessMatchMode::Regex, Cell::new(loc.inspector_match_tab_regex, "")),
+                                ];
+                                widgets::cells(ui, match_mode, &match_options);
+
+                                ui.add_space(6.0);
+                                ui.checkbox(single_instance, loc.inspector_checkbox_single_instance);
+                            }
+                        }
+
+                        TriggerCategory::Schedule => {
+                            if let Some(Trigger::Schedule { schedule_type, interval_sec, daily_time, days_of_week, target_datetime, .. }) = &mut rule.trigger {
+                                render_schedule_trigger(
+                                    ui,
+                                    loc,
+                                    schedule_type,
+                                    interval_sec,
+                                    daily_time,
+                                    days_of_week,
+                                    target_datetime,
+                                    t,
+                                );
+                            }
+                        }
+
+                        TriggerCategory::Events => {
+                            let mut current_event = match &rule.trigger {
+                                Some(Trigger::Schedule { schedule_type: ScheduleType::AppStartup, .. }) => EventTriggerKind::AppStartup,
+                                Some(Trigger::Schedule { schedule_type: ScheduleType::AppShutdown, .. }) => EventTriggerKind::AppShutdown,
+                                Some(Trigger::SystemEvent { event_type, .. }) => match event_type {
+                                    SystemEventType::SessionLock => EventTriggerKind::SessionLock,
+                                    SystemEventType::SessionUnlock => EventTriggerKind::SessionUnlock,
+                                    SystemEventType::SystemSleep => EventTriggerKind::SystemSleep,
+                                    SystemEventType::SystemResume => EventTriggerKind::SystemResume,
+                                    SystemEventType::PowerSourceAc => EventTriggerKind::PowerAc,
+                                    SystemEventType::PowerSourceBattery => EventTriggerKind::PowerBattery,
+                                    SystemEventType::UserIdle => EventTriggerKind::UserIdle,
+                                    SystemEventType::UserActive => EventTriggerKind::UserActive,
+                                    _ => EventTriggerKind::AppStartup,
+                                },
+                                _ => EventTriggerKind::AppStartup,
+                            };
+
+                            let events = [
+                                (EventTriggerKind::AppStartup, format!("{} {}", egui_phosphor::regular::ROCKET_LAUNCH, loc.inspector_schedule_app_start)),
+                                (EventTriggerKind::AppShutdown, format!("{} {}", egui_phosphor::regular::POWER, loc.inspector_schedule_app_close)),
+                                (EventTriggerKind::SessionLock, format!("{} {}", egui_phosphor::regular::LOCK, loc.inspector_sys_event_lock)),
+                                (EventTriggerKind::SessionUnlock, format!("{} {}", egui_phosphor::regular::LOCK_OPEN, loc.inspector_sys_event_unlock)),
+                                (EventTriggerKind::SystemSleep, format!("{} {}", egui_phosphor::regular::MOON, loc.inspector_sys_event_sleep)),
+                                (EventTriggerKind::SystemResume, format!("{} {}", egui_phosphor::regular::SUN, loc.inspector_sys_event_resume)),
+                                (EventTriggerKind::PowerAc, format!("{} {}", egui_phosphor::regular::PLUG, loc.inspector_sys_event_ac)),
+                                (EventTriggerKind::PowerBattery, format!("{} {}", egui_phosphor::regular::BATTERY_CHARGING, loc.inspector_sys_event_battery)),
+                                (EventTriggerKind::UserIdle, format!("{} {}", egui_phosphor::regular::HOURGLASS, loc.inspector_sys_event_idle)),
+                                (EventTriggerKind::UserActive, format!("{} {}", egui_phosphor::regular::ACTIVITY, loc.inspector_sys_event_active)),
+                            ];
+
+                            widgets::hud(ui, loc.inspector_field_sys_event_type, t.muted);
+
+                            let selected_label = events.iter().find(|(k, _)| *k == current_event).map(|(_, l)| l.as_str()).unwrap_or("");
+                            let prev_event = current_event;
+
+                            egui::ComboBox::from_id_salt("unified_events_combo")
+                                .selected_text(selected_label)
+                                .width(ui.available_width() - 8.0)
+                                .show_ui(ui, |ui| {
+                                    for (k, label) in &events {
+                                        ui.selectable_value(&mut current_event, *k, label);
+                                    }
+                                });
+
+                            if current_event != prev_event {
+                                match current_event {
+                                    EventTriggerKind::AppStartup => {
+                                        rule.trigger = Some(Trigger::Schedule {
+                                            schedule_type: ScheduleType::AppStartup,
+                                            interval_sec: 0,
+                                            daily_time: None,
+                                            days_of_week: Vec::new(),
+                                            delay_sec: 0,
+                                            target_datetime: None,
+                                        });
+                                    }
+                                    EventTriggerKind::AppShutdown => {
+                                        rule.trigger = Some(Trigger::Schedule {
+                                            schedule_type: ScheduleType::AppShutdown,
+                                            interval_sec: 0,
+                                            daily_time: None,
+                                            days_of_week: Vec::new(),
+                                            delay_sec: 0,
+                                            target_datetime: None,
+                                        });
+                                    }
+                                    _ => {
+                                        let sys_ev = match current_event {
+                                            EventTriggerKind::SessionLock => SystemEventType::SessionLock,
+                                            EventTriggerKind::SessionUnlock => SystemEventType::SessionUnlock,
+                                            EventTriggerKind::SystemSleep => SystemEventType::SystemSleep,
+                                            EventTriggerKind::SystemResume => SystemEventType::SystemResume,
+                                            EventTriggerKind::PowerAc => SystemEventType::PowerSourceAc,
+                                            EventTriggerKind::PowerBattery => SystemEventType::PowerSourceBattery,
+                                            EventTriggerKind::UserIdle => SystemEventType::UserIdle,
+                                            EventTriggerKind::UserActive => SystemEventType::UserActive,
+                                            _ => SystemEventType::SessionLock,
+                                        };
+                                        rule.trigger = Some(Trigger::SystemEvent {
+                                            event_type: sys_ev,
+                                            idle_duration_sec: 300,
+                                            device_id_filter: None,
+                                        });
+                                    }
+                                }
+                            }
+
+                            if let Some(Trigger::SystemEvent { event_type: SystemEventType::UserIdle, idle_duration_sec, .. }) = &mut rule.trigger {
+                                ui.add_space(6.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    widgets::hud(ui, loc.inspector_field_idle_duration, t.muted);
+                                    ui.add(egui::DragValue::new(idle_duration_sec).range(10..=3600).suffix(" s"));
+                                });
+                            }
+                        }
                     }
-                }
-            }
+                });
 
             if switch_trigger_to_hunter {
-                state.editing_rule = Some(rule.clone());
-                state.switch_to_hunter_from_picker(crate::gui::state::ProcessPickerTarget::Trigger);
+                state.open_process_picker(crate::gui::state::ProcessPickerTarget::Trigger);
             }
 
-            widgets::hrule(ui);
+            ui.add_space(8.0);
+
+            let is_process_trigger = matches!(rule.trigger, Some(Trigger::Process { .. }));
 
             // 2. Action Sequence Builder (Execution on trigger)
             let action_header = if is_process_trigger {
@@ -505,13 +621,12 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                 exec_opt,
                 t,
             ) {
-                state.editing_rule = Some(rule.clone());
-                state.switch_to_hunter_from_picker(crate::gui::state::ProcessPickerTarget::Action(idx));
+                state.open_process_picker(crate::gui::state::ProcessPickerTarget::Action(idx));
             }
 
             // 3. Actions on Process Exit
             if is_process_trigger {
-                widgets::hrule(ui);
+                ui.add_space(8.0);
                 widgets::eyebrow(ui, "04", loc.inspector_eyebrow_actions_exit);
 
                 if let Some(idx) = render_actions_pipeline(
@@ -523,31 +638,10 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                     exec_opt,
                     t,
                 ) {
-                    state.editing_rule = Some(rule.clone());
-                    state.switch_to_hunter_from_picker(crate::gui::state::ProcessPickerTarget::ExitAction(idx));
+                    state.open_process_picker(crate::gui::state::ProcessPickerTarget::ExitAction(idx));
                 }
             }
 
-            widgets::hrule(ui);
-
-            // Save / Cancel Actions
-            ui.horizontal_wrapped(|ui| {
-                if widgets::button(ui, loc.inspector_btn_save_rule, Kind::Primary, 120.0).clicked() {
-                    state.save_rule(rule.clone());
-                }
-
-                if !state.is_creating_new_rule
-                    && widgets::button(ui, loc.inspector_btn_clone, Kind::Secondary, 0.0)
-                        .on_hover_text(loc.inspector_btn_clone_tip)
-                        .clicked()
-                {
-                    state.clone_rule(rule);
-                }
-
-                if widgets::button(ui, loc.inspector_btn_cancel, Kind::Secondary, 0.0).clicked() {
-                    state.close_editor();
-                }
-            });
         });
     });
 }
@@ -1484,8 +1578,8 @@ fn render_process_inspector(ui: &mut Ui, state: &mut GuiState, proc: &ProcessSna
         .inner_margin(egui::Margin {
             left: 20,
             right: right_m,
-            top: 20,
-            bottom: 20,
+            top: 8,
+            bottom: 8,
         })
         .show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -1729,41 +1823,33 @@ fn render_schedule_trigger(
     target_datetime: &mut Option<String>,
     t: &Tokens,
 ) {
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 2.0;
+    let sub_options = [
+        (ScheduleType::Interval, Cell::new(loc.inspector_sched_tab_interval, "")),
+        (ScheduleType::Daily, Cell::new(loc.inspector_sched_tab_daily, "")),
+        (ScheduleType::OneShot, Cell::new(loc.inspector_sched_tab_specific, "")),
+    ];
 
-        ui.horizontal_wrapped(|ui| {
-            let modes = [
-                (ScheduleType::Interval, loc.inspector_schedule_interval),
-                (ScheduleType::Daily, loc.inspector_schedule_daily),
-                (ScheduleType::OneShot, loc.inspector_schedule_oneshot),
-            ];
-            for (m, label) in modes {
-                let prev = *schedule_type;
-                if ui.radio_value(schedule_type, m, label).clicked()
-                    && *schedule_type != prev
-                    && *schedule_type == ScheduleType::Interval
-                {
-                    *target_datetime = None;
+    let prev_type = *schedule_type;
+    if widgets::cells(ui, schedule_type, &sub_options) && *schedule_type != prev_type {
+        match *schedule_type {
+            ScheduleType::Interval => {
+                *target_datetime = None;
+            }
+            ScheduleType::Daily => {}
+            ScheduleType::OneShot => {
+                if target_datetime.is_none() {
+                    let now = chrono::Local::now();
+                    *target_datetime = Some(format!(
+                        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                        now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second()
+                    ));
                 }
             }
-        });
+            _ => {}
+        }
+    }
 
-        ui.horizontal_wrapped(|ui| {
-            let modes = [
-                (ScheduleType::AppStartup, loc.inspector_schedule_app_start),
-                (ScheduleType::AppShutdown, loc.inspector_schedule_app_close),
-            ];
-            for (m, label) in modes {
-                let prev = *schedule_type;
-                if ui.radio_value(schedule_type, m, label).clicked() && *schedule_type != prev {
-                    *target_datetime = None;
-                }
-            }
-        });
-    });
-
-    ui.add_space(4.0);
+    ui.add_space(8.0);
 
     match schedule_type {
         ScheduleType::Interval => {
@@ -1939,20 +2025,6 @@ fn render_schedule_trigger(
             render_datetime_picker(ui, loc, target_datetime, t, "oneshot_cal");
         }
 
-        ScheduleType::AppStartup => {
-            widgets::badge(
-                ui,
-                loc.inspector_badge_app_startup,
-                t.good,
-            );
-        }
-
-        ScheduleType::AppShutdown => {
-            widgets::badge(
-                ui,
-                loc.inspector_badge_app_shutdown,
-                t.muted,
-            );
-        }
+        _ => {}
     }
 }

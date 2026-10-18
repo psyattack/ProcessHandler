@@ -232,7 +232,7 @@ pub fn cells<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T, Cel
     let mut changed = false;
     let mut rects = Vec::with_capacity(options.len());
 
-    ui.scope(|ui| {
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (opt, cell) in options {
             let on = *value == *opt;
@@ -434,10 +434,22 @@ pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
     glyph_button_active(ui, glyph, false, tip)
 }
 
+/// Small outlined square button with a custom square size (e.g. 24.0 or 26.0 px).
+#[allow(dead_code)]
+pub fn glyph_button_size(ui: &mut Ui, glyph: Glyph, size: f32, tip: &str) -> Response {
+    glyph_button_custom(ui, glyph, size, false, tip)
+}
+
 /// Small outlined square button with a drawn glyph; supports active state.
 pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -> Response {
+    glyph_button_custom(ui, glyph, theme::CONTROL_H, active, tip)
+}
+
+/// Small outlined square button with custom size and active state.
+#[allow(dead_code)]
+pub fn glyph_button_custom(ui: &mut Ui, glyph: Glyph, size: f32, active: bool, tip: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());
     let hovered = resp.hovered();
     let p = ui.painter();
     let (fill, stroke, c) = if active || hovered {
@@ -449,7 +461,7 @@ pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -
     let m = rect.center();
     match glyph {
         Glyph::Close => {
-            let s = 4.5;
+            let s = (size * 0.15).clamp(3.5, 4.5);
             p.line_segment([m + vec2(-s, -s), m + vec2(s, s)], Stroke::new(1.5, c));
             p.line_segment([m + vec2(-s, s), m + vec2(s, -s)], Stroke::new(1.5, c));
         }
@@ -463,7 +475,7 @@ pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -
             p.rect_stroke(front, CornerRadius::ZERO, Stroke::new(1.2, c), egui::StrokeKind::Inside);
         }
         Glyph::Expand => {
-            let s = 4.2;
+            let s = (size * 0.14).clamp(3.2, 4.2);
             p.line_segment([m + vec2(s - 3.2, -s), m + vec2(s, -s)], Stroke::new(1.3, c));
             p.line_segment([m + vec2(s, -s), m + vec2(s, -s + 3.2)], Stroke::new(1.3, c));
             p.line_segment([m + vec2(-s, s - 3.2), m + vec2(-s, s)], Stroke::new(1.3, c));
@@ -478,11 +490,12 @@ pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -
             p.circle_filled(m + vec2(0.0, 4.5), r, c);
         }
         Glyph::Reset => {
+            let font_size = (size * 0.48).clamp(12.0, 15.0);
             p.text(
                 m,
                 egui::Align2::CENTER_CENTER,
                 egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE,
-                egui::FontId::new(15.0, theme::phosphor()),
+                egui::FontId::new(font_size, theme::phosphor()),
                 c,
             );
         }

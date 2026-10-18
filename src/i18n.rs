@@ -130,6 +130,10 @@ pub struct Strings {
     pub hunter_col_quick_actions: &'static str,
     pub hunter_btn_rule: &'static str,
     pub hunter_btn_rule_tip: &'static str,
+    pub hunter_btn_select: &'static str,
+    pub hunter_btn_select_tip: &'static str,
+    pub hunter_modal_title: &'static str,
+    pub hunter_modal_subtitle: &'static str,
 
     // Activity Log Stream View (logs_view.rs)
     pub logs_cell_all: &'static str,
@@ -187,6 +191,17 @@ pub struct Strings {
     pub inspector_trigger_process: &'static str,
     pub inspector_trigger_system: &'static str,
     pub inspector_trigger_timer: &'static str,
+    pub inspector_trigger_tab_process: &'static str,
+    pub inspector_trigger_tab_schedule: &'static str,
+    pub inspector_trigger_tab_events: &'static str,
+    pub inspector_match_tab_exact: &'static str,
+    pub inspector_match_tab_wildcard: &'static str,
+    pub inspector_match_tab_regex: &'static str,
+    pub inspector_sched_tab_interval: &'static str,
+    pub inspector_sched_tab_daily: &'static str,
+    pub inspector_sched_tab_specific: &'static str,
+    pub inspector_sched_tab_app_start: &'static str,
+    pub inspector_sched_tab_app_close: &'static str,
     pub inspector_field_target_process: &'static str,
     pub inspector_field_target_process_hint: &'static str,
     pub inspector_field_match_mode: &'static str,
@@ -246,6 +261,7 @@ pub struct Strings {
     pub inspector_btn_clone: &'static str,
     pub inspector_btn_clone_tip: &'static str,
     pub inspector_btn_cancel: &'static str,
+    pub inspector_btn_reset: &'static str,
     pub inspector_btn_reset_tip: &'static str,
 
     // Inspector Action Dropdown Menu Options

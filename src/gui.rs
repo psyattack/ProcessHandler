@@ -13,7 +13,7 @@ use views::changelog_modal::render_changelog_modal;
 use views::header_bar::render_header_bar;
 use views::inspector::render_inspector_drawer;
 use views::logs_view::render_logs_view;
-use views::processes_view::render_processes_view;
+use views::process_picker_modal::render_process_picker_modal;
 use views::rules_view::render_rules_view;
 use views::script_modal::render_script_editor_canvas;
 use views::settings_view::render_settings_view;
@@ -195,7 +195,6 @@ impl App for ProcessHandlerApp {
             .show(ui, |ui| {
                 match self.state.active_view {
                     ActiveView::Rules => render_rules_view(ui, &mut self.state),
-                    ActiveView::Processes => render_processes_view(ui, &mut self.state),
                     ActiveView::LiveStream => render_logs_view(ui, &mut self.state),
                     ActiveView::Settings => render_settings_view(ui, &mut self.state),
                 }
@@ -210,10 +209,13 @@ impl App for ProcessHandlerApp {
         // 5. Action Catalog Modal (library for selecting rule actions)
         render_action_catalog_modal(&ctx, &mut self.state);
 
-        // 5. Centered Expanded Script Canvas (modal popup for pwsh / cmd editing)
+        // 6. Process Picker Modal (Hunter inside studio modal for selecting a running process)
+        render_process_picker_modal(&ctx, &mut self.state);
+
+        // 7. Centered Expanded Script Canvas (modal popup for pwsh / cmd editing)
         render_script_editor_canvas(&ctx, &mut self.state);
 
-        // 6. Centered Changelog & Release Notes Modal
+        // 8. Centered Changelog & Release Notes Modal
         render_changelog_modal(&ctx, &mut self.state);
 
         // 7. Borderless Window Edges (8-direction border resize & hairline stroke)

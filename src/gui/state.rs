@@ -5,7 +5,6 @@ use crate::models::{ProcessSnapshotItem, Rule};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveView {
     Rules,
-    Processes,
     LiveStream,
     Settings,
 }
@@ -63,6 +62,8 @@ pub struct GuiState {
     pub editing_rule: Option<Rule>,
     pub builder_draft: Option<Rule>,
     pub picker_target: Option<ProcessPickerTarget>,
+    pub last_picker_target: Option<ProcessPickerTarget>,
+    pub process_search_query: String,
     pub expanded_script_editor: Option<ExpandedScriptEditorState>,
     pub last_script_editor: Option<ExpandedScriptEditorState>,
     pub action_catalog: Option<ActionCatalogModalState>,
@@ -100,6 +101,8 @@ impl GuiState {
             editing_rule: None,
             builder_draft: None,
             picker_target: None,
+            last_picker_target: None,
+            process_search_query: String::new(),
             expanded_script_editor: None,
             last_script_editor: None,
             action_catalog: None,
@@ -241,7 +244,7 @@ impl GuiState {
             }
         }
 
-        if self.active_view == ActiveView::Processes || self.editing_rule.is_some() || !self.search_query.is_empty() {
+        if self.picker_target.is_some() || self.editing_rule.is_some() || !self.search_query.is_empty() {
             if let Ok(IpcResponse::Processes(procs)) = IpcClient::call(&IpcRequest::GetProcesses) {
                 self.cached_processes = procs;
             }
@@ -377,85 +380,89 @@ impl GuiState {
         self.picker_target = None;
     }
 
-    pub fn switch_to_hunter_from_picker(&mut self, target: ProcessPickerTarget) {
-        self.close_action_catalog();
-        if let Some(rule) = self.editing_rule.take() {
-            self.builder_draft = Some(rule);
-        }
+    pub fn open_process_picker(&mut self, target: ProcessPickerTarget) {
+        self.ensure_processes();
+        self.process_search_query.clear();
         self.picker_target = Some(target);
-        self.selected_process = None;
-        self.active_view = ActiveView::Processes;
+        self.last_picker_target = Some(target);
+    }
+
+    pub fn close_process_picker(&mut self) {
+        self.picker_target = None;
+    }
+
+    pub fn apply_selected_process(&mut self, proc_name: &str) {
+        let loc = self.loc();
+        let target = self.picker_target.take().or(self.last_picker_target);
+        self.picker_target = None;
+
+        if let Some(rule) = &mut self.editing_rule {
+            match target {
+                Some(ProcessPickerTarget::Action(idx)) => {
+                    if let Some(action) = rule.actions.get_mut(idx) {
+                        match action {
+                            crate::models::Action::KillProcess { process_name, .. } => {
+                                *process_name = proc_name.to_string();
+                            }
+                            crate::models::Action::ProcessAudio { process_name, .. } => {
+                                *process_name = proc_name.to_string();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Some(ProcessPickerTarget::ExitAction(idx)) => {
+                    if let Some(action) = rule.on_exit_actions.get_mut(idx) {
+                        match action {
+                            crate::models::Action::KillProcess { process_name, .. } => {
+                                *process_name = proc_name.to_string();
+                            }
+                            crate::models::Action::ProcessAudio { process_name, .. } => {
+                                *process_name = proc_name.to_string();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Some(ProcessPickerTarget::Trigger) | None => {
+                    match &mut rule.trigger {
+                        Some(crate::models::Trigger::Process { process_name, .. }) => {
+                            *process_name = proc_name.to_string();
+                        }
+                        _ => {
+                            rule.trigger = Some(crate::models::Trigger::Process {
+                                process_name: proc_name.to_string(),
+                                match_mode: crate::models::ProcessMatchMode::Exact,
+                                single_instance: false,
+                            });
+                        }
+                    }
+
+                    if rule.name.is_empty()
+                        || rule.name == loc.rules_default_new_name
+                        || rule.name.starts_with(loc.inspector_rule_track_prefix)
+                    {
+                        rule.name = format!("{} {}", loc.inspector_rule_track_prefix, proc_name);
+                    }
+                }
+            }
+            rule.auto_process_icon = true;
+        }
     }
 
     pub fn apply_process_to_draft_or_new_rule(&mut self, proc_name: &str) {
         let loc = self.loc();
-        let mut rule = if let Some(draft) = self.builder_draft.take().or_else(|| self.editing_rule.take()) {
-            draft
-        } else {
-            self.initial_new_rule()
-        };
-
-        match self.picker_target.take() {
-            Some(ProcessPickerTarget::Action(idx)) => {
-                if let Some(action) = rule.actions.get_mut(idx) {
-                    match action {
-                        crate::models::Action::KillProcess { process_name, .. } => {
-                            *process_name = proc_name.to_string();
-                        }
-                        crate::models::Action::ProcessAudio { process_name, .. } => {
-                            *process_name = proc_name.to_string();
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Some(ProcessPickerTarget::ExitAction(idx)) => {
-                if let Some(action) = rule.on_exit_actions.get_mut(idx) {
-                    match action {
-                        crate::models::Action::KillProcess { process_name, .. } => {
-                            *process_name = proc_name.to_string();
-                        }
-                        crate::models::Action::ProcessAudio { process_name, .. } => {
-                            *process_name = proc_name.to_string();
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Some(ProcessPickerTarget::Trigger) | None => {
-                match &mut rule.trigger {
-                    Some(crate::models::Trigger::Process { process_name, .. }) => {
-                        *process_name = proc_name.to_string();
-                    }
-                    _ => {
-                        rule.trigger = Some(crate::models::Trigger::Process {
-                            process_name: proc_name.to_string(),
-                            match_mode: crate::models::ProcessMatchMode::Exact,
-                            single_instance: false,
-                        });
-                    }
-                }
-
-                if rule.name.is_empty()
-                    || rule.name == loc.rules_default_new_name
-                    || rule.name.starts_with(loc.inspector_rule_track_prefix)
-                {
-                    rule.name = format!("{} {}", loc.inspector_rule_track_prefix, proc_name);
-                }
-            }
-        }
-
+        let mut rule = self.initial_new_rule();
+        rule.trigger = Some(crate::models::Trigger::Process {
+            process_name: proc_name.to_string(),
+            match_mode: crate::models::ProcessMatchMode::Exact,
+            single_instance: false,
+        });
+        rule.name = format!("{} {}", loc.inspector_rule_track_prefix, proc_name);
         rule.auto_process_icon = true;
-
-        let is_new = if let Some(ds) = &self.daemon_state {
-            !ds.config.rules.iter().any(|r| r.id == rule.id)
-        } else {
-            true
-        };
-
         self.active_view = ActiveView::Rules;
-        self.is_creating_new_rule = is_new;
-        self.selected_rule_id = if is_new { None } else { Some(rule.id.clone()) };
+        self.is_creating_new_rule = true;
+        self.selected_rule_id = None;
         self.editing_rule = Some(rule);
         self.selected_process = None;
     }
