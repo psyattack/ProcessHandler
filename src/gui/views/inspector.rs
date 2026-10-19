@@ -41,10 +41,9 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
 
     let is_open = state.editing_rule.is_some() || state.selected_process.is_some();
 
-    // Handle Esc key to close inspector (only if script canvas and action catalog are NOT open)
+    // Handle Esc key to close inspector (only if child modals/overlays are NOT open)
     if is_open
-        && state.expanded_script_editor.is_none()
-        && state.action_catalog.is_none()
+        && !state.is_modal_open()
         && ctx.input(|i| i.key_pressed(egui::Key::Escape))
     {
         state.close_editor();

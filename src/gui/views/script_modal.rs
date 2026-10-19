@@ -72,15 +72,10 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
     );
 
     let header_h = 52.0;
-    let footer_h = 52.0;
     let header_rect = Rect::from_min_size(modal_rect.min, vec2(modal_rect.width(), header_h));
-    let footer_rect = Rect::from_min_size(
-        pos2(modal_rect.left(), modal_rect.bottom() - footer_h),
-        vec2(modal_rect.width(), footer_h),
-    );
     let body_rect = Rect::from_min_max(
         pos2(modal_rect.left(), header_rect.bottom()),
-        pos2(modal_rect.right(), footer_rect.top()),
+        modal_rect.max,
     );
 
     // Retrieve script string from state.editing_rule
@@ -133,8 +128,17 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
                 // Elevated studio drop shadow
                 p.add(theme::shadow(&t).as_shape(modal_rect, CornerRadius::same(2)));
 
-                // Panel background & precision border
+                // Panel background
                 p.rect_filled(modal_rect, CornerRadius::same(2), t.bg);
+
+                // 1. Header zone background and bottom hairline
+                p.rect_filled(header_rect, CornerRadius::ZERO, t.bg);
+                p.hline(header_rect.x_range(), header_rect.bottom(), t.hairline());
+
+                // 2. Editor body sunken well
+                p.rect_filled(body_rect, CornerRadius::ZERO, t.sunken);
+
+                // CRITICAL: Paint outer border stroke AFTER all inner fills so left, right, and bottom sides are consistently visible
                 p.rect_stroke(
                     modal_rect,
                     CornerRadius::same(2),
@@ -142,17 +146,8 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
                     egui::StrokeKind::Inside,
                 );
 
-                // 1. Header zone background and bottom hairline
-                p.rect_filled(header_rect, CornerRadius::ZERO, t.bg);
-                p.hline(header_rect.x_range(), header_rect.bottom(), t.hairline());
+                // Top accent stripe (blue) painted AFTER outer border stroke so white does not paint over it
                 p.hline(modal_rect.x_range(), modal_rect.top() + 1.0, Stroke::new(2.5, t.accent_ink));
-
-                // 2. Editor body sunken well
-                p.rect_filled(body_rect, CornerRadius::ZERO, t.sunken);
-
-                // 3. Footer zone background and top hairline
-                p.rect_filled(footer_rect, CornerRadius::ZERO, t.bg);
-                p.hline(footer_rect.x_range(), footer_rect.top(), t.hairline());
             }
 
             // --- 1. HEADER ZONE ---
@@ -164,27 +159,17 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
                     widgets::hud(ui, &format!("{} {:02}", prefix, modal.step_idx + 1), t.accent_ink);
                     ui.add_space(8.0);
                     widgets::badge(ui, modal.language.badge_name(), t.accent_ink);
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(modal.language.localized_subtitle(loc))
-                            .family(theme::medium())
-                            .size(13.0)
-                            .color(t.muted),
-                    );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(20.0);
                         if widgets::glyph_button(ui, Glyph::Close, loc.modal_tip_close).clicked() {
                             close_clicked = true;
                         }
-                        ui.add_space(14.0);
-                        let line_count = script_buffer.lines().count().max(1);
-                        let char_count = script_buffer.len();
-                        widgets::hud(
-                            ui,
-                            &format!("{} {}  •  {} {}", line_count, loc.modal_lines, char_count, loc.modal_bytes),
-                            t.faint,
-                        );
+
+                        ui.add_space(8.0);
+                        if widgets::button(ui, loc.modal_btn_copy_script, Kind::Secondary, 0.0).clicked() {
+                            copy_clicked = true;
+                        }
                     });
                 });
             });
@@ -214,24 +199,19 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
                     });
             });
 
-            // --- 3. FOOTER ZONE ---
-            ui.scope_builder(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add_space(20.0);
-                    widgets::hud(ui, loc.modal_esc_hint, t.faint);
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(20.0);
-                        if widgets::button(ui, loc.modal_btn_done, Kind::Primary, 0.0).clicked() {
-                            close_clicked = true;
-                        }
-                        ui.add_space(10.0);
-                        if widgets::button(ui, loc.modal_btn_copy_script, Kind::Secondary, 0.0).clicked() {
-                            copy_clicked = true;
-                        }
-                    });
-                });
-            });
+            // Floating semi-transparent metrics label in bottom-right corner of editor canvas
+            {
+                let line_count = script_buffer.lines().count().max(1);
+                let char_count = script_buffer.chars().count();
+                let metrics_text = format!("{} {}  •  {} {}", line_count, loc.modal_lines, char_count, loc.modal_chars);
+                let text_color = t.faint.gamma_multiply(0.5);
+                let galley = widgets::caps(ui, &metrics_text, 9.5, theme::mono(), 9.5 * 0.10, text_color);
+                let text_pos = pos2(
+                    inner_body.right() - 8.0 - galley.size().x,
+                    inner_body.bottom() - 4.0 - galley.size().y,
+                );
+                ui.painter().galley_with_override_text_color(text_pos, galley, text_color);
+            }
         });
 
     if copy_clicked {

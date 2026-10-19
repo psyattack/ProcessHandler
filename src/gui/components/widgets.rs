@@ -51,6 +51,7 @@ pub fn hud(ui: &mut Ui, text: &str, color: Color32) -> Response {
 }
 
 /// A mono label elided with "…" if wider than `max_width`. Full text on hover.
+#[allow(dead_code)]
 pub fn hud_elided(ui: &mut Ui, text: &str, color: Color32, max_width: f32) -> Response {
     let format = egui::TextFormat {
         font_id: egui::FontId::new(theme::HUD_SIZE, theme::mono()),

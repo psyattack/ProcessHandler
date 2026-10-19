@@ -14,7 +14,6 @@ pub enum ProcessSortColumn {
     #[default]
     Name,
     Pid,
-    Memory,
     WindowTitle,
 }
 
@@ -391,6 +390,14 @@ impl GuiState {
         self.picker_target = None;
     }
 
+    /// Whether any modal popup (script editor, action catalog, process picker, or changelog) is currently open.
+    pub fn is_modal_open(&self) -> bool {
+        self.expanded_script_editor.is_some()
+            || self.action_catalog.is_some()
+            || self.picker_target.is_some()
+            || (self.show_changelog_modal && self.available_update.is_some())
+    }
+
     pub fn apply_selected_process(&mut self, proc_name: &str) {
         let loc = self.loc();
         let target = self.picker_target.take().or(self.last_picker_target);
@@ -628,3 +635,59 @@ impl GuiState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_modal_open() {
+        let mut state = GuiState::new();
+        assert!(!state.is_modal_open());
+
+        // Process picker
+        state.open_process_picker(ProcessPickerTarget::Trigger);
+        assert!(state.is_modal_open());
+        state.close_process_picker();
+        assert!(!state.is_modal_open());
+
+        // Action catalog
+        state.action_catalog = Some(ActionCatalogModalState {
+            is_exit_pipeline: false,
+            insert_idx: None,
+            search_query: String::new(),
+            selected_category: 0,
+        });
+        assert!(state.is_modal_open());
+        state.action_catalog = None;
+        assert!(!state.is_modal_open());
+
+        // Script editor
+        state.expanded_script_editor = Some(ExpandedScriptEditorState {
+            step_idx: 0,
+            is_exit_pipeline: false,
+            language: crate::gui::components::script_highlighter::ScriptLanguage::PowerShell,
+        });
+        assert!(state.is_modal_open());
+        state.expanded_script_editor = None;
+        assert!(!state.is_modal_open());
+
+        // Changelog modal (requires show_changelog_modal && available_update.is_some())
+        state.show_changelog_modal = true;
+        assert!(!state.is_modal_open());
+        state.available_update = Some(crate::updater::ReleaseInfo {
+            version: "1.4.0".into(),
+            tag_name: "v1.4.0".into(),
+            name: "v1.4.0".into(),
+            body: "Notes".into(),
+            html_url: "http://example.com".into(),
+            asset_url: "http://example.com/asset.zip".into(),
+            asset_name: "asset.zip".into(),
+            asset_size: 1024,
+        });
+        assert!(state.is_modal_open());
+        state.show_changelog_modal = false;
+        assert!(!state.is_modal_open());
+    }
+}
+

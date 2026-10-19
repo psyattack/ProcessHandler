@@ -19,6 +19,7 @@ impl ScriptLanguage {
         }
     }
 
+    #[allow(dead_code)]
     pub fn localized_subtitle(&self, loc: &crate::i18n::Strings) -> &'static str {
         match self {
             Self::PowerShell => loc.modal_pwsh_subtitle,

@@ -385,6 +385,7 @@ pub static STRINGS: Strings = Strings {
     // Script Modal (script_modal.rs)
     modal_tip_close: "Close canvas (Esc)",
     modal_lines: "LINES",
+    modal_chars: "CHARS",
     modal_bytes: "BYTES",
     modal_esc_hint: "PRESS ESC OR CLICK OUTSIDE TO CLOSE",
     modal_btn_done: "DONE",

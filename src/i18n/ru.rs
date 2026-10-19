@@ -385,6 +385,7 @@ pub static STRINGS: Strings = Strings {
     // Script Modal (script_modal.rs)
     modal_tip_close: "Закрыть холст (Esc)",
     modal_lines: "СТРОК",
+    modal_chars: "СИМВОЛОВ",
     modal_bytes: "БАЙТ",
     modal_esc_hint: "НАЖМИТЕ ESC ИЛИ ВНЕ ОКНА ДЛЯ ЗАКРЫТИЯ",
     modal_btn_done: "ГОТОВО",

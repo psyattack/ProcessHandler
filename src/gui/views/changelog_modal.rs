@@ -63,15 +63,10 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
     );
 
     let header_h = 56.0;
-    let footer_h = 52.0;
     let header_rect = Rect::from_min_size(modal_rect.min, vec2(modal_rect.width(), header_h));
-    let footer_rect = Rect::from_min_size(
-        pos2(modal_rect.left(), modal_rect.bottom() - footer_h),
-        vec2(modal_rect.width(), footer_h),
-    );
     let body_rect = Rect::from_min_max(
         pos2(modal_rect.left(), header_rect.bottom()),
-        pos2(modal_rect.right(), footer_rect.top()),
+        modal_rect.max,
     );
 
     let mut close_clicked = false;
@@ -93,6 +88,13 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
                 let p = ui.painter();
                 p.add(theme::shadow(&t).as_shape(modal_rect, CornerRadius::same(2)));
                 p.rect_filled(modal_rect, CornerRadius::same(2), t.bg);
+
+                p.rect_filled(header_rect, CornerRadius::ZERO, t.bg);
+                p.hline(header_rect.x_range(), header_rect.bottom(), t.hairline());
+
+                p.rect_filled(body_rect, CornerRadius::ZERO, t.sunken);
+
+                // CRITICAL: Paint outer border stroke AFTER all inner fills so left, right, and bottom sides are consistently visible
                 p.rect_stroke(
                     modal_rect,
                     CornerRadius::same(2),
@@ -100,14 +102,8 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
                     egui::StrokeKind::Inside,
                 );
 
-                p.rect_filled(header_rect, CornerRadius::ZERO, t.bg);
-                p.hline(header_rect.x_range(), header_rect.bottom(), t.hairline());
+                // Top accent stripe (blue) painted AFTER outer border stroke so white does not paint over it
                 p.hline(modal_rect.x_range(), modal_rect.top() + 1.0, Stroke::new(2.5, t.accent_ink));
-
-                p.rect_filled(body_rect, CornerRadius::ZERO, t.sunken);
-
-                p.rect_filled(footer_rect, CornerRadius::ZERO, t.bg);
-                p.hline(footer_rect.x_range(), footer_rect.top(), t.hairline());
             }
 
             // --- 1. HEADER ZONE ---
@@ -133,11 +129,35 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
                             close_clicked = true;
                         }
 
+                        ui.add_space(8.0);
+
+                        // Update Now Button
+                        let is_busy = state.is_downloading_update;
+                        let update_btn_label = if is_busy {
+                            format!("{} {:.0}%", loc.changelog_btn_update, (state.update_download_progress * 100.0).clamp(0.0, 100.0))
+                        } else {
+                            loc.changelog_btn_update.to_string()
+                        };
+
+                        ui.add_enabled_ui(!is_busy, |ui| {
+                            if widgets::button(ui, &update_btn_label, Kind::Primary, 0.0).clicked() {
+                                update_clicked = true;
+                            }
+                        });
+
                         if !info.html_url.is_empty() {
+                            ui.add_space(8.0);
                             let open_label = format!("{} {}", egui_phosphor::regular::ARROW_SQUARE_OUT, loc.changelog_open_github);
                             if widgets::button(ui, &open_label, Kind::Secondary, 0.0).clicked() {
                                 ui.ctx().open_url(egui::OpenUrl::same_tab(&info.html_url));
                             }
+                        }
+
+                        // File size info
+                        let size_mb = info.asset_size as f64 / 1_048_576.0;
+                        if size_mb > 0.05 {
+                            ui.add_space(10.0);
+                            widgets::hud(ui, &format!("{:.1} MB", size_mb), t.faint);
                         }
                     });
                 });
@@ -160,45 +180,6 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
                             render_rich_changelog(ui, body_text, &t);
                         }
                     });
-            });
-
-            // --- 3. FOOTER ZONE ---
-            ui.scope_builder(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.add_space(20.0);
-
-                    // File size info
-                    let size_mb = info.asset_size as f64 / 1_048_576.0;
-                    let size_label = if size_mb > 0.05 {
-                        format!("{}  {:.1} MB", info.asset_name, size_mb)
-                    } else {
-                        info.asset_name.clone()
-                    };
-                    widgets::hud(ui, &size_label, t.faint);
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(20.0);
-
-                        // Update Now Button
-                        let is_busy = state.is_downloading_update;
-                        let update_btn_label = if is_busy {
-                            format!("{} {:.0}%", loc.changelog_btn_update, (state.update_download_progress * 100.0).clamp(0.0, 100.0))
-                        } else {
-                            loc.changelog_btn_update.to_string()
-                        };
-
-                        ui.add_enabled_ui(!is_busy, |ui| {
-                            if widgets::button(ui, &update_btn_label, Kind::Primary, 0.0).clicked() {
-                                update_clicked = true;
-                            }
-                        });
-
-                        ui.add_space(8.0);
-                        if widgets::button(ui, loc.changelog_btn_close, Kind::Secondary, 0.0).clicked() {
-                            close_clicked = true;
-                        }
-                    });
-                });
             });
         });
 

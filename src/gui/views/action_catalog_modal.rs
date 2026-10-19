@@ -291,20 +291,15 @@ pub fn render_action_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
 
     let header_h = 46.0;
     let search_h = 46.0;
-    let footer_h = 38.0;
 
     let header_rect = Rect::from_min_size(modal_rect.min, vec2(modal_rect.width(), header_h));
     let search_rect = Rect::from_min_size(
         pos2(modal_rect.left(), header_rect.bottom()),
         vec2(modal_rect.width(), search_h),
     );
-    let footer_rect = Rect::from_min_size(
-        pos2(modal_rect.left(), modal_rect.bottom() - footer_h),
-        vec2(modal_rect.width(), footer_h),
-    );
     let body_rect = Rect::from_min_max(
         pos2(modal_rect.left(), search_rect.bottom()),
-        pos2(modal_rect.right(), footer_rect.top()),
+        modal_rect.max,
     );
 
     let sidebar_w = 195.0;
@@ -333,30 +328,25 @@ pub fn render_action_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
                 let p = ui.painter();
                 p.add(theme::shadow(&t).as_shape(modal_rect, CornerRadius::same(2)));
                 p.rect_filled(modal_rect, CornerRadius::same(2), t.bg);
+
+                // Section background fills
+                p.rect_filled(header_rect, CornerRadius::ZERO, t.bg);
+                p.rect_filled(search_rect, CornerRadius::ZERO, t.sunken);
+                p.rect_filled(sidebar_rect, CornerRadius::ZERO, t.bg);
+                p.rect_filled(cards_rect, CornerRadius::ZERO, t.sunken);
+
+                // Horizontal dividers and sidebar border
+                p.hline(modal_rect.x_range(), header_rect.bottom(), t.hairline());
+                p.hline(modal_rect.x_range(), search_rect.bottom(), t.hairline());
+                p.vline(sidebar_rect.right(), body_rect.y_range(), t.hairline());
+
+                // CRITICAL: Paint outer border stroke AFTER all inner fills so all 4 sides are consistently visible
                 p.rect_stroke(
                     modal_rect,
                     CornerRadius::same(2),
                     Stroke::new(1.0, t.line_strong),
                     egui::StrokeKind::Inside,
                 );
-
-                // Top accent stripe
-                p.hline(modal_rect.x_range(), modal_rect.top() + 1.0, Stroke::new(2.5, t.accent_ink));
-
-                // Horizontal dividers
-                p.hline(modal_rect.x_range(), header_rect.bottom(), t.hairline());
-                p.hline(modal_rect.x_range(), search_rect.bottom(), t.hairline());
-                p.hline(modal_rect.x_range(), footer_rect.top(), t.hairline());
-
-                // Section background fills
-                p.rect_filled(header_rect, CornerRadius::ZERO, t.bg);
-                p.rect_filled(search_rect, CornerRadius::ZERO, t.sunken);
-                p.rect_filled(footer_rect, CornerRadius::ZERO, t.bg);
-
-                // Sidebar background and vertical border
-                p.rect_filled(sidebar_rect, CornerRadius::ZERO, t.bg);
-                p.vline(sidebar_rect.right(), body_rect.y_range(), t.hairline());
-                p.rect_filled(cards_rect, CornerRadius::ZERO, t.sunken);
             }
 
             // ---------------- 1. HEADER ----------------
@@ -387,7 +377,7 @@ pub fn render_action_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
                     ui.add_space(6.0);
 
                     let has_query = !modal_state.search_query.is_empty();
-                    let extra_w = if has_query { 50.0 } else { 24.0 };
+                    let extra_w = if has_query { 40.0 } else { 14.0 };
                     let input_w = (ui.available_width() - extra_w).max(100.0);
 
                     let _search_resp = ui.add_sized(
@@ -553,6 +543,7 @@ pub fn render_action_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
                         egui::ScrollArea::vertical()
                             .id_salt("catalog_cards_scroll")
                             .auto_shrink([false, false])
+                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                             .show(ui, |ui| {
                                 ui.set_width(ui.available_width());
                                 if filtered_items.is_empty() {
@@ -683,19 +674,6 @@ pub fn render_action_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
                     });
             });
 
-            // ---------------- 4. FOOTER ----------------
-            ui.scope_builder(egui::UiBuilder::new().max_rect(footer_rect), |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.add_space(18.0);
-                    widgets::hud(ui, loc.catalog_esc_hint, t.faint);
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(18.0);
-                        let count_str = loc.catalog_actions_count.replace("{}", &filtered_items.len().to_string());
-                        widgets::hud(ui, &count_str, t.muted);
-                    });
-                });
-            });
         });
 
     if let Some(act) = chosen_action {

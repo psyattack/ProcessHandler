@@ -402,6 +402,7 @@ pub struct Strings {
     // Script Modal (script_modal.rs)
     pub modal_tip_close: &'static str,
     pub modal_lines: &'static str,
+    pub modal_chars: &'static str,
     pub modal_bytes: &'static str,
     pub modal_esc_hint: &'static str,
     pub modal_btn_done: &'static str,

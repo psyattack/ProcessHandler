@@ -153,29 +153,18 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
 
                             widgets::cells(ui, &mut state.process_category_filter, &options);
 
-                            // Right side: Close button, Rescan button, Search Input
+                            // Right side: Close button, Search Input
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if widgets::glyph_button(ui, Glyph::Close, loc.inspector_btn_close_tip).clicked() {
                                     close_requested = true;
                                 }
 
-                                ui.add_space(6.0);
-
-                                if widgets::button(ui, loc.hunter_btn_rescan, Kind::Secondary, 0.0).clicked() {
-                                    if let Ok(crate::ipc::IpcResponse::Processes(procs)) =
-                                        crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::GetProcesses)
-                                    {
-                                        state.cached_processes = procs;
-                                        state.set_toast(loc.toast_process_refreshed);
-                                    }
-                                }
-
-                                ui.add_space(6.0);
+                                ui.add_space(8.0);
 
                                 ui.add(
                                     egui::TextEdit::singleline(&mut state.process_search_query)
                                         .hint_text(loc.hunter_search_placeholder)
-                                        .desired_width(220.0)
+                                        .desired_width(240.0)
                                         .min_size(vec2(0.0, theme::CONTROL_H))
                                         .vertical_align(egui::Align::Center)
                                         .margin(vec2(10.0, 8.0)),
@@ -205,10 +194,9 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
                                 .resizable(false)
                                 .min_scrolled_height(table_h)
                                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                                .column(Column::remainder().at_least(180.0).clip(true))
+                                .column(Column::exact(300.0).clip(true))
                                 .column(Column::exact(65.0))
-                                .column(Column::exact(120.0))
-                                .column(Column::exact(150.0).clip(true))
+                                .column(Column::remainder().at_least(200.0).clip(true))
                                 .column(Column::exact(125.0))
                                 .header(32.0, |mut header| {
                                     header.col(|ui| {
@@ -218,22 +206,12 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
                                         render_sortable_header(ui, state, ProcessSortColumn::Pid, loc.hunter_col_pid, &t);
                                     });
                                     header.col(|ui| {
-                                        render_sortable_header(ui, state, ProcessSortColumn::Memory, loc.hunter_col_working_set, &t);
-                                    });
-                                    header.col(|ui| {
                                         render_sortable_header(ui, state, ProcessSortColumn::WindowTitle, loc.hunter_col_window_title, &t);
                                     });
                                     header.col(|ui| {
                                         let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
                                         let galley = widgets::caps(ui, loc.hunter_col_quick_actions, theme::HUD_SIZE, theme::mono_bold(), theme::HUD_SPACING, t.faint);
-                                        let text_w = galley.size().x;
-                                        let text_x = if text_w <= rect.width() {
-                                            rect.right() - text_w
-                                        } else {
-                                            rect.left()
-                                        };
-                                        let text_pos = pos2(text_x, rect.center().y - galley.size().y / 2.0);
-                                        ui.painter().galley(text_pos, galley, t.faint);
+                                        widgets::paint_centred(ui, rect, galley, t.faint);
                                     });
                                 })
                                 .body(|mut body| {
@@ -279,37 +257,36 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                 widgets::paint_left(ui, cell_rect, galley, t.muted);
                                             });
 
-                                            // Memory Column
+                                            // Window Title Column (expanded width, elided)
                                             row.col(|ui| {
-                                                let mb = proc.memory_bytes as f64 / (1024.0 * 1024.0);
-                                                let mem_color = if mb > 1024.0 {
-                                                    t.accent_ink
-                                                } else if mb > 400.0 {
-                                                    t.warn
-                                                } else {
-                                                    t.good
-                                                };
+                                                let (cell_rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click());
+                                                if resp.double_clicked() {
+                                                    row_double_clicked = true;
+                                                }
+                                                ui.painter().hline(cell_rect.x_range(), cell_rect.bottom() - 0.5, t.hairline());
 
-                                                ui.horizontal(|ui| {
-                                                    widgets::hud(ui, &format!("{:.1} MB", mb), mem_color);
-                                                    let ratio = (mb / 1024.0).min(1.0) as f32;
-                                                    let (bar_rect, _) = ui.allocate_exact_size(vec2(32.0, 4.0), Sense::hover());
-                                                    ui.painter().rect_filled(bar_rect, CornerRadius::ZERO, t.line);
-                                                    let mut fill_rect = bar_rect;
-                                                    fill_rect.set_width(bar_rect.width() * ratio.max(0.08));
-                                                    ui.painter().rect_filled(fill_rect, CornerRadius::ZERO, mem_color);
-                                                });
-                                            });
-
-                                            // Window Title Column (reduced width, elided)
-                                            row.col(|ui| {
                                                 let title = if proc.window_title.is_empty() { "—" } else { &proc.window_title };
-                                                widgets::hud_elided(ui, title, if proc.window_title.is_empty() { t.faint } else { t.muted }, 140.0);
+                                                let color = if proc.window_title.is_empty() { t.faint } else { t.muted };
+                                                let format = egui::TextFormat {
+                                                    font_id: egui::FontId::new(theme::HUD_SIZE, theme::mono()),
+                                                    color,
+                                                    extra_letter_spacing: theme::HUD_SPACING,
+                                                    ..Default::default()
+                                                };
+                                                let mut job = egui::text::LayoutJob::single_section(title.to_uppercase(), format);
+                                                job.wrap = egui::text::TextWrapping::truncate_at_width(cell_rect.width());
+                                                let galley = ui.painter().layout_job(job);
+                                                let elided = galley.elided;
+                                                widgets::paint_left(ui, cell_rect, galley, color);
+                                                if elided {
+                                                    resp.on_hover_text(title);
+                                                }
                                             });
 
                                             // Actions Column (SELECT button)
                                             row.col(|ui| {
-                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                ui.vertical_centered(|ui| {
+                                                    ui.add_space((ui.available_height() - theme::CONTROL_H).max(0.0) / 2.0);
                                                     if widgets::button(ui, loc.hunter_btn_select, Kind::Primary, 0.0)
                                                         .on_hover_text(loc.hunter_btn_select_tip)
                                                         .clicked()
@@ -373,12 +350,7 @@ fn filter_and_sort_processes(state: &GuiState) -> Vec<ProcessSnapshotItem> {
                 if asc { cmp } else { cmp.reverse() }
             });
         }
-        ProcessSortColumn::Memory => {
-            filtered.sort_by(|a, b| {
-                let cmp = a.memory_bytes.cmp(&b.memory_bytes);
-                if asc { cmp } else { cmp.reverse() }
-            });
-        }
+
         ProcessSortColumn::WindowTitle => {
             filtered.sort_by(|a, b| {
                 let cmp = a.window_title.to_lowercase().cmp(&b.window_title.to_lowercase());
@@ -422,3 +394,25 @@ fn render_sortable_header(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_select_button_centered() {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            ui.allocate_ui(vec2(125.0, 36.0), |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space((ui.available_height() - theme::CONTROL_H).max(0.0) / 2.0);
+                    let (rect, _) = ui.allocate_exact_size(vec2(65.0, theme::CONTROL_H), Sense::click());
+                    assert_eq!(rect.min.x, 30.0);
+                    assert_eq!(rect.min.y, 1.0);
+                });
+            });
+        });
+        out.textures_delta.clear();
+    }
+}
+
