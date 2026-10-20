@@ -17,24 +17,25 @@
 
 **ProcessHandler** is a fast, native Windows process automation service and task monitor built in 100% pure Rust. Designed as a dual-tier system, it decouples background execution from user interaction:
 
-1. **System Tray Daemon**: An ultra-low overhead background service that listens reactively to Windows WMI process lifecycle events, manages schedules, and executes automated rule pipelines with zero window baggage.
+1. **System Tray Daemon**: An ultra-low overhead background service that listens reactively to system events, process lifecycles, and triggers, managing schedules and executing automated rule pipelines with zero window baggage.
 2. **Interactive Desktop GUI**: A hardware-accelerated, high-DPI desktop interface powered by `egui` and `eframe`, communicating seamlessly with the daemon via high-throughput Windows Named Pipes (`\\.\pipe\ProcessHandler_daemon`).
 
 Whether you need to boost game performance by binding companion utilities, safeguard your PC from rogue memory leaks, or automate daily workflow scripts, ProcessHandler delivers full control with near-zero resource utilization (<0.1% CPU, ~2MB RAM).
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/6eb36b2e-5852-451b-abbe-d1bd2be790c7" width="100%">
-  <img src="https://github.com/user-attachments/assets/3859f79f-23eb-4bed-8d07-a258b7ffdeb4" width="49%"> <img src="https://github.com/user-attachments/assets/f8e86dfc-f37e-48fc-8f26-95849b7f2282" width="49%">
+  <img src="https://github.com/user-attachments/assets/777a1893-7a49-45bf-ad52-84375a5ef808" width="100%">
 </div>
 
 ---
 
 ## ✨ Key Features
 
-* **Instant process lifecycle detection** via native Windows WMI event notifications and low-latency snapshotting
-* **Flexible multi-action pipeline** combining process control, PowerShell/CMD scripts, webhooks, and delays
-* **Deep Windows audio control** covering per-process volume/mute, master sound, and microphone devices (WASAPI)
-* **Comprehensive trigger engine** spanning process events, scheduled timers, user idle states, and system power transitions
+* **Event-driven process detection** via native Windows WMI subscriptions and low-latency snapshotting
+* **Versatile trigger engine** spanning process lifecycles, window focus, CPU/RAM thresholds, global hotkeys, file watcher, webhooks, and schedules
+* **Flexible action pipeline** covering process control, window management, CPU/memory tuning, scripts, macros, audio devices, and webhooks
+* **Embedded Lua 5.4 runtime** (`mlua`) with dedicated `ph` API alongside PowerShell and Batch scripting
+* **Macro Studio** with low-level keyboard/mouse recording, timeline editing, loop control, and organic jitter
+* **Deep Windows audio & device control** covering per-process volume/mute, master sound, and default playback/mic devices (WASAPI)
 * **Companion process mode** with automated lifecycle coupling and graceful exit cleanup
 * **Ultra-lightweight daemon architecture** with background tray operation (<0.1% CPU, ~2MB RAM) and named-pipe IPC
 * **Portable rule sharing** via compressed, self-contained clipboard codes (single and batch import/export)
@@ -54,18 +55,26 @@ Whether you need to boost game performance by binding companion utilities, safeg
 <summary><b>Automation & Rules Engine</b></summary>
 
 - **Triggers**:
-  - *Process Lifecycle*: Target application launch, termination, or running duration (exact match, wildcards, regex).
+  - *Process Lifecycle*: Target application launch, termination, or duration (exact match, wildcard, regex).
+  - *Window Focus*: Gain or loss of active foreground window focus.
+  - *Resource Thresholds*: Sustained high CPU (%) or RAM (MB) usage limits.
+  - *Global Hotkeys*: System-wide shortcut listener with toggle or hold mode.
+  - *File Watcher*: File and folder creation, modification, or deletion with extension filters.
+  - *Local Webhooks*: Inbound HTTP REST requests (`http://127.0.0.1:48123/api/v1/trigger/{endpoint}`).
   - *Schedules & Alarms*: Fixed intervals, daily recurring schedules, and one-shot date/time alarms.
-  - *System & Power Events*: User idle/active state, session lock/unlock, system sleep/wake, and AC/battery power transitions.
+  - *System & Power*: User idle/active state, session lock/unlock, sleep/wake, and AC/battery transitions.
 - **Action Pipelines**:
-  - *Process Management*: Launch applications (custom arguments, working directory, admin rights, hidden mode), terminate process trees, or restart.
-  - *Audio & Microphone Control*: Control master volume, per-application audio sessions (WASAPI mute/volume), and microphone recording endpoints.
-  - *PowerShell & CMD Scripts*: Execute custom scripts and CLI commands with an integrated syntax-highlighting editor.
-  - *Alerts & Webhooks*: Native Windows toast notifications and outbound HTTP REST webhooks (POST/GET/PUT).
-  - *Flow & System*: Screen locking and configurable pause intervals between steps.
+  - *Process Control*: Launch (custom arguments, working dir, admin, hidden mode), terminate process trees, or restart.
+  - *Window Management*: Minimize, maximize, restore, hide, show, close, transparency, always-on-top, and screen positioning.
+  - *Process Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and trim memory working sets.
+  - *Scripting & Automation*: Embedded Lua 5.4 (`ph` API), PowerShell, and Batch scripts with token interpolation (`{pid}`, `{process}`, `{window_title}`, `{file_path}`).
+  - *Macro Playback*: Recorded keyboard and mouse sequences with speed multipliers, loop counts, and organic jitter.
+  - *Audio & Device Control*: System and per-app volume/mute, microphone levels, and default playback/recording device switching.
+  - *Alerts & Webhooks*: Windows toast notifications and outbound HTTP REST calls (POST/GET/PUT).
+  - *System Power & Delays*: System lock, sleep, display off, shutdown, and configurable pause intervals between steps.
 - **Execution & Safeguards**:
-  - Non-blocking asynchronous task execution ensuring the daemon and UI never freeze.
-  - Cooldown timers, execution counters, rule cloning, and pause toggles.
+  - Non-blocking asynchronous task execution with per-step action testing directly in the editor.
+  - Cooldowns, execution limits (`max_executions`), execution counters, rule cloning, and multi-level Undo/Redo (Ctrl+Z / Ctrl+Y).
   - One-click clipboard import/export of rules via compressed portable payloads.
 
 </details>
@@ -82,7 +91,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 <summary><b>Architecture & System Integration</b></summary>
 
 - **Dual-Tier Decoupled Architecture**: Lightweight background daemon (<0.1% CPU, ~2MB RAM) running continuously in the system tray, separated from the desktop GUI.
-- **Named Pipes IPC**: Fast, thread-safe local communication between interface and daemon.
+- **Named Pipes IPC**: Fast, thread-safe local communication between interface and daemon (`\\.\pipe\ProcessHandler_daemon`).
 - **Tray & Startup Control**: Unobtrusive system tray icon with quick actions and one-click Windows startup registration.
 - **In-App Auto-Updater**: Built-in GitHub Releases checker with zero-downtime binary updates.
 
@@ -92,9 +101,11 @@ Whether you need to boost game performance by binding companion utilities, safeg
 <summary><b>User Interface & Workspace</b></summary>
 
 - **Visual Studio**: Hardware-accelerated interface with Dark, Light, and Chocolate palettes, plus full English and Russian localization.
-- **Interactive Rule Builder**: Drag-and-drop step reordering, real-time step execution highlighting, automatic target process icon detection, and builder draft preservation.
-- **Action Catalog & Process Picker**: Fast in-context modal dialogs to browse available actions and select active processes without losing editor state.
-- **Activity Feed**: Real-time diagnostic logs capturing trigger evaluations, action outputs, and system events.
+- **Interactive Rule Builder**: Drag-and-drop step reordering, real-time step execution tracking, target process icon detection, and multi-step Undo/Redo.
+- **Macro Studio & Editor**: Built-in input recorder with timeline editing, speed/loop settings, and organic motion controls.
+- **Action Catalog & Process Picker**: Fast in-context modal dialogs to browse actions and pick active processes without losing editor draft.
+- **Analytics & Telemetry**: Monospace event stream with live KPI metrics (Total Executions, Active Rules, System Uptime) and category filters.
+- **Built-in Documentation**: In-app GitBook-style guide with architecture overview, shortcut cheat sheets, and practical recipes.
 
 </details>
 
@@ -166,7 +177,7 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 - **eframe** (Desktop windowing & rendering integration)
 - **Custom Design Tokens & Themes** (Dark, Light, Chocolate palettes)
 - **i18n Localization Engine** (Full English & Russian support)
-- **Script Syntax Highlighter** (PowerShell & Batch lexer)
+- **Script Syntax Highlighter** (PowerShell, Batch & Lua lexer)
 - **Win32 Shell GDI & image crate** (Native icon rasterization, PNG/JPEG decoding & textures)
 - **arboard** (Cross-platform system clipboard integration)
 - **Named Pipe Client** (Thread-safe IPC client)
@@ -177,9 +188,10 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 ### Backend / Engine
 - **Rust** (High-performance, memory-safe systems language)
 - **Tokio** (Asynchronous runtime for decoupled rule execution & IPC)
+- **mlua** (Embedded Lua 5.4 engine with vendored build)
 - **windows-rs** (Official Win32, COM & Core Audio bindings)
 - **WMI** (Windows Management Instrumentation event listener)
-- **Core Audio & WASAPI** (System volume & per-process)
+- **Core Audio & WASAPI** (System volume, default devices & per-process)
 - **reqwest** (Async HTTP client for GitHub releases & binary updates)
 - **Named Pipes Server** (Multi-client background IPC listener)
 - **Serde + Serde JSON** (Strongly-typed state persistence)
@@ -199,54 +211,62 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 
 ```
 ProcessHandler/
-├── assets/                           # Application assets & branding
-│   ├── fonts/                        # Bundled variable fonts (Archivo, GeistMono, Inter)
-│   ├── app.ico                       # Win32 application icon
-│   ├── app.png                       # High-res RGBA icon
-│   └── app.svg                       # Vector logo
-├── src/                              # Source code
-│   ├── daemon/                       # Background daemon service
-│   │   ├── actions.rs                # Execution handlers (Process, Master/Mic/Process Audio, Toast, Commands)
-│   │   ├── engine.rs                 # Central automation state engine & rule evaluator
-│   │   ├── ipc_server.rs             # Named pipe listener & connection worker
-│   │   ├── system_events.rs          # Win32 idle time & AC/battery power monitor
-│   │   ├── tray.rs                   # Win32 system tray manager, menu & message loop
-│   │   └── watcher.rs                # WMI events & Toolhelp32 process snapshotting
-│   ├── gui/                          # egui desktop user interface
-│   │   ├── components/               # UI components
-│   │   │   ├── icons.rs              # Win32 shell icon extractor, image loader & texture cache
-│   │   │   ├── script_highlighter.rs # PowerShell & Batch syntax highlighter
-│   │   │   └── widgets.rs            # Custom canvas controls (buttons, inputs, cards, drag handles, glyphs)
-│   │   ├── views/                    # Application screens & panels
+├── assets/                             # Application assets & branding
+│   ├── fonts/                          # Bundled variable fonts (Archivo, GeistMono, Inter)
+│   ├── app.ico                         # Win32 application icon
+│   ├── app.png                         # High-res RGBA icon
+│   └── app.svg                         # Vector logo
+├── src/                                # Source code
+│   ├── daemon/                         # Background daemon service
+│   │   ├── actions.rs                  # Execution handlers (Process, Window, Tuning, Audio, Scripts, Macros)
+│   │   ├── engine.rs                   # Central automation state engine & rule evaluator
+│   │   ├── file_watcher.rs             # Filesystem polling & directory event watcher
+│   │   ├── hotkeys.rs                  # Low-level global hotkey listener & hold-mode engine
+│   │   ├── ipc_server.rs               # Named pipe listener & connection worker
+│   │   ├── lua_runner.rs               # Embedded Lua 5.4 execution runner with custom `ph` API
+│   │   ├── system_events.rs            # Win32 idle time & AC/battery power monitor
+│   │   ├── tray.rs                     # Win32 system tray manager, menu & message loop
+│   │   ├── watcher.rs                  # WMI events & Toolhelp32 process snapshotting
+│   │   └── webhook_server.rs           # Local HTTP webhook server (port 48123)
+│   ├── gui/                            # egui desktop user interface
+│   │   ├── components/                 # UI components
+│   │   │   ├── icons.rs                # Win32 shell icon extractor, image loader & texture cache
+│   │   │   ├── modal.rs                # Unified animated modal window framework
+│   │   │   ├── script_highlighter.rs   # PowerShell, Batch & Lua syntax highlighter
+│   │   │   └── widgets.rs              # Custom canvas controls (buttons, inputs, cards, drag handles, glyphs)
+│   │   ├── views/                      # Application screens & panels
 │   │   │   ├── action_catalog_modal.rs # Studio modal for categorized action browsing & search
-│   │   │   ├── changelog_modal.rs    # GitHub release notes & changelog viewer
-│   │   │   ├── header_bar.rs         # Custom window titlebar & controls
-│   │   │   ├── inspector.rs          # Rule inspector, trigger & action editor (drag-and-drop)
-│   │   │   ├── logs_view.rs          # Real-time event & action logs
+│   │   │   ├── analytics_view.rs       # Real-time event telemetry stream & KPI metric cards
+│   │   │   ├── changelog_modal.rs      # GitHub release notes & changelog viewer
+│   │   │   ├── guide_modal.rs          # GitBook-style interactive documentation & recipes
+│   │   │   ├── header_bar.rs           # Custom window titlebar & navigation tabs
+│   │   │   ├── inspector.rs            # Rule inspector, trigger & action editor (drag-and-drop, undo/redo)
+│   │   │   ├── macro_modal.rs          # Macro timeline editor & playback studio
 │   │   │   ├── process_picker_modal.rs # In-context process picker modal with filter & sorting
-│   │   │   ├── rules_view.rs         # Rule management list & cards
-│   │   │   ├── script_modal.rs       # Expandable script editor modal
-│   │   │   └── settings_view.rs      # Balanced 2x2 settings (System, Engine, Appearance, Updates)
-│   │   ├── state.rs                  # GUI state management & IPC synchronization
-│   │   └── theme.rs                  # Design system tokens (Dark, Light, Chocolate palettes)
-│   ├── i18n/                         # Internationalization & localization
-│   │   ├── en.rs                     # English string catalog
-│   │   └── ru.rs                     # Russian string catalog
-│   ├── ipc/                          # Inter-process communication
-│   │   ├── client.rs                 # Named pipe IPC client
-│   │   └── protocol.rs               # Request & response message types (Serde)
-│   ├── autorun.rs                    # Windows Registry autorun integration
-│   ├── config.rs                     # JSON configuration persistence & validation (theme, language, updates)
-│   ├── daemon.rs                     # Daemon entrypoint & service lifecycle
-│   ├── gui.rs                        # GUI entrypoint & eframe application loop
-│   ├── i18n.rs                       # Internationalization loader & language switcher
-│   ├── models.rs                     # Domain data models (Rule, Trigger, Action, Process)
-│   ├── sharing.rs                    # Portable automation compression, encoding & clipboard sharing
-│   ├── updater.rs                    # GitHub releases auto-update & self-replacement engine
-│   └── main.rs                       # CLI dispatcher (--daemon, --gui, default)
-├── build.rs                          # Windows resource compilation (icon, manifest)
-├── Cargo.toml                        # Rust manifest & dependencies
-└── LICENSE                           # MIT License
+│   │   │   ├── rules_view.rs           # Rule management list & cards
+│   │   │   ├── script_modal.rs         # Expandable script editor modal (PowerShell, CMD, Lua)
+│   │   │   └── settings_view.rs        # Balanced 2x2 settings (System, Engine, Appearance, Updates)
+│   │   ├── macro_recorder.rs           # Win32 low-level keyboard/mouse macro recorder
+│   │   ├── state.rs                    # GUI state management & IPC synchronization
+│   │   └── theme.rs                    # Design system tokens (Dark, Light, Chocolate palettes)
+│   ├── i18n/                           # Internationalization & localization
+│   │   ├── en.rs                       # English string catalog
+│   │   └── ru.rs                       # Russian string catalog
+│   ├── ipc/                            # Inter-process communication
+│   │   ├── client.rs                   # Named pipe IPC client
+│   │   └── protocol.rs                 # Request & response message types (Serde)
+│   ├── autorun.rs                      # Windows Registry autorun integration
+│   ├── config.rs                       # JSON configuration persistence & validation (theme, language, updates)
+│   ├── daemon.rs                       # Daemon entrypoint & service lifecycle
+│   ├── gui.rs                          # GUI entrypoint & eframe application loop
+│   ├── i18n.rs                         # Internationalization loader & language switcher
+│   ├── models.rs                       # Domain data models (Rule, Trigger, Action, Process)
+│   ├── sharing.rs                      # Portable automation compression, encoding & clipboard sharing
+│   ├── updater.rs                      # GitHub releases auto-update & self-replacement engine
+│   └── main.rs                         # CLI dispatcher (--daemon, --gui, default)
+├── build.rs                            # Windows resource compilation (icon, manifest)
+├── Cargo.toml                          # Rust manifest & dependencies
+└── LICENSE                             # MIT License
 ```
 
 </details>
@@ -263,7 +283,7 @@ Configuration and state files are located in:
 | `config.json` | Application settings, user rules, poll interval, window geometry, color theme (`dark`, `light`, `chocolate`), language (`english`, `russian`), startup update checks, and autorun state |
 
 > [!NOTE]
-> Event and action execution logs are maintained in an in-memory ring buffer (up to 100 entries) in RAM and streamed via IPC directly to the GUI without incurring disk I/O wear.
+> Event and action execution logs are maintained in an in-memory ring buffer (up to 500 entries) in RAM, with smart eviction prioritizing rule execution and error history, and streamed via IPC directly to the GUI without incurring disk I/O wear.
 
 ---
 
