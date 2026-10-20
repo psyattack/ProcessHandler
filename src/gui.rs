@@ -1,4 +1,5 @@
 pub mod components;
+pub mod macro_recorder;
 pub mod state;
 pub mod theme;
 pub mod views;
@@ -9,10 +10,12 @@ use components::widgets;
 use state::{ActiveView, GuiState};
 use theme::{Tokens, apply_theme};
 use views::action_catalog_modal::render_action_catalog_modal;
+use views::analytics_view::render_analytics_view;
 use views::changelog_modal::render_changelog_modal;
+use views::guide_modal::render_guide_modal;
 use views::header_bar::render_header_bar;
 use views::inspector::render_inspector_drawer;
-use views::logs_view::render_logs_view;
+use views::macro_modal::render_macro_modal;
 use views::process_picker_modal::render_process_picker_modal;
 use views::rules_view::render_rules_view;
 use views::script_modal::render_script_editor_canvas;
@@ -195,7 +198,7 @@ impl App for ProcessHandlerApp {
             .show(ui, |ui| {
                 match self.state.active_view {
                     ActiveView::Rules => render_rules_view(ui, &mut self.state),
-                    ActiveView::LiveStream => render_logs_view(ui, &mut self.state),
+                    ActiveView::Analytics => render_analytics_view(ui, &mut self.state),
                     ActiveView::Settings => render_settings_view(ui, &mut self.state),
                 }
 
@@ -215,8 +218,14 @@ impl App for ProcessHandlerApp {
         // 7. Centered Expanded Script Canvas (modal popup for pwsh / cmd editing)
         render_script_editor_canvas(&ctx, &mut self.state);
 
-        // 8. Centered Changelog & Release Notes Modal
+        // 8. Centered Interactive Macro Studio Modal (record / edit keystrokes & mouse)
+        render_macro_modal(&ctx, &mut self.state);
+
+        // 9. Centered Changelog & Release Notes Modal
         render_changelog_modal(&ctx, &mut self.state);
+
+        // 10. Centered Editor Guide & Documentation Modal
+        render_guide_modal(&ctx, &mut self.state);
 
         // 7. Borderless Window Edges (8-direction border resize & hairline stroke)
         widgets::window_edges(&ctx);

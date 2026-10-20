@@ -130,9 +130,9 @@ mod tests {
                     message: "Cleaning up".into(),
                 },
             ],
-            execution_count: 0,
             custom_icon_path: Some("C:\\games\\game.exe".into()),
             auto_process_icon: true,
+            ..Default::default()
         };
 
         let encoded = compress_and_encode(&SharedAutomation::Single(rule.clone())).expect("encode failed");
@@ -164,9 +164,9 @@ mod tests {
                     message: format!("Message {i}"),
                 }],
                 on_exit_actions: Vec::new(),
-                execution_count: 0,
                 custom_icon_path: None,
                 auto_process_icon: false,
+                ..Default::default()
             });
         }
 

@@ -3,10 +3,11 @@
 //! Win32 icons, and 1-click select binding for triggers and actions.
 
 use egui::{
-    Color32, CornerRadius, Id, Margin, Order, Rect, Sense, Stroke, Ui,
-    emath::easing, pos2, vec2,
+    Color32, CornerRadius, Margin, Rect, Sense, Stroke,
+    pos2, vec2,
 };
 use egui_extras::{Column, TableBuilder};
+use crate::gui::components::modal::Modal;
 use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::{GuiState, ProcessCategoryFilter, ProcessSortColumn};
 use crate::gui::theme::{self, Tokens};
@@ -15,104 +16,20 @@ use crate::models::ProcessSnapshotItem;
 pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
     let t = Tokens::get(ctx);
     let is_open = state.picker_target.is_some();
-    let mut close_requested = false;
-
-    // Handle Esc key to close modal
-    if is_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        close_requested = true;
-    }
-
-    let anim = ctx.animate_bool_with_time_and_easing(
-        Id::new("process-picker-modal-anim"),
-        is_open,
-        0.20,
-        easing::cubic_out,
-    );
-
-    if anim <= 0.001 && !is_open {
-        state.last_picker_target = None;
-        return;
-    }
-
-    let target = state
-        .picker_target
-        .or(state.last_picker_target);
-
-    let Some(_target) = target else { return };
-
-    let full = ctx.content_rect();
-
-    // 1. Full-screen scrim overlay
-    let scrim_alpha = (anim * 195.0) as u8;
-    egui::Area::new(Id::new("process-picker-modal-scrim"))
-        .order(Order::Foreground)
-        .fixed_pos(full.min)
-        .show(ctx, |ui| {
-            let (rect, resp) = ui.allocate_exact_size(full.size(), Sense::click());
-            ui.painter().rect_filled(
-                rect,
-                CornerRadius::ZERO,
-                egui::Color32::from_black_alpha(scrim_alpha),
-            );
-            if resp.clicked() {
-                close_requested = true;
-            }
-        });
-
-    // 2. Centered Modal Box geometry
-    let modal_w = (full.width() * 0.85).clamp(720.0, 960.0).min(full.width() - 32.0);
-    let modal_h = (full.height() * 0.82).clamp(480.0, 680.0).min(full.height() - 48.0);
-    let center = full.center();
-
-    let scale = 0.95 + 0.05 * anim;
-    let y_shift = (1.0 - anim) * 12.0;
-    let modal_rect = Rect::from_center_size(
-        pos2(center.x, center.y + y_shift),
-        vec2(modal_w * scale, modal_h * scale),
-    );
-
-    let top_bar_h = 46.0;
-    let top_bar_rect = Rect::from_min_size(modal_rect.min, vec2(modal_rect.width(), top_bar_h));
-    let body_rect = Rect::from_min_max(
-        pos2(modal_rect.left(), top_bar_rect.bottom()),
-        modal_rect.max,
-    );
-
     let loc = state.loc();
     let mut chosen_process: Option<String> = None;
 
-    // 3. Modal Surface
-    egui::Area::new(Id::new("process-picker-modal-window"))
-        .order(Order::Tooltip)
-        .fixed_pos(modal_rect.min)
-        .show(ctx, |ui| {
-            ui.set_width(modal_rect.width());
-            ui.set_height(modal_rect.height());
-            ui.set_max_width(modal_rect.width());
-            ui.set_max_height(modal_rect.height());
-            ui.set_clip_rect(modal_rect);
-
-            // Paint background surfaces, dividers, and outer border stroke
-            {
-                let p = ui.painter();
-                p.add(theme::shadow(&t).as_shape(modal_rect, CornerRadius::same(2)));
-                p.rect_filled(modal_rect, CornerRadius::same(2), t.bg);
-                p.rect_filled(top_bar_rect, CornerRadius::same(2), t.sunken);
-                p.hline(modal_rect.x_range(), top_bar_rect.bottom(), t.hairline());
-
-                // CRITICAL: Paint outer border stroke AFTER all inner fills so all 4 sides are consistently visible
-                p.rect_stroke(
-                    modal_rect,
-                    CornerRadius::same(2),
-                    Stroke::new(1.0, t.line_strong),
-                    egui::StrokeKind::Inside,
-                );
-            }
-
-            // Top Bar: Category Cells on the left, Search + Rescan + Close on the right (same row)
-            ui.scope_builder(egui::UiBuilder::new().max_rect(top_bar_rect), |ui| {
-                ui.set_width(top_bar_rect.width());
-                ui.set_height(top_bar_rect.height());
+    let modal_res = Modal::new("process-picker-modal", is_open)
+        .width_fraction(0.85)
+        .height_fraction(0.82)
+        .min_size(vec2(720.0, 480.0))
+        .max_size(vec2(960.0, 680.0))
+        .header_height(46.0)
+        .header_sunken(true)
+        .accent_bar(t.accent_ink)
+        .show(ctx, &t, |frame| {
+            // Header: Category Cells on the left, Search + Close on the right
+            frame.header(|ui, close_req| {
                 egui::Frame::new()
                     .inner_margin(Margin { left: 14, right: 12, top: 7, bottom: 7 })
                     .show(ui, |ui| {
@@ -156,7 +73,7 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
                             // Right side: Close button, Search Input
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if widgets::glyph_button(ui, Glyph::Close, loc.inspector_btn_close_tip).clicked() {
-                                    close_requested = true;
+                                    *close_req = true;
                                 }
 
                                 ui.add_space(8.0);
@@ -175,9 +92,7 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
             });
 
             // Body Content (Table)
-            ui.scope_builder(egui::UiBuilder::new().max_rect(body_rect), |ui| {
-                ui.set_width(body_rect.width());
-                ui.set_height(body_rect.height());
+            frame.body(|ui| {
                 egui::Frame::new()
                     .inner_margin(Margin { left: 14, right: 14, top: 4, bottom: 8 })
                     .show(ui, |ui| {
@@ -306,8 +221,12 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
 
     if let Some(name) = chosen_process {
         state.apply_selected_process(&name);
-    } else if close_requested {
-        state.close_process_picker();
+    } else if let Some(res) = modal_res {
+        if res.close_requested {
+            state.close_process_picker();
+        }
+    } else if !is_open {
+        state.last_picker_target = None;
     }
 }
 
@@ -338,54 +257,34 @@ fn filter_and_sort_processes(state: &GuiState) -> Vec<ProcessSnapshotItem> {
 
     let asc = state.process_sort_ascending;
     match state.process_sort_column {
-        ProcessSortColumn::Name => {
-            filtered.sort_by(|a, b| {
-                let cmp = a.name.to_lowercase().cmp(&b.name.to_lowercase());
-                if asc { cmp } else { cmp.reverse() }
-            });
-        }
-        ProcessSortColumn::Pid => {
-            filtered.sort_by(|a, b| {
-                let cmp = a.pid.cmp(&b.pid);
-                if asc { cmp } else { cmp.reverse() }
-            });
-        }
-
-        ProcessSortColumn::WindowTitle => {
-            filtered.sort_by(|a, b| {
-                let cmp = a.window_title.to_lowercase().cmp(&b.window_title.to_lowercase());
-                if asc { cmp } else { cmp.reverse() }
-            });
-        }
+        ProcessSortColumn::Name => filtered.sort_by(|a, b| {
+            let cmp = a.name.to_lowercase().cmp(&b.name.to_lowercase());
+            if asc { cmp } else { cmp.reverse() }
+        }),
+        ProcessSortColumn::Pid => filtered.sort_by(|a, b| {
+            let cmp = a.pid.cmp(&b.pid);
+            if asc { cmp } else { cmp.reverse() }
+        }),
+        ProcessSortColumn::WindowTitle => filtered.sort_by(|a, b| {
+            let cmp = a.window_title.to_lowercase().cmp(&b.window_title.to_lowercase());
+            if asc { cmp } else { cmp.reverse() }
+        }),
     }
 
     filtered
 }
 
 fn render_sortable_header(
-    ui: &mut Ui,
+    ui: &mut egui::Ui,
     state: &mut GuiState,
     col: ProcessSortColumn,
-    title: &str,
+    label: &str,
     t: &Tokens,
 ) {
     let is_active = state.process_sort_column == col;
-    let label = if is_active {
-        if state.process_sort_ascending {
-            format!("{} ▲", title)
-        } else {
-            format!("{} ▼", title)
-        }
-    } else {
-        title.to_string()
-    };
-
     let (rect, resp) = ui.allocate_exact_size(ui.available_size(), Sense::click());
-    let color = if is_active || resp.hovered() { t.ink_strong } else { t.faint };
-    let galley = widgets::caps(ui, &label, theme::HUD_SIZE, theme::mono_bold(), theme::HUD_SPACING, color);
-    widgets::paint_left(ui, rect, galley, color);
 
-    if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+    if resp.clicked() {
         if is_active {
             state.process_sort_ascending = !state.process_sort_ascending;
         } else {
@@ -393,26 +292,25 @@ fn render_sortable_header(
             state.process_sort_ascending = true;
         }
     }
+
+    let color = if resp.hovered() {
+        t.ink_strong
+    } else if is_active {
+        t.accent_ink
+    } else {
+        t.faint
+    };
+
+    let title = if is_active {
+        if state.process_sort_ascending {
+            format!("{} ▲", label)
+        } else {
+            format!("{} ▼", label)
+        }
+    } else {
+        label.to_string()
+    };
+
+    let galley = widgets::caps(ui, &title, theme::HUD_SIZE, theme::mono_bold(), theme::HUD_SPACING, color);
+    widgets::paint_left(ui, rect, galley, color);
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_select_button_centered() {
-        let ctx = egui::Context::default();
-        let mut out = ctx.run_ui(Default::default(), |ui| {
-            ui.allocate_ui(vec2(125.0, 36.0), |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space((ui.available_height() - theme::CONTROL_H).max(0.0) / 2.0);
-                    let (rect, _) = ui.allocate_exact_size(vec2(65.0, theme::CONTROL_H), Sense::click());
-                    assert_eq!(rect.min.x, 30.0);
-                    assert_eq!(rect.min.y, 1.0);
-                });
-            });
-        });
-        out.textures_delta.clear();
-    }
-}
-

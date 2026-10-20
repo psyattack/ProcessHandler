@@ -1,9 +1,13 @@
 pub mod actions;
 pub mod engine;
+pub mod file_watcher;
+pub mod hotkeys;
 pub mod ipc_server;
+pub mod lua_runner;
 pub mod system_events;
 pub mod tray;
 pub mod watcher;
+pub mod webhook_server;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -33,6 +37,51 @@ pub fn run_daemon() {
         .enable_all()
         .build()
         .expect("Failed to create Tokio runtime for daemon");
+
+    // Initialize Global Hotkey Listener
+    let (hotkey_tx, mut hotkey_rx) = tokio::sync::mpsc::unbounded_channel::<hotkeys::HotkeyEvent>();
+    let hotkey_handle = hotkeys::start_hotkey_listener(hotkey_tx);
+    hotkey_handle.reload(&config.rules);
+
+    {
+        let engine_clone = Arc::clone(&engine);
+        let h_handle = hotkey_handle.clone();
+        rt.block_on(async {
+            let mut eng = engine_clone.lock().await;
+            eng.hotkey_handle = Some(h_handle);
+        });
+    }
+
+    // Spawn Global Hotkey Event Loop (supports Normal toggle, Hold mode, and Infinite macro cancellation)
+    let engine_hotkey = Arc::clone(&engine);
+    rt.spawn(async move {
+        while let Some(ev) = hotkey_rx.recv().await {
+            let mut eng = engine_hotkey.lock().await;
+            match ev {
+                hotkeys::HotkeyEvent::Trigger(rule_id) => {
+                    if eng.is_rule_executing(&rule_id) {
+                        eng.stop_rule_execution(&rule_id);
+                    } else if let Some(rule) = eng.config.rules.iter().find(|r| r.id == rule_id).cloned() {
+                        if rule.is_enabled {
+                            let _ = eng.try_execute_rule(&rule, "Global Hotkey", 0).await;
+                        }
+                    }
+                }
+                hotkeys::HotkeyEvent::HoldStart(rule_id) => {
+                    if !eng.is_rule_executing(&rule_id) {
+                        if let Some(rule) = eng.config.rules.iter().find(|r| r.id == rule_id).cloned() {
+                            if rule.is_enabled {
+                                let _ = eng.try_execute_rule(&rule, "Global Hotkey (Hold)", 0).await;
+                            }
+                        }
+                    }
+                }
+                hotkeys::HotkeyEvent::HoldStop(rule_id) => {
+                    eng.stop_rule_execution(&rule_id);
+                }
+            }
+        }
+    });
 
     // Log daemon initialization status
     {
@@ -103,6 +152,27 @@ pub fn run_daemon() {
             interval.tick().await;
             let mut eng = engine_sched.lock().await;
             eng.tick_schedule().await;
+        }
+    });
+
+    // Spawn Webhook Server Loop
+    let engine_webhook = Arc::clone(&engine);
+    rt.spawn(async move {
+        let server = crate::daemon::webhook_server::WebhookServer::new(
+            engine_webhook,
+            crate::daemon::webhook_server::DEFAULT_WEBHOOK_PORT,
+        );
+        server.run().await;
+    });
+
+    // Spawn File Watcher Loop
+    let engine_file = Arc::clone(&engine);
+    rt.spawn(async move {
+        let mut file_watcher = crate::daemon::file_watcher::FileWatcherService::new(engine_file);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(1500));
+        loop {
+            interval.tick().await;
+            file_watcher.poll_once().await;
         }
     });
 

@@ -9,6 +9,7 @@ use crate::gui::theme::{self, Tokens};
 pub enum ScriptLanguage {
     PowerShell,
     Batch,
+    Lua,
 }
 
 impl ScriptLanguage {
@@ -16,6 +17,7 @@ impl ScriptLanguage {
         match self {
             Self::PowerShell => "POWERSHELL",
             Self::Batch => "CMD / BATCH",
+            Self::Lua => "LUA 5.4",
         }
     }
 
@@ -24,6 +26,7 @@ impl ScriptLanguage {
         match self {
             Self::PowerShell => loc.modal_pwsh_subtitle,
             Self::Batch => loc.modal_cmd_subtitle,
+            Self::Lua => "Embedded Lua Automation Script",
         }
     }
 }
@@ -433,6 +436,146 @@ fn highlight_batch(text: &str, t: &Tokens, font_size: f32, job: &mut LayoutJob) 
     }
 }
 
+const LUA_KEYWORDS: &[&str] = &[
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
+    "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then",
+    "true", "until", "while",
+];
+
+const LUA_GLOBALS: &[&str] = &[
+    "ph", "log", "run_cmd", "get", "set", "print", "assert", "error", "ipairs",
+    "pairs", "pcall", "xpcall", "select", "tonumber", "tostring", "type", "string",
+    "table", "math", "io", "os", "coroutine", "package", "utf8", "debug",
+];
+
+fn highlight_lua(text: &str, t: &Tokens, font_size: f32, job: &mut LayoutJob) {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let n = chars.len();
+    let mut i = 0;
+
+    let byte_end = |idx: usize| -> usize {
+        if idx < n {
+            chars[idx].0
+        } else {
+            text.len()
+        }
+    };
+
+    while i < n {
+        let (start_byte, ch) = chars[i];
+
+        // 1. Block comment --[[ ... ]] or line comment -- ...
+        if ch == '-' && i + 1 < n && chars[i + 1].1 == '-' {
+            let start = start_byte;
+            i += 2;
+            if i + 1 < n && chars[i].1 == '[' && chars[i + 1].1 == '[' {
+                i += 2;
+                while i < n {
+                    if chars[i].1 == ']' && i + 1 < n && chars[i + 1].1 == ']' {
+                        i += 2;
+                        break;
+                    }
+                    i += 1;
+                }
+            } else {
+                while i < n && chars[i].1 != '\n' {
+                    i += 1;
+                }
+            }
+            append_span(job, &text[start..byte_end(i)], t.muted.gamma_multiply(0.7), false, font_size);
+            continue;
+        }
+
+        // 2. Multiline raw string literal [[ ... ]]
+        if ch == '[' && i + 1 < n && chars[i + 1].1 == '[' {
+            let start = start_byte;
+            i += 2;
+            while i < n {
+                if chars[i].1 == ']' && i + 1 < n && chars[i + 1].1 == ']' {
+                    i += 2;
+                    break;
+                }
+                i += 1;
+            }
+            let str_color = if t.dark { Color32::from_rgb(165, 214, 167) } else { Color32::from_rgb(46, 125, 50) };
+            append_span(job, &text[start..byte_end(i)], str_color, false, font_size);
+            continue;
+        }
+
+        // 3. String literal "..." or '...'
+        if ch == '"' || ch == '\'' {
+            let quote = ch;
+            let start = start_byte;
+            i += 1;
+            while i < n {
+                let cur = chars[i].1;
+                if cur == '\\' && i + 1 < n {
+                    i += 2;
+                    continue;
+                }
+                if cur == quote {
+                    i += 1;
+                    break;
+                }
+                if cur == '\n' {
+                    break;
+                }
+                i += 1;
+            }
+            let str_color = if t.dark { Color32::from_rgb(165, 214, 167) } else { Color32::from_rgb(46, 125, 50) };
+            append_span(job, &text[start..byte_end(i)], str_color, false, font_size);
+            continue;
+        }
+
+        // 4. Numbers (hex 0x... or decimal / float)
+        if ch.is_ascii_digit() || (ch == '.' && i + 1 < n && chars[i + 1].1.is_ascii_digit()) {
+            let start = start_byte;
+            if ch == '0' && i + 1 < n && (chars[i + 1].1 == 'x' || chars[i + 1].1 == 'X') {
+                i += 2;
+                while i < n && chars[i].1.is_ascii_hexdigit() {
+                    i += 1;
+                }
+            } else {
+                while i < n && (chars[i].1.is_ascii_digit() || chars[i].1 == '.' || chars[i].1 == 'e' || chars[i].1 == 'E') {
+                    i += 1;
+                }
+            }
+            let num_color = if t.dark { Color32::from_rgb(255, 183, 77) } else { Color32::from_rgb(230, 81, 0) };
+            append_span(job, &text[start..byte_end(i)], num_color, false, font_size);
+            continue;
+        }
+
+        // 5. Identifiers (Keywords, globals, or normal identifiers)
+        if ch.is_alphabetic() || ch == '_' {
+            let start = start_byte;
+            while i < n && (chars[i].1.is_alphanumeric() || chars[i].1 == '_') {
+                i += 1;
+            }
+            let word = &text[start..byte_end(i)];
+            if LUA_KEYWORDS.contains(&word) {
+                append_span(job, word, t.accent_ink, true, font_size);
+            } else if LUA_GLOBALS.contains(&word) {
+                let glob_color = if t.dark { Color32::from_rgb(129, 212, 250) } else { Color32::from_rgb(2, 119, 189) };
+                append_span(job, word, glob_color, false, font_size);
+            } else {
+                append_span(job, word, t.ink, false, font_size);
+            }
+            continue;
+        }
+
+        // 6. Operators & punctuation
+        if "+-*/%^#=~<>;:,.{}()[]".contains(ch) {
+            let start = start_byte;
+            append_span(job, &text[start..byte_end(i + 1)], t.muted, false, font_size);
+            i += 1;
+            continue;
+        }
+
+        append_span(job, &text[start_byte..byte_end(i + 1)], t.ink, false, font_size);
+        i += 1;
+    }
+}
+
 pub fn highlight_script(
     text: &str,
     lang: ScriptLanguage,
@@ -443,6 +586,7 @@ pub fn highlight_script(
     match lang {
         ScriptLanguage::PowerShell => highlight_powershell(text, t, font_size, &mut job),
         ScriptLanguage::Batch => highlight_batch(text, t, font_size, &mut job),
+        ScriptLanguage::Lua => highlight_lua(text, t, font_size, &mut job),
     }
     job
 }
@@ -477,6 +621,15 @@ mod tests {
         let t = Tokens::DARK;
         let script = "@echo off\n:: comment\nrem comment\nset TARGET=app.exe\nif exist %TARGET% (\n    start /b \"\" \"%TARGET%\"\n)";
         let job = highlight_script(script, ScriptLanguage::Batch, &t, 12.0);
+        assert!(!job.sections.is_empty());
+        assert_eq!(job.text, script);
+    }
+
+    #[test]
+    fn test_lua_highlighter_preserves_text() {
+        let t = Tokens::DARK;
+        let script = "-- Lua script\n--[[ block ]]\nlocal target = \"notepad.exe\"\nph.log(\"info\", \"Starting: \" .. target)\nif ph.get(\"status\") == nil then\n    ph.set(\"status\", 1)\nend";
+        let job = highlight_script(script, ScriptLanguage::Lua, &t, 12.0);
         assert!(!job.sections.is_empty());
         assert_eq!(job.text, script);
     }

@@ -9,17 +9,31 @@ use crate::gui::components::script_highlighter::{create_script_layouter, ScriptL
 use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
+use crate::i18n::Language;
 use crate::models::{
-    Action, MicrophoneActionType, ProcessAudioActionType, ProcessMatchMode, ProcessSnapshotItem, Rule, ScheduleType, SoundActionType,
-    SystemEventType, SystemPowerType, Trigger,
+    Action, PowerPlanType, ProcessAudioActionType, ProcessMatchMode,
+    ProcessPriorityLevel, ProcessSnapshotItem, Rule, ScheduleType,
+    SystemEventType, SystemPowerType, Trigger, WindowActionType,
 };
 use chrono::{Datelike, Timelike};
+use std::collections::HashMap;
+use std::time::Instant;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum TriggerCategory {
     Process,
+    Window,
     Schedule,
     Events,
+    System,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum SystemSubMode {
+    Resource,
+    Hotkey,
+    FileWatcher,
+    Webhook,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -34,6 +48,94 @@ enum EventTriggerKind {
     UserActive,
     AppStartup,
     AppShutdown,
+}
+
+
+fn egui_key_to_hotkey_name(key: egui::Key) -> Option<&'static str> {
+    match key {
+        egui::Key::A => Some("A"),
+        egui::Key::B => Some("B"),
+        egui::Key::C => Some("C"),
+        egui::Key::D => Some("D"),
+        egui::Key::E => Some("E"),
+        egui::Key::F => Some("F"),
+        egui::Key::G => Some("G"),
+        egui::Key::H => Some("H"),
+        egui::Key::I => Some("I"),
+        egui::Key::J => Some("J"),
+        egui::Key::K => Some("K"),
+        egui::Key::L => Some("L"),
+        egui::Key::M => Some("M"),
+        egui::Key::N => Some("N"),
+        egui::Key::O => Some("O"),
+        egui::Key::P => Some("P"),
+        egui::Key::Q => Some("Q"),
+        egui::Key::R => Some("R"),
+        egui::Key::S => Some("S"),
+        egui::Key::T => Some("T"),
+        egui::Key::U => Some("U"),
+        egui::Key::V => Some("V"),
+        egui::Key::W => Some("W"),
+        egui::Key::X => Some("X"),
+        egui::Key::Y => Some("Y"),
+        egui::Key::Z => Some("Z"),
+        egui::Key::Num0 => Some("0"),
+        egui::Key::Num1 => Some("1"),
+        egui::Key::Num2 => Some("2"),
+        egui::Key::Num3 => Some("3"),
+        egui::Key::Num4 => Some("4"),
+        egui::Key::Num5 => Some("5"),
+        egui::Key::Num6 => Some("6"),
+        egui::Key::Num7 => Some("7"),
+        egui::Key::Num8 => Some("8"),
+        egui::Key::Num9 => Some("9"),
+        egui::Key::F1 => Some("F1"),
+        egui::Key::F2 => Some("F2"),
+        egui::Key::F3 => Some("F3"),
+        egui::Key::F4 => Some("F4"),
+        egui::Key::F5 => Some("F5"),
+        egui::Key::F6 => Some("F6"),
+        egui::Key::F7 => Some("F7"),
+        egui::Key::F8 => Some("F8"),
+        egui::Key::F9 => Some("F9"),
+        egui::Key::F10 => Some("F10"),
+        egui::Key::F11 => Some("F11"),
+        egui::Key::F12 => Some("F12"),
+        egui::Key::Enter => Some("Enter"),
+        egui::Key::Tab => Some("Tab"),
+        egui::Key::Space => Some("Space"),
+        egui::Key::Backspace => Some("Backspace"),
+        egui::Key::Delete => Some("Delete"),
+        egui::Key::Insert => Some("Insert"),
+        egui::Key::Home => Some("Home"),
+        egui::Key::End => Some("End"),
+        egui::Key::PageUp => Some("PageUp"),
+        egui::Key::PageDown => Some("PageDown"),
+        egui::Key::ArrowUp => Some("Up"),
+        egui::Key::ArrowDown => Some("Down"),
+        egui::Key::ArrowLeft => Some("Left"),
+        egui::Key::ArrowRight => Some("Right"),
+        _ => None,
+    }
+}
+
+fn format_hotkey_combination(key: egui::Key, modifiers: egui::Modifiers) -> Option<String> {
+    let key_name = egui_key_to_hotkey_name(key)?;
+    let mut parts = Vec::new();
+    if modifiers.ctrl || modifiers.command {
+        parts.push("Ctrl");
+    }
+    if modifiers.alt {
+        parts.push("Alt");
+    }
+    if modifiers.shift {
+        parts.push("Shift");
+    }
+    if modifiers.mac_cmd {
+        parts.push("Win");
+    }
+    parts.push(key_name);
+    Some(parts.join("+"))
 }
 
 pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
@@ -187,9 +289,33 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
                         ui.set_width(ui.available_width());
                         ui.set_max_width(ui.available_width());
 
+                        // Keyboard shortcuts for Undo (Ctrl+Z) and Redo (Ctrl+Y or Ctrl+Shift+Z)
+                        let (do_undo, do_redo) = ui.input_mut(|i| {
+                            let u = i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)
+                                || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z);
+                            let r = i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)
+                                || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
+                                || i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::Z)
+                                || i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
+                            (u, r)
+                        });
+
+                        let mut undid_or_redid = false;
+                        if do_undo {
+                            state.undo();
+                            undid_or_redid = true;
+                        } else if do_redo {
+                            state.redo();
+                            undid_or_redid = true;
+                        }
+
                         if let Some(mut rule) = state.editing_rule.clone() {
+                            let pre_rule = rule.clone();
                             render_rule_editor(ui, state, &mut rule, &t);
                             if state.editing_rule.is_some() {
+                                if !undid_or_redid && rule != pre_rule && state.undo_stack.last() != Some(&pre_rule) {
+                                    state.push_undo_snapshot_of(&pre_rule);
+                                }
                                 state.editing_rule = Some(rule);
                             }
                         } else if let Some(proc) = state.selected_process.clone() {
@@ -236,6 +362,12 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
                                 if widgets::button(ui, loc.inspector_btn_cancel, Kind::Secondary, 0.0).clicked() {
                                     state.close_editor();
                                 }
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if widgets::glyph_button(ui, Glyph::Question, loc.footer_guide_tip).clicked() {
+                                        state.show_guide_modal = true;
+                                    }
+                                });
                             });
                         });
                 });
@@ -266,6 +398,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
             // 1. Basic Info & Icon Avatar
             let loc = state.loc();
+
             widgets::eyebrow(ui, "01", loc.inspector_eyebrow_task_details);
 
             egui::Frame::new()
@@ -376,6 +509,31 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                             ui.checkbox(&mut rule.auto_process_icon, loc.inspector_icon_auto_process)
                                 .on_hover_text(loc.inspector_icon_auto_process_tip);
                         });
+
+                        // Execution Quota (auto-pause when reached)
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            let mut has_quota = rule.max_executions.is_some();
+                            if ui.checkbox(&mut has_quota, loc.inspector_field_max_executions).changed() {
+                                rule.max_executions = if has_quota { Some(10) } else { None };
+                            }
+                            if let Some(limit) = &mut rule.max_executions {
+                                if widgets::glyph_button(ui, Glyph::Reset, "Reset execution counter").clicked() {
+                                    rule.execution_count = 0;
+                                }
+                                ui.add(egui::DragValue::new(limit).range(1..=100000).suffix(" runs"));
+                                let remaining = limit.saturating_sub(rule.execution_count);
+                                let note = if state.language == crate::i18n::Language::Russian {
+                                    format!("(осталось: {}/{})", remaining, limit)
+                                } else {
+                                    format!("({} of {} left)", remaining, limit)
+                                };
+                                widgets::hud(ui, &note, t.faint);
+                            }
+                            ui.checkbox(&mut rule.stop_on_error, loc.inspector_field_stop_on_error)
+                                .on_hover_text(loc.inspector_field_stop_on_error_tip);
+                        });
                     });
                 });
 
@@ -395,28 +553,48 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
                     let mut category = match &rule.trigger {
                         Some(Trigger::Process { .. }) => TriggerCategory::Process,
+                        Some(Trigger::WindowFocus { .. }) => TriggerCategory::Window,
                         Some(Trigger::Schedule { schedule_type, .. }) => match schedule_type {
                             ScheduleType::AppStartup | ScheduleType::AppShutdown => TriggerCategory::Events,
                             _ => TriggerCategory::Schedule,
                         },
                         Some(Trigger::SystemEvent { .. }) => TriggerCategory::Events,
+                        Some(Trigger::ResourceThreshold { .. }) | Some(Trigger::GlobalHotkey { .. }) => TriggerCategory::System,
+                        Some(Trigger::FileWatcher { .. }) | Some(Trigger::Webhook { .. }) => TriggerCategory::System,
                         None => TriggerCategory::Process,
                     };
 
                     let cat_options = [
-                        (TriggerCategory::Process, Cell::new(loc.inspector_trigger_tab_process, "")),
+                        (TriggerCategory::Process, Cell::new("PROCESS", "")),
+                        (TriggerCategory::Window, Cell::new("WINDOW", "")),
                         (TriggerCategory::Schedule, Cell::new(loc.inspector_trigger_tab_schedule, "")),
                         (TriggerCategory::Events, Cell::new(loc.inspector_trigger_tab_events, "")),
+                        (TriggerCategory::System, Cell::new("SYSTEM", "")),
                     ];
 
                     let prev_cat = category;
                     if widgets::cells(ui, &mut category, &cat_options) && category != prev_cat {
                         match category {
                             TriggerCategory::Process => {
+                                let proc = match &rule.trigger {
+                                    Some(Trigger::WindowFocus { process_name, .. }) => process_name.clone(),
+                                    _ => String::new(),
+                                };
                                 rule.trigger = Some(Trigger::Process {
-                                    process_name: "notepad.exe".into(),
+                                    process_name: proc,
                                     match_mode: ProcessMatchMode::Exact,
                                     single_instance: false,
+                                });
+                            }
+                            TriggerCategory::Window => {
+                                let proc = match &rule.trigger {
+                                    Some(Trigger::Process { process_name, .. }) => process_name.clone(),
+                                    _ => String::new(),
+                                };
+                                rule.trigger = Some(Trigger::WindowFocus {
+                                    process_name: proc,
+                                    on_focus_gained: true,
+                                    on_focus_lost: false,
                                 });
                             }
                             TriggerCategory::Schedule => {
@@ -439,6 +617,14 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                     target_datetime: None,
                                 });
                             }
+                            TriggerCategory::System => {
+                                rule.trigger = Some(Trigger::ResourceThreshold {
+                                    process_name: String::new(),
+                                    cpu_percent: Some(80.0),
+                                    ram_mb: None,
+                                    duration_sec: 5,
+                                });
+                            }
                         }
                     }
 
@@ -446,38 +632,75 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
                     match category {
                         TriggerCategory::Process => {
-                            if let Some(Trigger::Process { process_name, match_mode, single_instance }) = &mut rule.trigger {
-                                widgets::hud(ui, loc.inspector_field_target_process, t.muted);
-                                ui.horizontal(|ui| {
-                                    ui.set_width(ui.available_width());
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if render_process_picker(ui, loc) {
-                                            switch_trigger_to_hunter = true;
-                                        }
-                                        ui.add(
-                                            egui::TextEdit::singleline(process_name)
-                                                .hint_text(loc.inspector_field_target_process_hint)
-                                                .desired_width(ui.available_width())
-                                                .min_size(vec2(0.0, theme::CONTROL_H))
-                                                .vertical_align(egui::Align::Center)
-                                                .margin(vec2(10.0, 8.0)),
-                                        );
-                                    });
-                                });
+                                    if let Some(Trigger::Process { process_name, match_mode, single_instance }) = &mut rule.trigger {
+                                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+                                        ui.horizontal(|ui| {
+                                            ui.set_width(ui.available_width());
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if render_process_picker(ui, loc) {
+                                                    switch_trigger_to_hunter = true;
+                                                }
+                                                ui.add(
+                                                    egui::TextEdit::singleline(process_name)
+                                                        .hint_text(loc.inspector_field_target_process_hint)
+                                                        .desired_width(ui.available_width())
+                                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                                        .vertical_align(egui::Align::Center)
+                                                        .margin(vec2(10.0, 8.0)),
+                                                );
+                                            });
+                                        });
 
-                                ui.add_space(6.0);
-                                widgets::hud(ui, loc.inspector_field_match_mode, t.muted);
-                                let match_options = [
-                                    (ProcessMatchMode::Exact, Cell::new(loc.inspector_match_tab_exact, "")),
-                                    (ProcessMatchMode::Wildcard, Cell::new(loc.inspector_match_tab_wildcard, "")),
-                                    (ProcessMatchMode::Regex, Cell::new(loc.inspector_match_tab_regex, "")),
-                                ];
-                                widgets::cells(ui, match_mode, &match_options);
+                                        ui.add_space(6.0);
+                                        widgets::hud(ui, loc.inspector_field_match_mode, t.muted);
+                                        let match_options = [
+                                            (ProcessMatchMode::Exact, Cell::new(loc.inspector_match_tab_exact, "")),
+                                            (ProcessMatchMode::Wildcard, Cell::new(loc.inspector_match_tab_wildcard, "")),
+                                            (ProcessMatchMode::Regex, Cell::new(loc.inspector_match_tab_regex, "")),
+                                        ];
+                                        widgets::cells(ui, match_mode, &match_options);
 
-                                ui.add_space(6.0);
-                                ui.checkbox(single_instance, loc.inspector_checkbox_single_instance);
+                                        ui.add_space(6.0);
+                                        ui.checkbox(single_instance, loc.inspector_checkbox_single_instance);
                             }
                         }
+
+                        TriggerCategory::Window => {
+                            if let Some(Trigger::WindowFocus { process_name, on_focus_gained, on_focus_lost }) = &mut rule.trigger {
+                                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+                                        ui.horizontal(|ui| {
+                                            ui.set_width(ui.available_width());
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if render_process_picker(ui, loc) {
+                                                    switch_trigger_to_hunter = true;
+                                                }
+                                                ui.add(
+                                                    egui::TextEdit::singleline(process_name)
+                                                        .hint_text(loc.inspector_field_target_process_hint)
+                                                        .desired_width(ui.available_width())
+                                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                                        .vertical_align(egui::Align::Center)
+                                                        .margin(vec2(10.0, 8.0)),
+                                                );
+                                            });
+                                        });
+
+                                        ui.add_space(4.0);
+                                        widgets::hud(ui, "EVENT TYPE", t.muted);
+                                        ui.horizontal_wrapped(|ui| {
+                                            if ui.checkbox(on_focus_gained, "Gained Focus").changed() {
+                                                if !*on_focus_gained && !*on_focus_lost {
+                                                    *on_focus_lost = true;
+                                                }
+                                            }
+                                            if ui.checkbox(on_focus_lost, "Lost Focus").changed() {
+                                                if !*on_focus_lost && !*on_focus_gained {
+                                                    *on_focus_gained = true;
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
 
                         TriggerCategory::Schedule => {
                             if let Some(Trigger::Schedule { schedule_type, interval_sec, daily_time, days_of_week, target_datetime, .. }) = &mut rule.trigger {
@@ -590,6 +813,273 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                 });
                             }
                         }
+
+                        TriggerCategory::System => {
+                            let mut submode = match &rule.trigger {
+                                Some(Trigger::GlobalHotkey { .. }) => SystemSubMode::Hotkey,
+                                Some(Trigger::FileWatcher { .. }) => SystemSubMode::FileWatcher,
+                                Some(Trigger::Webhook { .. }) => SystemSubMode::Webhook,
+                                _ => SystemSubMode::Resource,
+                            };
+                            let sub_options = [
+                                (SystemSubMode::Resource, Cell::new("RESOURCE", "Trigger on CPU / RAM threshold")),
+                                (SystemSubMode::Hotkey, Cell::new("HOTKEY", "Trigger on keyboard shortcut")),
+                                (SystemSubMode::FileWatcher, Cell::new("FILE WATCHER", "Trigger on file or folder change")),
+                                (SystemSubMode::Webhook, Cell::new("WEBHOOK", "Trigger via local HTTP endpoint")),
+                            ];
+                            let prev_sub = submode;
+                            if widgets::cells(ui, &mut submode, &sub_options) && submode != prev_sub {
+                                state.push_undo_snapshot();
+                                match submode {
+                                    SystemSubMode::Resource => {
+                                        rule.trigger = Some(Trigger::ResourceThreshold {
+                                            process_name: String::new(),
+                                            cpu_percent: Some(80.0),
+                                            ram_mb: None,
+                                            duration_sec: 5,
+                                        });
+                                    }
+                                    SystemSubMode::Hotkey => {
+                                        rule.trigger = Some(Trigger::GlobalHotkey {
+                                            key_combination: String::new(),
+                                            hold_mode: false,
+                                        });
+                                    }
+                                    SystemSubMode::FileWatcher => {
+                                        rule.trigger = Some(Trigger::FileWatcher {
+                                            folder_path: String::new(),
+                                            filter_extension: None,
+                                            on_created: true,
+                                            on_modified: false,
+                                            on_deleted: false,
+                                        });
+                                    }
+                                    SystemSubMode::Webhook => {
+                                        rule.trigger = Some(Trigger::Webhook {
+                                            endpoint_path: String::new(),
+                                        });
+                                    }
+                                }
+                            }
+                            ui.add_space(8.0);
+
+                            match submode {
+                                SystemSubMode::Resource => {
+                                    if let Some(Trigger::ResourceThreshold { process_name, cpu_percent, ram_mb, duration_sec }) = &mut rule.trigger {
+                                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+                                        ui.horizontal(|ui| {
+                                            ui.set_width(ui.available_width());
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if render_process_picker(ui, loc) {
+                                                    switch_trigger_to_hunter = true;
+                                                }
+                                                ui.add(
+                                                    egui::TextEdit::singleline(process_name)
+                                                        .hint_text("Process executable")
+                                                        .desired_width(ui.available_width())
+                                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                                        .vertical_align(egui::Align::Center)
+                                                        .margin(vec2(10.0, 8.0)),
+                                                );
+                                            });
+                                        });
+
+                                        ui.add_space(6.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            let mut has_cpu = cpu_percent.is_some();
+                                            if ui.checkbox(&mut has_cpu, "CPU >").changed() {
+                                                *cpu_percent = if has_cpu { Some(80.0) } else { None };
+                                            }
+                                            if let Some(cpu) = cpu_percent {
+                                                ui.add(egui::DragValue::new(cpu).range(1.0..=100.0).suffix("%"));
+                                            }
+
+                                            ui.add_space(10.0);
+                                            let mut has_mem = ram_mb.is_some();
+                                            if ui.checkbox(&mut has_mem, "RAM >").changed() {
+                                                *ram_mb = if has_mem { Some(1024) } else { None };
+                                            }
+                                            if let Some(mem) = ram_mb {
+                                                ui.add(egui::DragValue::new(mem).range(10..=65536).suffix(" MB"));
+                                            }
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            widgets::hud(ui, "DURATION THRESHOLD:", t.muted);
+                                            ui.add(egui::DragValue::new(duration_sec).range(1..=3600).suffix(" s"));
+                                        });
+                                    }
+                                }
+                                SystemSubMode::Hotkey => {
+                                    if let Some(Trigger::GlobalHotkey { key_combination, hold_mode }) = &mut rule.trigger {
+                                        widgets::hud(ui, "HOTKEY COMBINATION", t.muted);
+                                        let rec_id = ui.id().with("rec_global_hotkey");
+                                        let mut is_recording: bool = ui.data_mut(|d| d.get_temp(rec_id).unwrap_or(false));
+
+                                        if is_recording {
+                                            ui.ctx().input(|i| {
+                                                for event in &i.raw.events {
+                                                    match event {
+                                                        egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. } => {
+                                                            if *key == egui::Key::Escape {
+                                                                is_recording = false;
+                                                                break;
+                                                            }
+                                                            if let Some(combo) = format_hotkey_combination(*key, *modifiers) {
+                                                                *key_combination = combo;
+                                                                is_recording = false;
+                                                                break;
+                                                            }
+                                                        }
+                                                        egui::Event::PointerButton { button, pressed: true, modifiers, .. } => {
+                                                            let btn_str = match button {
+                                                                egui::PointerButton::Primary => "LButton",
+                                                                egui::PointerButton::Secondary => "RButton",
+                                                                egui::PointerButton::Middle => "MButton",
+                                                                egui::PointerButton::Extra1 => "M4",
+                                                                egui::PointerButton::Extra2 => "M5",
+                                                            };
+                                                            let mut parts = Vec::new();
+                                                            if modifiers.ctrl || modifiers.command { parts.push("Ctrl"); }
+                                                            if modifiers.alt { parts.push("Alt"); }
+                                                            if modifiers.shift { parts.push("Shift"); }
+                                                            parts.push(btn_str);
+                                                            *key_combination = parts.join("+");
+                                                            is_recording = false;
+                                                            break;
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            });
+                                            ui.data_mut(|d| d.insert_temp(rec_id, is_recording));
+                                            ui.ctx().request_repaint();
+                                        }
+
+                                        ui.horizontal(|ui| {
+                                            ui.set_width(ui.available_width());
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                let rec_label = if is_recording { "● LISTENING..." } else { "RECORD" };
+                                                let rec_kind = if is_recording { Kind::Primary } else { Kind::Secondary };
+                                                if widgets::button(ui, rec_label, rec_kind, 0.0)
+                                                    .on_hover_text("Press keys or mouse buttons (M4/M5/RMB/etc), Esc to cancel")
+                                                    .clicked()
+                                                {
+                                                    is_recording = !is_recording;
+                                                    ui.data_mut(|d| d.insert_temp(rec_id, is_recording));
+                                                }
+                                                ui.add(
+                                                    egui::TextEdit::singleline(key_combination)
+                                                        .hint_text("Ctrl+Shift+P or M4, M5...")
+                                                        .desired_width(ui.available_width())
+                                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                                        .vertical_align(egui::Align::Center)
+                                                        .margin(vec2(10.0, 8.0)),
+                                                );
+                                            });
+                                        });
+
+                                        ui.add_space(6.0);
+                                        let hold_tip = if state.language == Language::Russian {
+                                            "Действие выполняется пока физически зажата комбинация клавиш или кнопка мыши, и автоматически прерывается при отпускании"
+                                        } else {
+                                            "Rule executes continuously while hotkey/mouse is held down, and automatically cancels on release"
+                                        };
+                                        ui.checkbox(hold_mode, "Hold mode").on_hover_text(hold_tip);
+                                    }
+                                }
+                                SystemSubMode::FileWatcher => {
+                                    if let Some(Trigger::FileWatcher { folder_path, filter_extension, on_created, on_modified, on_deleted }) = &mut rule.trigger {
+                                        widgets::hud(ui, "WATCH PATH", t.muted);
+                                        ui.horizontal(|ui| {
+                                            ui.set_width(ui.available_width());
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if widgets::button(ui, "FILE", Kind::Secondary, 0.0)
+                                                    .on_hover_text("Select a specific file to monitor")
+                                                    .clicked()
+                                                {
+                                                    if let Some(f) = rfd::FileDialog::new().pick_file() {
+                                                        *folder_path = f.to_string_lossy().to_string();
+                                                    }
+                                                }
+                                                if widgets::button(ui, "FOLDER", Kind::Secondary, 0.0)
+                                                    .on_hover_text("Select a directory/folder to monitor")
+                                                    .clicked()
+                                                {
+                                                    if let Some(f) = rfd::FileDialog::new().pick_folder() {
+                                                        *folder_path = f.to_string_lossy().to_string();
+                                                    }
+                                                }
+                                                ui.add(
+                                                    egui::TextEdit::singleline(folder_path)
+                                                        .hint_text("C:\\Path\\To\\Folder")
+                                                        .desired_width(ui.available_width())
+                                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                                        .vertical_align(egui::Align::Center)
+                                                        .margin(vec2(10.0, 8.0)),
+                                                );
+                                            });
+                                        });
+
+                                        ui.add_space(4.0);
+                                        widgets::hud(ui, "EXTENSION FILTER", t.muted);
+                                        let mut ext = filter_extension.clone().unwrap_or_default();
+                                        let max_w = ui.available_width().min(240.0);
+                                        if ui.add(
+                                            egui::TextEdit::singleline(&mut ext)
+                                                .hint_text(".log, .png")
+                                                .desired_width(max_w)
+                                                .min_size(vec2(0.0, theme::CONTROL_H))
+                                                .vertical_align(egui::Align::Center)
+                                                .margin(vec2(10.0, 8.0)),
+                                        ).changed() {
+                                            *filter_extension = if ext.trim().is_empty() { None } else { Some(ext.trim().to_string()) };
+                                        }
+
+                                        ui.add_space(4.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.checkbox(on_created, "On Created");
+                                            ui.checkbox(on_modified, "On Modified");
+                                            ui.checkbox(on_deleted, "On Deleted");
+                                        });
+                                    }
+                                }
+                                SystemSubMode::Webhook => {
+                                    if let Some(Trigger::Webhook { endpoint_path }) = &mut rule.trigger {
+                                        widgets::hud(ui, "ENDPOINT ID", t.muted);
+                                        ui.add(
+                                            egui::TextEdit::singleline(endpoint_path)
+                                                .hint_text("endpoint_id")
+                                                .desired_width(ui.available_width())
+                                                .min_size(vec2(0.0, theme::CONTROL_H))
+                                                .vertical_align(egui::Align::Center)
+                                                .margin(vec2(10.0, 8.0)),
+                                        );
+
+                                        let endpoint_display = if endpoint_path.trim().is_empty() {
+                                            rule.id.as_str()
+                                        } else {
+                                            endpoint_path.as_str()
+                                        };
+                                        let full_url = format!("http://127.0.0.1:48123/api/v1/trigger/{}", endpoint_display.trim_start_matches('/'));
+
+                                        ui.add_space(6.0);
+                                        let url_label = egui::RichText::new(&full_url)
+                                            .font(egui::FontId::new(12.0, theme::mono()))
+                                            .color(t.accent_ink)
+                                            .underline();
+                                        let resp = ui.add(egui::Label::new(url_label).sense(egui::Sense::click()))
+                                            .on_hover_text("Click to copy endpoint URL")
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                                        if resp.clicked() {
+                                            crate::sharing::copy_text_to_clipboard(ui.ctx(), &full_url);
+                                            state.set_toast("URL copied to clipboard");
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 });
 
@@ -601,7 +1091,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
             let is_process_trigger = matches!(rule.trigger, Some(Trigger::Process { .. }));
 
-            // 2. Action Sequence Builder (Execution on trigger)
+            // 3. Action Sequence Builder (Execution on trigger)
             let action_header = if is_process_trigger {
                 loc.inspector_eyebrow_actions_start
             } else {
@@ -623,7 +1113,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                 state.open_process_picker(crate::gui::state::ProcessPickerTarget::Action(idx));
             }
 
-            // 3. Actions on Process Exit
+            // 4. Actions on Process Exit
             if is_process_trigger {
                 ui.add_space(8.0);
                 widgets::eyebrow(ui, "04", loc.inspector_eyebrow_actions_exit);
@@ -710,15 +1200,21 @@ fn action_type_badge(action: &Action, loc: &crate::i18n::Strings) -> &'static st
             }
         }
         Action::KillProcess { .. } => loc.inspector_badge_kill_process,
-        Action::PowerShell { .. } => loc.inspector_badge_powershell,
-        Action::Cmd { .. } => loc.inspector_badge_cmd,
         Action::Notification { .. } => loc.inspector_badge_notification,
-        Action::Sound { .. } => loc.inspector_badge_audio_volume,
-        Action::Microphone { .. } => loc.inspector_badge_microphone,
         Action::ProcessAudio { .. } => loc.inspector_badge_process_audio,
         Action::SystemPower { .. } => loc.inspector_badge_system_power,
         Action::Delay { .. } => loc.inspector_badge_delay,
         Action::HttpWebhook { .. } => loc.inspector_badge_webhook,
+        Action::Window { .. } => loc.inspector_badge_window,
+        Action::ProcessTuning { .. } => loc.inspector_badge_tuning,
+        Action::PowerPlan { .. } => loc.inspector_badge_power_plan,
+        Action::PlaySound { .. } => loc.inspector_badge_play_sound,
+        Action::Firewall { .. } => loc.inspector_badge_firewall,
+        Action::Display { .. } => loc.inspector_badge_display,
+        Action::AudioControl { .. } | Action::Sound { .. } | Action::Microphone { .. } => loc.inspector_badge_audio_control,
+        Action::DefaultDevice { .. } | Action::AudioDevice { .. } | Action::MicrophoneDevice { .. } => loc.inspector_badge_default_device,
+        Action::ExecuteScript { .. } | Action::PowerShell { .. } | Action::Cmd { .. } | Action::LuaScript { .. } => loc.inspector_badge_execute_script,
+        Action::Macro { .. } => loc.inspector_badge_macro,
     }
 }
 
@@ -736,22 +1232,6 @@ fn action_summary_preview(action: &Action) -> String {
             }
         }
         Action::KillProcess { process_name, .. } => format!("Kill {}", process_name),
-        Action::PowerShell { script, .. } => {
-            let first_line = script.lines().next().unwrap_or("PowerShell script").trim();
-            if first_line.is_empty() {
-                "PowerShell script".to_string()
-            } else {
-                first_line.chars().take(40).collect()
-            }
-        }
-        Action::Cmd { command, .. } => {
-            let c = command.trim();
-            if c.is_empty() {
-                "Command prompt".to_string()
-            } else {
-                c.chars().take(40).collect()
-            }
-        }
         Action::Notification { title, .. } => {
             if title.is_empty() {
                 "Notification toast".to_string()
@@ -759,19 +1239,6 @@ fn action_summary_preview(action: &Action) -> String {
                 format!("Notify \"{}\"", title)
             }
         }
-        Action::Sound { sound_type, volume_level } => match sound_type {
-            SoundActionType::PlayBeep => "Play System Beep".into(),
-            SoundActionType::Mute => "Mute Master Audio".into(),
-            SoundActionType::Unmute => "Unmute Master Audio".into(),
-            SoundActionType::ToggleMute => "Toggle Master Mute".into(),
-            SoundActionType::SetVolume => format!("Master Volume {}%", volume_level),
-        },
-        Action::Microphone { action_type, volume_level } => match action_type {
-            MicrophoneActionType::Mute => "Mute Microphone".into(),
-            MicrophoneActionType::Unmute => "Unmute Microphone".into(),
-            MicrophoneActionType::ToggleMute => "Toggle Microphone Mute".into(),
-            MicrophoneActionType::SetVolume => format!("Microphone Volume {}%", volume_level),
-        },
         Action::ProcessAudio {
             process_name,
             action_type,
@@ -791,6 +1258,79 @@ fn action_summary_preview(action: &Action) -> String {
                 format!("{} {}", method, url)
             }
         }
+        Action::Window { window_action, target_process, .. } => {
+            let proc = target_process.as_deref().unwrap_or("Active window");
+            format!("{:?} {}", window_action, proc)
+        }
+        Action::ProcessTuning { target_process, .. } => {
+            let proc = target_process.as_deref().unwrap_or("Trigger process");
+            format!("Tuning {}", proc)
+        }
+        Action::PowerPlan { plan } => format!("Power Plan: {:?}", plan),
+        Action::PlaySound { file_path } => {
+            let f = std::path::Path::new(file_path).file_name().and_then(|s| s.to_str()).unwrap_or(file_path);
+            format!("Play sound: {}", f)
+        }
+        Action::Firewall { process_name, block } => {
+            if *block {
+                format!("Block network for {}", process_name)
+            } else {
+                format!("Allow network for {}", process_name)
+            }
+        }
+        Action::Display { width, height, refresh_rate, monitor_index } => {
+            let res = match (width, height) {
+                (Some(w), Some(h)) => format!("{}x{}", w, h),
+                _ => "Auto Resolution".to_string(),
+            };
+            let mon = monitor_index.map(|m| format!("[Monitor {}] ", m)).unwrap_or_default();
+            refresh_rate.map(|r| format!("Display: {}{} @ {}Hz", mon, res, r)).unwrap_or_else(|| format!("Display: {}{}", mon, res))
+        }
+        Action::AudioControl { target, action_type, volume_level } => {
+            let target_str = match target {
+                crate::models::AudioTarget::Playback => "Playback",
+                crate::models::AudioTarget::Microphone => "Microphone",
+            };
+            match action_type {
+                crate::models::AudioVolumeAction::Mute => format!("Mute {}", target_str),
+                crate::models::AudioVolumeAction::Unmute => format!("Unmute {}", target_str),
+                crate::models::AudioVolumeAction::ToggleMute => format!("Toggle {} Mute", target_str),
+                crate::models::AudioVolumeAction::SetVolume => format!("{} Volume {}%", target_str, volume_level),
+                crate::models::AudioVolumeAction::PlayBeep => "Play System Beep".into(),
+            }
+        }
+        Action::DefaultDevice { target, device_name } => {
+            let pfx = match target {
+                crate::models::AudioTarget::Playback => "Audio Output",
+                crate::models::AudioTarget::Microphone => "Microphone",
+            };
+            format!("Default {}: {}", pfx, device_name)
+        }
+        Action::ExecuteScript { interpreter, script, .. } => {
+            let name = match interpreter {
+                crate::models::ScriptType::PowerShell => "PowerShell",
+                crate::models::ScriptType::Batch => "CMD",
+                crate::models::ScriptType::Lua => "Lua",
+            };
+            let first = script.lines().next().unwrap_or("").trim();
+            if first.is_empty() {
+                format!("Execute {}", name)
+            } else {
+                format!("{}: {}", name, first.chars().take(35).collect::<String>())
+            }
+        }
+        Action::Macro { events, repeat, speed, infinite } => {
+            let rep_str = if *infinite {
+                " (∞)".to_string()
+            } else if *repeat > 1 {
+                format!(" (x{})", repeat)
+            } else {
+                String::new()
+            };
+            let spd_str = if (*speed - 1.0).abs() > 0.05 { format!(" @{:.1}x", speed) } else { String::new() };
+            format!("Macro: {} events{}{}", events.len(), rep_str, spd_str)
+        }
+        _ => "Legacy Action".into(),
     }
 }
 
@@ -1056,6 +1596,9 @@ fn render_actions_pipeline(
         if let Some(lang) = resp.expand_script {
             state.open_script_editor(idx, is_exit_pipeline, lang);
         }
+        if resp.expand_macro {
+            state.open_macro_editor(idx, is_exit_pipeline);
+        }
         if resp.drag_started {
             drag_started_idx = Some(idx);
         }
@@ -1095,9 +1638,11 @@ fn render_actions_pipeline(
             let dst = session.target_idx;
             if src < actions.len() && dst <= actions.len() {
                 if dst < src {
+                    state.push_undo_snapshot();
                     let item = actions.remove(src);
                     actions.insert(dst, item);
                 } else if dst > src + 1 {
+                    state.push_undo_snapshot();
                     let item = actions.remove(src);
                     actions.insert(dst - 1, item);
                 }
@@ -1110,12 +1655,14 @@ fn render_actions_pipeline(
     // Handle step cloning
     if let Some(idx) = clone_idx {
         if idx < actions.len() {
+            state.push_undo_snapshot();
             let cloned = actions[idx].clone();
             actions.insert(idx + 1, cloned);
         }
     }
     if let Some(idx) = remove_idx {
         if idx < actions.len() {
+            state.push_undo_snapshot();
             actions.remove(idx);
         }
     }
@@ -1163,6 +1710,7 @@ struct ActionCardResponse {
     pub remove_clicked: bool,
     pub clone_clicked: bool,
     pub expand_script: Option<ScriptLanguage>,
+    pub expand_macro: bool,
     pub drag_started: bool,
     pub switch_to_hunter: bool,
     pub card_rect: Rect,
@@ -1182,8 +1730,11 @@ fn render_action_card(
     let mut remove_clicked = false;
     let mut clone_clicked = false;
     let mut expand_script = None;
+    let mut expand_macro = false;
     let mut drag_started = false;
     let mut switch_to_hunter = false;
+
+    action.migrate_to_unified();
 
     let ghost_id = ui.id().with(("card_ghost", is_exit_pipeline, idx));
     let ghost_anim = ui.ctx().animate_bool_with_time_and_easing(ghost_id, is_being_dragged, 0.15, easing::cubic_out);
@@ -1223,6 +1774,47 @@ fn render_action_card(
 
                         if widgets::glyph_button(ui, Glyph::Clone, loc.inspector_tip_clone_step).clicked() {
                             clone_clicked = true;
+                        }
+
+                        if widgets::glyph_button(ui, Glyph::Play, loc.inspector_btn_test_step).clicked() {
+                            let (ok, msg) = match action {
+                                Action::Macro { events, speed, .. } => {
+                                    if events.is_empty() {
+                                        (false, if state.language == Language::Russian { "Макрос пуст" } else { "Macro has no events" }.to_string())
+                                    } else {
+                                        crate::gui::macro_recorder::run_macro_test_safe(events.clone(), *speed);
+                                        (true, if state.language == Language::Russian { format!("Тест запущен ({} действий)", events.len()) } else { format!("Testing {} actions", events.len()) })
+                                    }
+                                }
+                                _ => {
+                                    let mut ctx = HashMap::new();
+                                    ctx.insert("ProcessName".to_string(), "test.exe".to_string());
+                                    ctx.insert("Timestamp".to_string(), chrono::Local::now().to_rfc3339());
+                                    let res = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::TestStep {
+                                        action: action.clone(),
+                                        context: ctx,
+                                    });
+                                    let ok = matches!(res, Ok(crate::ipc::IpcResponse::TestStepResult(Ok(()))));
+                                    let msg = match res {
+                                        Ok(crate::ipc::IpcResponse::TestStepResult(Ok(()))) => "Step passed".to_string(),
+                                        Ok(crate::ipc::IpcResponse::TestStepResult(Err(e))) => format!("Failed: {e}"),
+                                        Ok(crate::ipc::IpcResponse::Error(e)) => format!("Error: {e}"),
+                                        Err(e) => format!("IPC Error: {e}"),
+                                        _ => "Unknown result".to_string(),
+                                    };
+                                    (ok, msg)
+                                }
+                            };
+                            let key = if is_exit_pipeline { idx + 1000 } else { idx };
+                            ui.data_mut(|d| d.insert_temp(Id::new(("test_step_res", key)), (ok, msg, Instant::now())));
+                        }
+
+                        let test_key = if is_exit_pipeline { idx + 1000 } else { idx };
+                        if let Some((ok, msg, at)) = ui.data(|d| d.get_temp::<(bool, String, Instant)>(Id::new(("test_step_res", test_key)))) {
+                            if at.elapsed().as_secs() < 8 {
+                                let badge_color = if ok { t.good } else { t.bad };
+                                widgets::badge(ui, if ok { "PASS" } else { "FAIL" }, badge_color).on_hover_text(msg);
+                            }
                         }
 
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -1364,53 +1956,11 @@ fn render_action_card(
                         });
                     }
 
-                    Action::PowerShell { script, run_in_window } => {
-                        ui.horizontal(|ui| {
-                            widgets::hud(ui, loc.inspector_field_powershell_script, t.muted);
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if widgets::glyph_button(ui, Glyph::Expand, loc.inspector_tip_expand_pwsh).clicked() {
-                                    expand_script = Some(ScriptLanguage::PowerShell);
-                                }
-                            });
-                        });
-                        let mut layouter = create_script_layouter(ScriptLanguage::PowerShell, *t, 12.0);
-                        ui.add(
-                            egui::TextEdit::multiline(script)
-                                .desired_width(ui.available_width())
-                                .desired_rows(3)
-                                .font(egui::FontId::new(12.0, theme::mono()))
-                                .margin(vec2(10.0, 8.0))
-                                .layouter(&mut layouter),
-                        );
-
-                        ui.checkbox(run_in_window, loc.inspector_checkbox_visible_console);
-                    }
-
-                    Action::Cmd { command, run_in_window } => {
-                        ui.horizontal(|ui| {
-                            widgets::hud(ui, loc.inspector_field_cmd_prompt, t.muted);
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if widgets::glyph_button(ui, Glyph::Expand, loc.inspector_tip_expand_cmd).clicked() {
-                                    expand_script = Some(ScriptLanguage::Batch);
-                                }
-                            });
-                        });
-                        let mut layouter = create_script_layouter(ScriptLanguage::Batch, *t, 12.0);
-                        ui.add(
-                            egui::TextEdit::multiline(command)
-                                .desired_width(ui.available_width())
-                                .desired_rows(2)
-                                .font(egui::FontId::new(12.0, theme::mono()))
-                                .margin(vec2(10.0, 8.0))
-                                .layouter(&mut layouter),
-                        );
-                        ui.checkbox(run_in_window, loc.inspector_checkbox_visible_console);
-                    }
-
                     Action::Notification { title, message } => {
                         widgets::hud(ui, loc.inspector_field_notif_title, t.muted);
                         ui.add(
                             egui::TextEdit::singleline(title)
+                                .hint_text(if state.language == Language::Russian { "Заголовок уведомления" } else { "Notification Title" })
                                 .desired_width(ui.available_width())
                                 .min_size(vec2(0.0, theme::CONTROL_H))
                                 .vertical_align(egui::Align::Center)
@@ -1420,44 +1970,12 @@ fn render_action_card(
                         widgets::hud(ui, loc.inspector_field_notif_message, t.muted);
                         ui.add(
                             egui::TextEdit::singleline(message)
+                                .hint_text(if state.language == Language::Russian { "Текст оповещения..." } else { "Notification message text..." })
                                 .desired_width(ui.available_width())
                                 .min_size(vec2(0.0, theme::CONTROL_H))
                                 .vertical_align(egui::Align::Center)
                                 .margin(vec2(10.0, 8.0)),
                         );
-                    }
-
-                    Action::Sound { sound_type, volume_level } => {
-                        widgets::hud(ui, loc.inspector_field_audio_action_type, t.muted);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.radio_value(sound_type, SoundActionType::PlayBeep, loc.inspector_audio_beep);
-                            ui.radio_value(sound_type, SoundActionType::Mute, loc.inspector_audio_mute);
-                            ui.radio_value(sound_type, SoundActionType::Unmute, loc.inspector_audio_unmute);
-                            ui.radio_value(sound_type, SoundActionType::ToggleMute, loc.inspector_audio_toggle_mute);
-                            ui.radio_value(sound_type, SoundActionType::SetVolume, loc.inspector_audio_set_volume);
-                        });
-                        if *sound_type == SoundActionType::SetVolume {
-                            ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
-                                ui.add(egui::Slider::new(volume_level, 0..=100).text("%"));
-                            });
-                        }
-                    }
-
-                    Action::Microphone { action_type, volume_level } => {
-                        widgets::hud(ui, loc.inspector_field_mic_action_type, t.muted);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.radio_value(action_type, MicrophoneActionType::Mute, loc.inspector_audio_mute);
-                            ui.radio_value(action_type, MicrophoneActionType::Unmute, loc.inspector_audio_unmute);
-                            ui.radio_value(action_type, MicrophoneActionType::ToggleMute, loc.inspector_audio_toggle_mute);
-                            ui.radio_value(action_type, MicrophoneActionType::SetVolume, loc.inspector_audio_set_volume);
-                        });
-                        if *action_type == MicrophoneActionType::SetVolume {
-                            ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
-                                ui.add(egui::Slider::new(volume_level, 0..=100).text("%"));
-                            });
-                        }
                     }
 
                     Action::ProcessAudio {
@@ -1474,7 +1992,7 @@ fn render_action_card(
                                 }
                                 ui.add(
                                     egui::TextEdit::singleline(process_name)
-                                        .hint_text("e.g. notepad.exe or game.exe")
+                                        .hint_text("notepad.exe")
                                         .desired_width(ui.available_width())
                                         .min_size(vec2(0.0, theme::CONTROL_H))
                                         .vertical_align(egui::Align::Center)
@@ -1484,29 +2002,32 @@ fn render_action_card(
                         });
 
                         widgets::hud(ui, loc.inspector_field_process_audio_action, t.muted);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.radio_value(action_type, ProcessAudioActionType::Mute, loc.inspector_audio_mute);
-                            ui.radio_value(action_type, ProcessAudioActionType::Unmute, loc.inspector_audio_unmute);
-                            ui.radio_value(action_type, ProcessAudioActionType::ToggleMute, loc.inspector_audio_toggle_mute);
-                            ui.radio_value(action_type, ProcessAudioActionType::SetVolume, loc.inspector_audio_set_volume);
-                        });
+                        let pa_options = [
+                            (ProcessAudioActionType::Mute, Cell::new(if state.language == Language::Russian { "ГЛУШИТЬ" } else { "MUTE" }, loc.inspector_audio_mute)),
+                            (ProcessAudioActionType::Unmute, Cell::new(if state.language == Language::Russian { "ВКЛЮЧИТЬ" } else { "UNMUTE" }, loc.inspector_audio_unmute)),
+                            (ProcessAudioActionType::ToggleMute, Cell::new(if state.language == Language::Russian { "ПЕРЕКЛЮЧИТЬ" } else { "TOGGLE" }, loc.inspector_audio_toggle_mute)),
+                            (ProcessAudioActionType::SetVolume, Cell::new(if state.language == Language::Russian { "ГРОМКОСТЬ" } else { "VOLUME" }, loc.inspector_audio_set_volume)),
+                        ];
+                        widgets::cells(ui, action_type, &pa_options);
                         if *action_type == ProcessAudioActionType::SetVolume {
-                            ui.horizontal_wrapped(|ui| {
-                                widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
-                                ui.add(egui::Slider::new(volume_level, 0..=100).text("%"));
+                            ui.add_space(4.0);
+                            widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Slider::new(volume_level, 0..=100).suffix("%"));
                             });
                         }
                     }
 
                     Action::SystemPower { power_type } => {
                         widgets::hud(ui, loc.inspector_field_power_action, t.muted);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.radio_value(power_type, SystemPowerType::Lock, loc.inspector_power_lock);
-                            ui.radio_value(power_type, SystemPowerType::Sleep, loc.inspector_power_sleep);
-                            ui.radio_value(power_type, SystemPowerType::TurnScreenOff, loc.inspector_power_screen_off);
-                            ui.radio_value(power_type, SystemPowerType::Restart, loc.inspector_power_restart);
-                            ui.radio_value(power_type, SystemPowerType::Shutdown, loc.inspector_power_shutdown);
-                        });
+                        let power_options = [
+                            (SystemPowerType::Lock, Cell::new(if state.language == Language::Russian { "БЛОКИРОВКА" } else { "LOCK" }, loc.inspector_power_lock)),
+                            (SystemPowerType::Sleep, Cell::new(if state.language == Language::Russian { "СОН" } else { "SLEEP" }, loc.inspector_power_sleep)),
+                            (SystemPowerType::TurnScreenOff, Cell::new(if state.language == Language::Russian { "ЭКРАН ВЫКЛ" } else { "SCREEN OFF" }, loc.inspector_power_screen_off)),
+                            (SystemPowerType::Restart, Cell::new(if state.language == Language::Russian { "ПЕРЕЗАГРУЗКА" } else { "RESTART" }, loc.inspector_power_restart)),
+                            (SystemPowerType::Shutdown, Cell::new(if state.language == Language::Russian { "ВЫКЛЮЧИТЬ" } else { "SHUTDOWN" }, loc.inspector_power_shutdown)),
+                        ];
+                        widgets::cells(ui, power_type, &power_options);
                     }
 
                     Action::Delay { seconds } => {
@@ -1545,6 +2066,7 @@ fn render_action_card(
                         let mut p_str = payload.clone().unwrap_or_default();
                         if ui.add(
                             egui::TextEdit::multiline(&mut p_str)
+                                .hint_text(if state.language == Language::Russian { "{\"event\": \"triggered\", \"status\": \"ok\"}" } else { "{\"event\": \"triggered\", \"status\": \"ok\"}" })
                                 .desired_width(ui.available_width())
                                 .desired_rows(2)
                                 .font(egui::FontId::new(12.0, theme::mono()))
@@ -1553,6 +2075,442 @@ fn render_action_card(
                             *payload = if p_str.trim().is_empty() { None } else { Some(p_str) };
                         }
                     }
+
+                    Action::Window {
+                        window_action,
+                        target_process,
+                        x,
+                        y,
+                        width,
+                        height,
+                        transparency,
+                    } => {
+                        let mut proc_str = target_process.clone().unwrap_or_default();
+                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+                        ui.horizontal(|ui| {
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if render_process_picker(ui, loc) {
+                                    switch_to_hunter = true;
+                                }
+                                if ui.add(
+                                    egui::TextEdit::singleline(&mut proc_str)
+                                        .hint_text("Process executable or title (empty = active)")
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                ).changed() {
+                                    *target_process = if proc_str.trim().is_empty() { None } else { Some(proc_str) };
+                                }
+                            });
+                        });
+
+                        widgets::hud(ui, "WINDOW OPERATION", t.muted);
+                        let combo_id = ui.id().with(idx).with("win_act_combo");
+                        let win_act_label = match window_action {
+                            WindowActionType::Minimize => "Minimize",
+                            WindowActionType::Maximize => "Maximize",
+                            WindowActionType::Restore => "Restore",
+                            WindowActionType::Hide => "Hide",
+                            WindowActionType::Show => "Show",
+                            WindowActionType::Close => "Close",
+                            WindowActionType::AlwaysOnTop => "Always On Top",
+                            WindowActionType::RemoveAlwaysOnTop => "Disable Always On Top",
+                            WindowActionType::ToggleAlwaysOnTop => "Toggle Always On Top",
+                            WindowActionType::SetTransparency => "Set Transparency",
+                            WindowActionType::SnapToPosition => "Coordinates & Size",
+                        };
+                        egui::ComboBox::from_id_salt(combo_id)
+                            .selected_text(win_act_label)
+                            .width(ui.available_width())
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(window_action, WindowActionType::Minimize, "Minimize");
+                                ui.selectable_value(window_action, WindowActionType::Maximize, "Maximize");
+                                ui.selectable_value(window_action, WindowActionType::Restore, "Restore");
+                                ui.selectable_value(window_action, WindowActionType::Hide, "Hide");
+                                ui.selectable_value(window_action, WindowActionType::Show, "Show");
+                                ui.selectable_value(window_action, WindowActionType::Close, "Close");
+                                ui.selectable_value(window_action, WindowActionType::AlwaysOnTop, "Always On Top");
+                                ui.selectable_value(window_action, WindowActionType::RemoveAlwaysOnTop, "Disable Always On Top");
+                                ui.selectable_value(window_action, WindowActionType::ToggleAlwaysOnTop, "Toggle Always On Top");
+                                ui.selectable_value(window_action, WindowActionType::SetTransparency, "Set Transparency");
+                                ui.selectable_value(window_action, WindowActionType::SnapToPosition, "Coordinates & Size");
+                            });
+
+                        if *window_action == WindowActionType::SetTransparency {
+                            widgets::hud(ui, "OPACITY", t.muted);
+                            let mut val = transparency.unwrap_or(255);
+                            if ui.add(egui::Slider::new(&mut val, 10..=255)).changed() {
+                                *transparency = Some(val);
+                            }
+                        } else if *window_action == WindowActionType::SnapToPosition {
+                            ui.horizontal(|ui| {
+                                widgets::hud(ui, "POS X:", t.muted);
+                                let mut xv = x.unwrap_or(0);
+                                if ui.add(egui::DragValue::new(&mut xv).range(0..=7680)).changed() { *x = Some(xv); }
+                                ui.add_space(10.0);
+                                widgets::hud(ui, "POS Y:", t.muted);
+                                let mut yv = y.unwrap_or(0);
+                                if ui.add(egui::DragValue::new(&mut yv).range(0..=4320)).changed() { *y = Some(yv); }
+                            });
+                            ui.horizontal(|ui| {
+                                widgets::hud(ui, "WIDTH:", t.muted);
+                                let mut wv = width.unwrap_or(800);
+                                if ui.add(egui::DragValue::new(&mut wv).range(100..=7680)).changed() { *width = Some(wv); }
+                                ui.add_space(10.0);
+                                widgets::hud(ui, "HEIGHT:", t.muted);
+                                let mut hv = height.unwrap_or(600);
+                                if ui.add(egui::DragValue::new(&mut hv).range(100..=4320)).changed() { *height = Some(hv); }
+                            });
+                        }
+                    }
+
+                    Action::ProcessTuning {
+                        target_process,
+                        priority,
+                        affinity_mask: _,
+                        trim_memory,
+                    } => {
+                        let mut proc_str = target_process.clone().unwrap_or_default();
+                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+                        ui.horizontal(|ui| {
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if render_process_picker(ui, loc) {
+                                    switch_to_hunter = true;
+                                }
+                                if ui.add(
+                                    egui::TextEdit::singleline(&mut proc_str)
+                                        .hint_text("Target process")
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                ).changed() {
+                                    *target_process = if proc_str.trim().is_empty() { None } else { Some(proc_str) };
+                                }
+                            });
+                        });
+
+                        widgets::hud(ui, "PRIORITY", t.muted);
+                        let combo_id = ui.id().with(idx).with("pri_combo");
+                        let pri_text = priority.map(|p| format!("{:?}", p)).unwrap_or_else(|| "Unchanged".to_string());
+                        egui::ComboBox::from_id_salt(combo_id)
+                            .selected_text(pri_text)
+                            .width(ui.available_width())
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(priority, None, "Unchanged");
+                                ui.selectable_value(priority, Some(ProcessPriorityLevel::Idle), "Idle");
+                                ui.selectable_value(priority, Some(ProcessPriorityLevel::BelowNormal), "Below Normal");
+                                ui.selectable_value(priority, Some(ProcessPriorityLevel::Normal), "Normal");
+                                ui.selectable_value(priority, Some(ProcessPriorityLevel::AboveNormal), "Above Normal");
+                                ui.selectable_value(priority, Some(ProcessPriorityLevel::High), "High");
+                                ui.selectable_value(priority, Some(ProcessPriorityLevel::Realtime), "Realtime");
+                            });
+
+                        ui.add_space(4.0);
+                        ui.checkbox(trim_memory, "Trim Working Set RAM");
+                    }
+
+                    Action::PowerPlan { plan } => {
+                        widgets::hud(ui, "ENERGY SCHEME", t.muted);
+                        let plan_options = [
+                            (PowerPlanType::HighPerformance, Cell::new("HIGH PERFORMANCE", "Максимальная производительность")),
+                            (PowerPlanType::Balanced, Cell::new("BALANCED", "Сбалансированная схема питания")),
+                            (PowerPlanType::PowerSaver, Cell::new("POWER SAVER", "Энергосбережение")),
+                        ];
+                        widgets::cells(ui, plan, &plan_options);
+                    }
+
+                    Action::PlaySound { file_path } => {
+                        widgets::hud(ui, "WAV SOUND FILE PATH", t.muted);
+                        ui.horizontal(|ui| {
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let btn_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
+                                if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, btn_w).clicked() {
+                                    if let Some(file) = rfd::FileDialog::new()
+                                        .add_filter("WAV Sound", &["wav"])
+                                        .pick_file()
+                                    {
+                                        *file_path = file.to_string_lossy().to_string();
+                                    }
+                                }
+                                ui.add(
+                                    egui::TextEdit::singleline(file_path)
+                                        .hint_text("C:\\Windows\\Media\\notify.wav")
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                );
+                            });
+                        });
+                    }
+
+                    Action::Firewall { process_name, block } => {
+                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+                        ui.horizontal(|ui| {
+                            ui.set_width(ui.available_width());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if render_process_picker(ui, loc) {
+                                    switch_to_hunter = true;
+                                }
+                                ui.add(
+                                    egui::TextEdit::singleline(process_name)
+                                        .hint_text("Application .exe")
+                                        .desired_width(ui.available_width())
+                                        .min_size(vec2(0.0, theme::CONTROL_H))
+                                        .vertical_align(egui::Align::Center)
+                                        .margin(vec2(10.0, 8.0)),
+                                );
+                            });
+                        });
+
+                        ui.add_space(4.0);
+                        let fw_options = [
+                            (true, Cell::new(if state.language == Language::Russian { "БЛОКИРОВАТЬ" } else { "BLOCK TRAFFIC" }, "")),
+                            (false, Cell::new(if state.language == Language::Russian { "РАЗРЕШИТЬ" } else { "ALLOW TRAFFIC" }, "")),
+                        ];
+                        widgets::cells(ui, block, &fw_options);
+                    }
+
+                    Action::Display { width, height, refresh_rate, monitor_index } => {
+                        widgets::hud(ui, "MONITOR", t.muted);
+                        ui.horizontal(|ui| {
+                            let mut has_mon = monitor_index.is_some();
+                            if ui.checkbox(&mut has_mon, "Target Specific Monitor").changed() {
+                                *monitor_index = if has_mon { Some(1) } else { None };
+                            }
+                            if let Some(m) = monitor_index {
+                                ui.add(egui::DragValue::new(m).range(1..=16).prefix("Monitor #"));
+                            }
+                        });
+
+                        ui.add_space(4.0);
+                        widgets::hud(ui, "RESOLUTION", t.muted);
+                        ui.horizontal(|ui| {
+                            let mut w_val = width.unwrap_or(1920);
+                            let mut h_val = height.unwrap_or(1080);
+                            ui.add(egui::DragValue::new(&mut w_val).range(640..=7680).prefix("W: ").suffix(" px"));
+                            ui.add(egui::DragValue::new(&mut h_val).range(480..=4320).prefix("H: ").suffix(" px"));
+                            *width = Some(w_val);
+                            *height = Some(h_val);
+                        });
+
+                        ui.add_space(4.0);
+                        widgets::hud(ui, "REFRESH RATE", t.muted);
+                        ui.horizontal(|ui| {
+                            let mut has_hz = refresh_rate.is_some();
+                            if ui.checkbox(&mut has_hz, "Set Refresh Rate").changed() {
+                                *refresh_rate = if has_hz { Some(144) } else { None };
+                            }
+                            if let Some(hz) = refresh_rate {
+                                ui.add(egui::DragValue::new(hz).range(30..=360).suffix(" Hz"));
+                            }
+                        });
+                    }
+
+                    Action::AudioControl { target, action_type, volume_level } => {
+                        widgets::hud(ui, if state.language == Language::Russian { "ЦЕЛЬ АУДИО" } else { "AUDIO TARGET" }, t.muted);
+                        let target_options = [
+                            (crate::models::AudioTarget::Playback, Cell::new(
+                                if state.language == Language::Russian { "ДИНАМИКИ" } else { "PLAYBACK" },
+                                if state.language == Language::Russian { "Воспроизведение звука (динамики / наушники)" } else { "Audio playback (speakers / headphones)" },
+                            )),
+                            (crate::models::AudioTarget::Microphone, Cell::new(
+                                if state.language == Language::Russian { "МИКРОФОН" } else { "MICROPHONE" },
+                                if state.language == Language::Russian { "Запись звука (микрофон)" } else { "Audio recording (microphone)" },
+                            )),
+                        ];
+                        if widgets::cells(ui, target, &target_options) {
+                            if *target == crate::models::AudioTarget::Microphone && *action_type == crate::models::AudioVolumeAction::PlayBeep {
+                                *action_type = crate::models::AudioVolumeAction::Mute;
+                            }
+                        }
+
+                        ui.add_space(4.0);
+                        widgets::hud(ui, loc.inspector_field_audio_action_type, t.muted);
+                        if *target == crate::models::AudioTarget::Playback {
+                            let audio_options = [
+                                (crate::models::AudioVolumeAction::Mute, Cell::new(
+                                    if state.language == Language::Russian { "ГЛУШИТЬ" } else { "MUTE" },
+                                    loc.inspector_audio_mute,
+                                )),
+                                (crate::models::AudioVolumeAction::Unmute, Cell::new(
+                                    if state.language == Language::Russian { "ВКЛЮЧИТЬ" } else { "UNMUTE" },
+                                    loc.inspector_audio_unmute,
+                                )),
+                                (crate::models::AudioVolumeAction::ToggleMute, Cell::new(
+                                    if state.language == Language::Russian { "ПЕРЕКЛЮЧИТЬ" } else { "TOGGLE" },
+                                    loc.inspector_audio_toggle_mute,
+                                )),
+                                (crate::models::AudioVolumeAction::SetVolume, Cell::new(
+                                    if state.language == Language::Russian { "ГРОМКОСТЬ" } else { "VOLUME" },
+                                    loc.inspector_audio_set_volume,
+                                )),
+                                (crate::models::AudioVolumeAction::PlayBeep, Cell::new(
+                                    if state.language == Language::Russian { "СИГНАЛ" } else { "BEEP" },
+                                    loc.inspector_audio_beep,
+                                )),
+                            ];
+                            widgets::cells(ui, action_type, &audio_options);
+                        } else {
+                            let mic_options = [
+                                (crate::models::AudioVolumeAction::Mute, Cell::new(
+                                    if state.language == Language::Russian { "ГЛУШИТЬ" } else { "MUTE" },
+                                    loc.inspector_audio_mute,
+                                )),
+                                (crate::models::AudioVolumeAction::Unmute, Cell::new(
+                                    if state.language == Language::Russian { "ВКЛЮЧИТЬ" } else { "UNMUTE" },
+                                    loc.inspector_audio_unmute,
+                                )),
+                                (crate::models::AudioVolumeAction::ToggleMute, Cell::new(
+                                    if state.language == Language::Russian { "ПЕРЕКЛЮЧИТЬ" } else { "TOGGLE" },
+                                    loc.inspector_audio_toggle_mute,
+                                )),
+                                (crate::models::AudioVolumeAction::SetVolume, Cell::new(
+                                    if state.language == Language::Russian { "ГРОМКОСТЬ" } else { "VOLUME" },
+                                    loc.inspector_audio_set_volume,
+                                )),
+                            ];
+                            widgets::cells(ui, action_type, &mic_options);
+                        }
+
+                        if *action_type == crate::models::AudioVolumeAction::SetVolume {
+                            ui.add_space(4.0);
+                            widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Slider::new(volume_level, 0..=100).suffix("%"));
+                            });
+                        }
+                    }
+
+                    Action::DefaultDevice { target, device_name } => {
+                        widgets::hud(ui, if state.language == Language::Russian { "ЦЕЛЬ АУДИО" } else { "AUDIO TARGET" }, t.muted);
+                        let dev_target_options = [
+                            (crate::models::AudioTarget::Playback, Cell::new(
+                                if state.language == Language::Russian { "ВОСПРОИЗВЕДЕНИЕ" } else { "PLAYBACK" },
+                                if state.language == Language::Russian { "Устройство воспроизведения по умолчанию" } else { "Default audio playback device" },
+                            )),
+                            (crate::models::AudioTarget::Microphone, Cell::new(
+                                if state.language == Language::Russian { "МИКРОФОН" } else { "MICROPHONE" },
+                                if state.language == Language::Russian { "Устройство записи звука по умолчанию" } else { "Default audio recording device" },
+                            )),
+                        ];
+                        widgets::cells(ui, target, &dev_target_options);
+
+                        ui.add_space(4.0);
+                        let dev_hint = match target {
+                            crate::models::AudioTarget::Playback => "Speakers (Realtek Audio), Headphones...",
+                            crate::models::AudioTarget::Microphone => "Microphone (Realtek Audio), Headset...",
+                        };
+                        widgets::hud(ui, "DEVICE NAME", t.muted);
+                        ui.add(
+                            egui::TextEdit::singleline(device_name)
+                                .hint_text(dev_hint)
+                                .desired_width(ui.available_width())
+                                .min_size(vec2(0.0, theme::CONTROL_H))
+                                .vertical_align(egui::Align::Center)
+                                .margin(vec2(10.0, 8.0)),
+                        );
+                    }
+
+                    Action::ExecuteScript { interpreter, script, run_in_window } => {
+                        ui.horizontal(|ui| {
+                            widgets::hud(ui, if state.language == Language::Russian { "ИНТЕРПРЕТАТОР" } else { "INTERPRETER" }, t.muted);
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let exp_tip = if state.language == Language::Russian { "Открыть редактор скрипта" } else { "Expand script in studio canvas" };
+                                if widgets::glyph_button(ui, Glyph::Expand, exp_tip).clicked() {
+                                    expand_script = Some(match interpreter {
+                                        crate::models::ScriptType::PowerShell => ScriptLanguage::PowerShell,
+                                        crate::models::ScriptType::Batch => ScriptLanguage::Batch,
+                                        crate::models::ScriptType::Lua => ScriptLanguage::Lua,
+                                    });
+                                }
+                            });
+                        });
+
+                        let script_options = [
+                            (crate::models::ScriptType::PowerShell, Cell::new("POWERSHELL", "Windows PowerShell (.ps1)")),
+                            (crate::models::ScriptType::Batch, Cell::new("CMD / BATCH", "Command Prompt (.cmd / .bat)")),
+                            (crate::models::ScriptType::Lua, Cell::new("LUA 5.4", "Embedded Lua 5.4 Script")),
+                        ];
+                        widgets::cells(ui, interpreter, &script_options);
+
+                        ui.add_space(4.0);
+                        let lang = match interpreter {
+                            crate::models::ScriptType::PowerShell => ScriptLanguage::PowerShell,
+                            crate::models::ScriptType::Batch => ScriptLanguage::Batch,
+                            crate::models::ScriptType::Lua => ScriptLanguage::Lua,
+                        };
+                        let mut layouter = create_script_layouter(lang, *t, 12.0);
+                        ui.add(
+                            egui::TextEdit::multiline(script)
+                                .hint_text(if state.language == Language::Russian { "# Введите команды скрипта..." } else { "# Enter script commands here..." })
+                                .font(egui::FontId::new(12.0, theme::mono()))
+                                .desired_width(ui.available_width())
+                                .desired_rows(4)
+                                .margin(vec2(8.0, 6.0))
+                                .layouter(&mut layouter),
+                        );
+
+                        if *interpreter != crate::models::ScriptType::Lua {
+                            ui.checkbox(run_in_window, loc.inspector_checkbox_visible_console);
+                        }
+                    }
+
+                    Action::Macro { .. } => {
+                        let banner_h = 44.0;
+                        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), banner_h), Sense::click());
+                        let hovered = resp.hovered();
+
+                        if resp.clicked() {
+                            expand_macro = true;
+                        }
+
+                        let p = ui.painter();
+                        let bg = if hovered { t.sunken } else { t.bg };
+                        let border_color = if hovered { t.accent_ink } else { t.hairline().color };
+                        p.rect_filled(rect, CornerRadius::same(2), bg);
+                        p.rect_stroke(rect, CornerRadius::same(2), Stroke::new(1.0, border_color), egui::StrokeKind::Inside);
+
+                        // Icon chip on left
+                        let icon_box = Rect::from_min_size(rect.min + vec2(8.0, 7.0), vec2(30.0, 30.0));
+                        let icon_bg = if hovered { t.accent_ink.gamma_multiply(0.22) } else { t.accent_ink.gamma_multiply(0.12) };
+                        p.rect_filled(icon_box, CornerRadius::same(2), icon_bg);
+                        p.text(
+                            icon_box.center(),
+                            egui::Align2::CENTER_CENTER,
+                            egui_phosphor::regular::GAME_CONTROLLER,
+                            egui::FontId::new(18.0, theme::phosphor()),
+                            t.accent_ink,
+                        );
+
+                        // Middle title (clean, centered vertically)
+                        let text_left = icon_box.right() + 10.0;
+                        let title_pos = pos2(text_left, rect.center().y);
+                        p.text(
+                            title_pos,
+                            egui::Align2::LEFT_CENTER,
+                            if state.language == Language::Russian { "СТУДИЯ МАКРОСОВ" } else { "MACRO STUDIO & TIMELINE" },
+                            egui::FontId::new(13.0, theme::semibold()),
+                            if hovered { t.accent_ink } else { t.ink_strong },
+                        );
+
+                        // Action arrow pill on right
+                        let arrow_txt = if state.language == Language::Russian { "ОТКРЫТЬ СТУДИЮ →" } else { "OPEN STUDIO →" };
+                        let arrow_pos = pos2(rect.right() - 14.0, rect.center().y);
+                        p.text(
+                            arrow_pos,
+                            egui::Align2::RIGHT_CENTER,
+                            arrow_txt,
+                            egui::FontId::new(11.0, theme::mono_bold()),
+                            if hovered { t.accent_ink } else { t.faint },
+                        );
+                    }
+                    _ => {}
                 }
             });
             });
@@ -1562,6 +2520,7 @@ fn render_action_card(
         remove_clicked,
         clone_clicked,
         expand_script,
+        expand_macro,
         drag_started,
         switch_to_hunter,
         card_rect: card_response.response.rect,

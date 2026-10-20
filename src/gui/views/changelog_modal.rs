@@ -3,8 +3,9 @@
 //! with HTML & Markdown parsing, clickable links, and one-click update installation.
 
 use egui::{
-    CornerRadius, Id, Order, Rect, RichText, Sense, Stroke, emath::easing, pos2, vec2, Ui,
+    CornerRadius, RichText, Ui, vec2,
 };
+use crate::gui::components::modal::Modal;
 use crate::gui::components::widgets::{self, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
@@ -13,101 +14,22 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
     let t = Tokens::get(ctx);
     let is_open = state.show_changelog_modal && state.available_update.is_some();
 
-    // Close on Escape key
-    if is_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        state.show_changelog_modal = false;
-    }
-
-    let anim = ctx.animate_bool_with_time_and_easing(
-        Id::new("changelog-modal-anim"),
-        is_open,
-        0.20,
-        easing::cubic_out,
-    );
-
-    if anim <= 0.001 && !is_open {
-        return;
-    }
-
     let Some(info) = state.available_update.clone() else { return };
     let loc = state.loc();
-    let full = ctx.content_rect();
 
-    // 1. Scrim overlay
-    let scrim_alpha = (anim * 195.0) as u8;
-    egui::Area::new(Id::new("changelog-modal-scrim"))
-        .order(Order::Foreground)
-        .fixed_pos(full.min)
-        .show(ctx, |ui| {
-            let (rect, resp) = ui.allocate_exact_size(full.size(), Sense::click());
-            ui.painter().rect_filled(
-                rect,
-                CornerRadius::ZERO,
-                egui::Color32::from_black_alpha(scrim_alpha),
-            );
-            if resp.clicked() {
-                state.show_changelog_modal = false;
-            }
-        });
-
-    // 2. Centered Modal Box geometry
-    let modal_w = (full.width() * 0.76).clamp(580.0, 920.0).min(full.width() - 32.0);
-    let modal_h = (full.height() * 0.78).clamp(380.0, 720.0).min(full.height() - 48.0);
-    let center = full.center();
-
-    let scale = 0.95 + 0.05 * anim;
-    let y_shift = (1.0 - anim) * 12.0;
-    let modal_rect = Rect::from_center_size(
-        pos2(center.x, center.y + y_shift),
-        vec2(modal_w * scale, modal_h * scale),
-    );
-
-    let header_h = 56.0;
-    let header_rect = Rect::from_min_size(modal_rect.min, vec2(modal_rect.width(), header_h));
-    let body_rect = Rect::from_min_max(
-        pos2(modal_rect.left(), header_rect.bottom()),
-        modal_rect.max,
-    );
-
-    let mut close_clicked = false;
     let mut update_clicked = false;
 
-    // 3. Modal Canvas Window
-    egui::Area::new(Id::new("changelog-modal-window"))
-        .order(Order::Tooltip)
-        .fixed_pos(modal_rect.min)
-        .show(ctx, |ui| {
-            ui.set_width(modal_rect.width());
-            ui.set_height(modal_rect.height());
-            ui.set_max_width(modal_rect.width());
-            ui.set_max_height(modal_rect.height());
-            ui.set_clip_rect(modal_rect);
-
-            // Paint background surfaces and precision dividers
-            {
-                let p = ui.painter();
-                p.add(theme::shadow(&t).as_shape(modal_rect, CornerRadius::same(2)));
-                p.rect_filled(modal_rect, CornerRadius::same(2), t.bg);
-
-                p.rect_filled(header_rect, CornerRadius::ZERO, t.bg);
-                p.hline(header_rect.x_range(), header_rect.bottom(), t.hairline());
-
-                p.rect_filled(body_rect, CornerRadius::ZERO, t.sunken);
-
-                // CRITICAL: Paint outer border stroke AFTER all inner fills so left, right, and bottom sides are consistently visible
-                p.rect_stroke(
-                    modal_rect,
-                    CornerRadius::same(2),
-                    Stroke::new(1.0, t.line_strong),
-                    egui::StrokeKind::Inside,
-                );
-
-                // Top accent stripe (blue) painted AFTER outer border stroke so white does not paint over it
-                p.hline(modal_rect.x_range(), modal_rect.top() + 1.0, Stroke::new(2.5, t.accent_ink));
-            }
-
+    let modal_res = Modal::new("changelog-modal", is_open)
+        .width_fraction(0.76)
+        .height_fraction(0.78)
+        .min_size(vec2(580.0, 380.0))
+        .max_size(vec2(920.0, 720.0))
+        .accent_bar(t.accent_ink)
+        .header_height(56.0)
+        .body_sunken(true)
+        .show(ctx, &t, |frame| {
             // --- 1. HEADER ZONE ---
-            ui.scope_builder(egui::UiBuilder::new().max_rect(header_rect), |ui| {
+            frame.header(|ui, close_req| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
                     ui.add_space(20.0);
@@ -126,7 +48,7 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(20.0);
                         if widgets::glyph_button(ui, Glyph::Close, loc.changelog_btn_close).clicked() {
-                            close_clicked = true;
+                            *close_req = true;
                         }
 
                         ui.add_space(8.0);
@@ -164,27 +86,32 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
             });
 
             // --- 2. BODY ZONE (Rich HTML & Markdown) ---
-            let inner_body = body_rect.shrink2(vec2(22.0, 16.0));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(inner_body), |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("changelog_scroll_area")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.spacing_mut().item_spacing.y = 10.0;
+            frame.body(|ui| {
+                let body_rect = ui.max_rect();
+                let inner_body = body_rect.shrink2(vec2(22.0, 16.0));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(inner_body), |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("changelog_scroll_area")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.spacing_mut().item_spacing.y = 10.0;
 
-                        let body_text = info.body.trim();
-                        if body_text.is_empty() {
-                            widgets::hud(ui, loc.changelog_no_notes, t.muted);
-                        } else {
-                            render_rich_changelog(ui, body_text, &t);
-                        }
-                    });
+                            let body_text = info.body.trim();
+                            if body_text.is_empty() {
+                                widgets::hud(ui, loc.changelog_no_notes, t.muted);
+                            } else {
+                                render_rich_changelog(ui, body_text, &t);
+                            }
+                        });
+                });
             });
         });
 
-    if close_clicked {
-        state.show_changelog_modal = false;
+    if let Some(res) = modal_res {
+        if res.close_requested {
+            state.show_changelog_modal = false;
+        }
     }
 
     if update_clicked {

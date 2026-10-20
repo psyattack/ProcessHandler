@@ -207,6 +207,12 @@ fn render_rule_card(
                     widgets::badge(ui, &running_label, t.accent_ink);
                 }
 
+                if let Some(limit) = rule.max_executions {
+                    ui.add_space(6.0);
+                    let color = if rule.execution_count >= limit { t.bad } else { t.accent_ink };
+                    widgets::badge(ui, &format!("{}/{} RUNS", rule.execution_count, limit), color);
+                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
 
@@ -390,7 +396,45 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
             let fname = std::path::Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
             format!("{} {}", loc.summary_action_launch, fname)
         }
-        Action::KillProcess { process_name, .. } => format!("{} {}", loc.summary_action_kill, process_name),
+        Action::KillProcess { process_name, .. } => {
+            format!("KILL {}", process_name)
+        }
+        Action::AudioControl { target, action_type, volume_level } => {
+            let target_str = match target {
+                crate::models::AudioTarget::Playback => "SOUND",
+                crate::models::AudioTarget::Microphone => "MIC",
+            };
+            match action_type {
+                crate::models::AudioVolumeAction::Mute => format!("{} {}", loc.summary_action_mute, target_str),
+                crate::models::AudioVolumeAction::Unmute => format!("{} {}", loc.summary_action_unmute, target_str),
+                crate::models::AudioVolumeAction::ToggleMute => format!("{} {}", loc.summary_action_toggle, target_str),
+                crate::models::AudioVolumeAction::SetVolume => format!("{} {}% {}", loc.summary_action_vol, volume_level, target_str),
+                crate::models::AudioVolumeAction::PlayBeep => "BEEP".to_string(),
+            }
+        }
+        Action::DefaultDevice { target, device_name } => {
+            let pfx = match target {
+                crate::models::AudioTarget::Playback => "AUDIO DEV",
+                crate::models::AudioTarget::Microphone => "MIC DEV",
+            };
+            format!("{} {}", pfx, device_name)
+        }
+        Action::ExecuteScript { interpreter, .. } => match interpreter {
+            crate::models::ScriptType::PowerShell => "POWERSHELL".to_string(),
+            crate::models::ScriptType::Batch => "CMD".to_string(),
+            crate::models::ScriptType::Lua => "LUA".to_string(),
+        }
+        Action::Macro { events, repeat, speed, infinite } => {
+            let rep_str = if *infinite {
+                " ∞".to_string()
+            } else if *repeat > 1 {
+                format!(" {}x", repeat)
+            } else {
+                String::new()
+            };
+            let spd_str = if (*speed - 1.0).abs() > 0.05 { format!(" @{:.1}x", speed) } else { String::new() };
+            format!("MACRO ({} ev){}{}", events.len(), rep_str, spd_str)
+        }
         Action::PowerShell { .. } => "POWERSHELL".to_string(),
         Action::Cmd { .. } => "CMD".to_string(),
         Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
@@ -414,6 +458,28 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
         Action::SystemPower { power_type } => format!("{} {:?}", loc.summary_action_power, power_type),
         Action::Delay { seconds } => format!("{} {:.1}S", loc.summary_action_wait, seconds),
         Action::HttpWebhook { .. } => "WEBHOOK".to_string(),
+        Action::Window { window_action, target_process, .. } => {
+            let proc = target_process.as_deref().unwrap_or("ACTIVE");
+            format!("{:?} {}", window_action, proc)
+        }
+        Action::ProcessTuning { target_process, .. } => {
+            let proc = target_process.as_deref().unwrap_or("ACTIVE");
+            format!("TUNE {}", proc)
+        }
+        Action::PowerPlan { plan } => format!("{:?} POWER", plan),
+        Action::PlaySound { .. } => "PLAY SOUND".to_string(),
+        Action::LuaScript { .. } => "LUA".to_string(),
+        Action::Firewall { process_name, block } => if *block { format!("BLOCK {}", process_name) } else { format!("ALLOW {}", process_name) },
+        Action::Display { width, height, refresh_rate, monitor_index } => {
+            let res = match (width, height) {
+                (Some(w), Some(h)) => format!("{}x{}", w, h),
+                _ => "AUTO RES".to_string(),
+            };
+            let mon_prefix = monitor_index.map(|m| format!("[M{}] ", m)).unwrap_or_default();
+            refresh_rate.map(|r| format!("DISPLAY {}{} @ {}Hz", mon_prefix, res, r)).unwrap_or_else(|| format!("DISPLAY {}{}", mon_prefix, res))
+        }
+        Action::AudioDevice { device_name } => format!("AUDIO DEV {}", device_name),
+        Action::MicrophoneDevice { device_name } => format!("MIC DEV {}", device_name),
     }
 }
 
@@ -434,6 +500,32 @@ fn render_pipeline_summary(
             Some(Trigger::Process { process_name, single_instance, .. }) => {
                 let si_suffix = if *single_instance { loc.rules_summary_single_instance } else { "" };
                 format!("{}{}{}", loc.rules_summary_trigger_process, process_name, si_suffix)
+            }
+            Some(Trigger::WindowFocus { process_name, on_focus_gained, on_focus_lost }) => {
+                let act = match (*on_focus_gained, *on_focus_lost) {
+                    (true, true) => "FOCUS/BLUR",
+                    (true, false) => "FOCUS",
+                    (false, true) => "BLUR",
+                    _ => "FOCUS",
+                };
+                format!("{}WINDOW {} {}", prefix, act, process_name)
+            }
+            Some(Trigger::ResourceThreshold { process_name, cpu_percent, ram_mb, .. }) => {
+                let mut parts = Vec::new();
+                if let Some(c) = cpu_percent { parts.push(format!("CPU > {}%", c)); }
+                if let Some(m) = ram_mb { parts.push(format!("RAM > {}MB", m)); }
+                format!("{}THRESHOLD {} ({})", prefix, process_name, parts.join(", "))
+            }
+            Some(Trigger::GlobalHotkey { key_combination, hold_mode }) => {
+                let hold_str = if *hold_mode { " [HOLD]" } else { "" };
+                format!("{}HOTKEY {}{}", prefix, key_combination, hold_str)
+            }
+            Some(Trigger::FileWatcher { folder_path, .. }) => {
+                let name = std::path::Path::new(folder_path).file_name().and_then(|f| f.to_str()).unwrap_or(folder_path);
+                format!("{}FOLDER {}", prefix, name)
+            }
+            Some(Trigger::Webhook { endpoint_path }) => {
+                format!("{}WEBHOOK /{}", prefix, endpoint_path.trim_start_matches('/'))
             }
             Some(Trigger::SystemEvent { event_type, .. }) => {
                 format!("{}{:?}", loc.rules_summary_trigger_system, event_type)

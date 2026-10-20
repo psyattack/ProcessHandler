@@ -5,7 +5,7 @@ use crate::models::{ProcessSnapshotItem, Rule};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveView {
     Rules,
-    LiveStream,
+    Analytics,
     Settings,
 }
 
@@ -30,6 +30,12 @@ pub struct ExpandedScriptEditorState {
     pub step_idx: usize,
     pub is_exit_pipeline: bool,
     pub language: crate::gui::components::script_highlighter::ScriptLanguage,
+}
+
+#[derive(Debug, Clone)]
+pub struct MacroEditorModalState {
+    pub step_idx: usize,
+    pub is_exit_pipeline: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +71,8 @@ pub struct GuiState {
     pub process_search_query: String,
     pub expanded_script_editor: Option<ExpandedScriptEditorState>,
     pub last_script_editor: Option<ExpandedScriptEditorState>,
+    pub macro_editor: Option<MacroEditorModalState>,
+    pub last_macro_editor: Option<MacroEditorModalState>,
     pub action_catalog: Option<ActionCatalogModalState>,
     pub last_action_catalog: Option<ActionCatalogModalState>,
     pub language: crate::i18n::Language,
@@ -78,6 +86,12 @@ pub struct GuiState {
     pub is_downloading_update: bool,
     pub update_download_progress: f32,
     pub show_changelog_modal: bool,
+    pub show_guide_modal: bool,
+    pub guide_selected_topic: usize,
+    pub analytics_log_filter: String,
+    pub group_full_presses: bool,
+    pub undo_stack: Vec<Rule>,
+    pub redo_stack: Vec<Rule>,
     update_event_tx: std::sync::mpsc::Sender<crate::updater::UpdateEvent>,
     update_event_rx: std::sync::mpsc::Receiver<crate::updater::UpdateEvent>,
 }
@@ -104,6 +118,8 @@ impl GuiState {
             process_search_query: String::new(),
             expanded_script_editor: None,
             last_script_editor: None,
+            macro_editor: None,
+            last_macro_editor: None,
             action_catalog: None,
             last_action_catalog: None,
             language: config.language,
@@ -117,6 +133,12 @@ impl GuiState {
             is_downloading_update: false,
             update_download_progress: 0.0,
             show_changelog_modal: false,
+            show_guide_modal: false,
+            guide_selected_topic: 0,
+            analytics_log_filter: String::new(),
+            group_full_presses: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
             update_event_tx,
             update_event_rx,
         }
@@ -165,6 +187,26 @@ impl GuiState {
         self.expanded_script_editor = None;
     }
 
+    pub fn open_macro_editor(&mut self, step_idx: usize, is_exit_pipeline: bool) {
+        let editor = MacroEditorModalState {
+            step_idx,
+            is_exit_pipeline,
+        };
+        self.macro_editor = Some(editor.clone());
+        self.last_macro_editor = Some(editor);
+        crate::gui::macro_recorder::set_studio_active(true);
+    }
+
+    pub fn close_macro_editor(&mut self) {
+        let rec = crate::gui::macro_recorder::MacroRecorder::global();
+        if rec.is_active() {
+            rec.stop_recording();
+        }
+        crate::gui::macro_recorder::stop_macro_test();
+        self.macro_editor = None;
+        crate::gui::macro_recorder::set_studio_active(false);
+    }
+
     pub fn open_action_catalog(&mut self, is_exit_pipeline: bool, insert_idx: Option<usize>) {
         let catalog = ActionCatalogModalState {
             is_exit_pipeline,
@@ -186,6 +228,7 @@ impl GuiState {
         is_exit_pipeline: bool,
         insert_idx: Option<usize>,
     ) {
+        self.push_undo_snapshot();
         if let Some(rule) = &mut self.editing_rule {
             let list = if is_exit_pipeline {
                 &mut rule.on_exit_actions
@@ -334,20 +377,62 @@ impl GuiState {
     pub fn initial_new_rule(&self) -> Rule {
         Rule {
             id: format!("rule_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
-            name: self.loc().rules_default_new_name.into(),
+            name: String::new(),
             description: String::new(),
             is_enabled: true,
             cooldown_seconds: 0.0,
+            max_executions: None,
+            execution_count: 0,
+            stop_on_error: true,
             trigger: Some(crate::models::Trigger::Process {
-                process_name: "notepad.exe".into(),
+                process_name: String::new(),
                 match_mode: crate::models::ProcessMatchMode::Exact,
                 single_instance: false,
             }),
             actions: Vec::new(),
             on_exit_actions: Vec::new(),
-            execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+        }
+    }
+
+    pub fn push_undo_snapshot(&mut self) {
+        if let Some(r) = &self.editing_rule {
+            if self.undo_stack.last() != Some(r) {
+                self.undo_stack.push(r.clone());
+                if self.undo_stack.len() > 50 {
+                    self.undo_stack.remove(0);
+                }
+                self.redo_stack.clear();
+            }
+        }
+    }
+
+    pub fn push_undo_snapshot_of(&mut self, r: &Rule) {
+        if self.undo_stack.last() != Some(r) {
+            self.undo_stack.push(r.clone());
+            if self.undo_stack.len() > 50 {
+                self.undo_stack.remove(0);
+            }
+            self.redo_stack.clear();
+        }
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(prev) = self.undo_stack.pop() {
+            if let Some(curr) = self.editing_rule.take() {
+                self.redo_stack.push(curr);
+            }
+            self.editing_rule = Some(prev);
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if let Some(next) = self.redo_stack.pop() {
+            if let Some(curr) = self.editing_rule.take() {
+                self.undo_stack.push(curr);
+            }
+            self.editing_rule = Some(next);
         }
     }
 
@@ -355,6 +440,8 @@ impl GuiState {
         self.selected_rule_id = None;
         self.selected_process = None;
         self.is_creating_new_rule = true;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
         let rule = self.builder_draft.take().unwrap_or_else(|| self.initial_new_rule());
         self.editing_rule = Some(rule);
     }
@@ -396,6 +483,8 @@ impl GuiState {
             || self.action_catalog.is_some()
             || self.picker_target.is_some()
             || (self.show_changelog_modal && self.available_update.is_some())
+            || self.show_guide_modal
+            || self.macro_editor.is_some()
     }
 
     pub fn apply_selected_process(&mut self, proc_name: &str) {
@@ -403,6 +492,7 @@ impl GuiState {
         let target = self.picker_target.take().or(self.last_picker_target);
         self.picker_target = None;
 
+        self.push_undo_snapshot();
         if let Some(rule) = &mut self.editing_rule {
             match target {
                 Some(ProcessPickerTarget::Action(idx)) => {
@@ -413,6 +503,15 @@ impl GuiState {
                             }
                             crate::models::Action::ProcessAudio { process_name, .. } => {
                                 *process_name = proc_name.to_string();
+                            }
+                            crate::models::Action::Firewall { process_name, .. } => {
+                                *process_name = proc_name.to_string();
+                            }
+                            crate::models::Action::Window { target_process, .. } => {
+                                *target_process = Some(proc_name.to_string());
+                            }
+                            crate::models::Action::ProcessTuning { target_process, .. } => {
+                                *target_process = Some(proc_name.to_string());
                             }
                             _ => {}
                         }
@@ -427,6 +526,15 @@ impl GuiState {
                             crate::models::Action::ProcessAudio { process_name, .. } => {
                                 *process_name = proc_name.to_string();
                             }
+                            crate::models::Action::Firewall { process_name, .. } => {
+                                *process_name = proc_name.to_string();
+                            }
+                            crate::models::Action::Window { target_process, .. } => {
+                                *target_process = Some(proc_name.to_string());
+                            }
+                            crate::models::Action::ProcessTuning { target_process, .. } => {
+                                *target_process = Some(proc_name.to_string());
+                            }
                             _ => {}
                         }
                     }
@@ -434,6 +542,12 @@ impl GuiState {
                 Some(ProcessPickerTarget::Trigger) | None => {
                     match &mut rule.trigger {
                         Some(crate::models::Trigger::Process { process_name, .. }) => {
+                            *process_name = proc_name.to_string();
+                        }
+                        Some(crate::models::Trigger::WindowFocus { process_name, .. }) => {
+                            *process_name = proc_name.to_string();
+                        }
+                        Some(crate::models::Trigger::ResourceThreshold { process_name, .. }) => {
                             *process_name = proc_name.to_string();
                         }
                         _ => {
@@ -478,13 +592,18 @@ impl GuiState {
         if self.is_creating_new_rule {
             self.builder_draft = self.editing_rule.take();
         }
+        self.undo_stack.clear();
+        self.redo_stack.clear();
         self.selected_rule_id = Some(rule.id.clone());
         self.editing_rule = Some(rule);
         self.is_creating_new_rule = false;
         self.selected_process = None;
     }
 
-    pub fn save_rule(&mut self, rule: Rule) {
+    pub fn save_rule(&mut self, mut rule: Rule) {
+        if rule.name.trim().is_empty() {
+            rule.name = self.loc().rules_default_new_name.to_string();
+        }
         let _ = IpcClient::call(&IpcRequest::SaveRule(rule));
         self.editing_rule = None;
         self.is_creating_new_rule = false;
@@ -688,6 +807,64 @@ mod tests {
         assert!(state.is_modal_open());
         state.show_changelog_modal = false;
         assert!(!state.is_modal_open());
+
+        // Guide modal
+        state.show_guide_modal = true;
+        assert!(state.is_modal_open());
+        state.show_guide_modal = false;
+        assert!(!state.is_modal_open());
+
+        // Macro editor
+        state.open_macro_editor(0, false);
+        assert!(state.is_modal_open());
+        state.close_macro_editor();
+        assert!(!state.is_modal_open());
+    }
+
+    #[test]
+    fn test_undo_redo_multi_step() {
+        let mut state = GuiState::new();
+        let mut r0 = state.initial_new_rule();
+        r0.name = "Step 0".to_string();
+        state.editing_rule = Some(r0.clone());
+
+        let mut r1 = r0.clone();
+        r1.name = "Step 1".to_string();
+        state.push_undo_snapshot_of(&r0);
+        state.editing_rule = Some(r1.clone());
+
+        let mut r2 = r1.clone();
+        r2.name = "Step 2".to_string();
+        state.push_undo_snapshot_of(&r1);
+        state.editing_rule = Some(r2.clone());
+
+        assert_eq!(state.editing_rule.as_ref().unwrap().name, "Step 2");
+        assert_eq!(state.undo_stack.len(), 2);
+        assert_eq!(state.redo_stack.len(), 0);
+
+        // Undo 1 -> Step 1
+        state.undo();
+        assert_eq!(state.editing_rule.as_ref().unwrap().name, "Step 1");
+        assert_eq!(state.undo_stack.len(), 1);
+        assert_eq!(state.redo_stack.len(), 1);
+
+        // Undo 2 -> Step 0
+        state.undo();
+        assert_eq!(state.editing_rule.as_ref().unwrap().name, "Step 0");
+        assert_eq!(state.undo_stack.len(), 0);
+        assert_eq!(state.redo_stack.len(), 2);
+
+        // Redo 1 -> Step 1
+        state.redo();
+        assert_eq!(state.editing_rule.as_ref().unwrap().name, "Step 1");
+        assert_eq!(state.undo_stack.len(), 1);
+        assert_eq!(state.redo_stack.len(), 1);
+
+        // Redo 2 -> Step 2
+        state.redo();
+        assert_eq!(state.editing_rule.as_ref().unwrap().name, "Step 2");
+        assert_eq!(state.undo_stack.len(), 2);
+        assert_eq!(state.redo_stack.len(), 0);
     }
 }
 

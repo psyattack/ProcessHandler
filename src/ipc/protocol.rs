@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::config::AppConfig;
-use crate::models::{LogItem, ProcessSnapshotItem, Rule};
+use crate::models::{Action, AnalyticsSummary, LogItem, ProcessSnapshotItem, Rule};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
@@ -12,6 +12,7 @@ pub enum IpcRequest {
     DeleteRule(String),
     ToggleRule { id: String, enabled: bool },
     TestRunRule(String),
+    TestStep { action: Action, context: std::collections::HashMap<String, String> },
     GetProcesses,
     KillProcess { pid: u32, force: bool },
     SetAutorun(bool),
@@ -28,6 +29,7 @@ pub enum IpcResponse {
     Pong,
     State(DaemonState),
     Processes(Vec<ProcessSnapshotItem>),
+    TestStepResult(Result<(), String>),
     Error(String),
 }
 
@@ -51,6 +53,8 @@ pub struct DaemonState {
     pub logs: Vec<LogItem>,
     #[serde(default)]
     pub active_rule_executions: std::collections::HashMap<String, ActiveRuleExecutionState>,
+    #[serde(default)]
+    pub analytics: AnalyticsSummary,
 }
 
 #[cfg(test)]
@@ -87,9 +91,9 @@ mod tests {
             trigger: None,
             actions: vec![],
             on_exit_actions: vec![],
-            execution_count: 0,
             custom_icon_path: Some("C:\\test.ico".into()),
             auto_process_icon: true,
+            ..Default::default()
         }]);
 
         let json = serde_json::to_string(&req).unwrap();

@@ -264,12 +264,12 @@ pub fn cells<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T, Cel
                 paint_left(ui, text_rect.with_min_x(text_rect.left() + label_w + 8.0), g, c);
             }
 
-            let name = match cell.count {
-                Some((n, _)) => format!("{} {n}", cell.label),
-                None => cell.label.to_string(),
+            let resp = if !cell.tip.trim().is_empty() {
+                resp.on_hover_text(cell.tip)
+            } else {
+                resp
             };
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &name));
-            if resp.on_hover_text(cell.tip).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !on {
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !on {
                 *value = *opt;
                 changed = true;
             }
@@ -371,7 +371,11 @@ fn window_button(ui: &mut Ui, button: WindowButton, height: f32, tip: &str) -> R
         }
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
-    resp.on_hover_text(tip)
+    if !tip.trim().is_empty() {
+        resp.on_hover_text(tip)
+    } else {
+        resp
+    }
 }
 
 /// Custom title bars: hairline around the window and resizing from edges and corners.
@@ -424,10 +428,13 @@ pub fn window_edges(ctx: &egui::Context) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Glyph {
     Close,
+    Minimize,
     Clone,
     Expand,
     More,
     Reset,
+    Play,
+    Question,
 }
 
 /// Small outlined square button with a drawn glyph (X, Clone, Expand, More, Reset); inverts on hover.
@@ -466,6 +473,10 @@ pub fn glyph_button_custom(ui: &mut Ui, glyph: Glyph, size: f32, active: bool, t
             p.line_segment([m + vec2(-s, -s), m + vec2(s, s)], Stroke::new(1.5, c));
             p.line_segment([m + vec2(-s, s), m + vec2(s, -s)], Stroke::new(1.5, c));
         }
+        Glyph::Minimize => {
+            let s = (size * 0.18).clamp(4.0, 5.0);
+            p.line_segment([m + vec2(-s, 0.0), m + vec2(s, 0.0)], Stroke::new(1.5, c));
+        }
         Glyph::Clone => {
             let back = Rect::from_center_size(m + vec2(-2.0, -2.0), vec2(7.0, 7.0));
             let front = Rect::from_center_size(m + vec2(1.8, 1.8), vec2(7.0, 7.0));
@@ -500,9 +511,34 @@ pub fn glyph_button_custom(ui: &mut Ui, glyph: Glyph, size: f32, active: bool, t
                 c,
             );
         }
+        Glyph::Play => {
+            let font_size = (size * 0.48).clamp(12.0, 15.0);
+            p.text(
+                m,
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::PLAY,
+                egui::FontId::new(font_size, theme::phosphor()),
+                c,
+            );
+        }
+        Glyph::Question => {
+            let font_size = (size * 0.48).clamp(12.0, 15.0);
+            p.text(
+                m,
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::QUESTION_MARK,
+                egui::FontId::new(font_size, theme::phosphor()),
+                c,
+            );
+        }
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
-    resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand)
+    let resp = if !tip.trim().is_empty() {
+        resp.on_hover_text(tip)
+    } else {
+        resp
+    };
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A precision drag handle with 6 studio dots; senses click and drag.
@@ -532,7 +568,12 @@ pub fn drag_handle(ui: &mut Ui, tip: &str) -> Response {
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
     let cursor = if dragged { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab };
-    resp.on_hover_text(tip).on_hover_cursor(cursor)
+    let resp = if !tip.trim().is_empty() {
+        resp.on_hover_text(tip)
+    } else {
+        resp
+    };
+    resp.on_hover_cursor(cursor)
 }
 
 /// App wordmark in display font with accent color suffix, vertically centered in container of given height.

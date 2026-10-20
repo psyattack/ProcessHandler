@@ -3,7 +3,10 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use crate::config::AppConfig;
 use crate::ipc::{DaemonState, IpcRequest, IpcResponse};
-use crate::models::{Action, LogItem, ProcessMatchMode, Rule, ScheduleType, SystemEventType, Trigger};
+use crate::models::{
+    Action, AnalyticsSummary, LogItem, ProcessMatchMode,
+    Rule, ScheduleType, SystemEventType, Trigger,
+};
 use crate::daemon::actions::ActionRunner;
 use crate::daemon::watcher::{ProcessEvent, ProcessWatcher};
 
@@ -65,12 +68,17 @@ pub struct DaemonEngine {
     pub rule_last_triggered: HashMap<String, Instant>,
     pub active_rule_pids: HashMap<String, HashSet<u32>>,
     pub active_executions: HashMap<u64, ActiveExecutionItem>,
+    pub analytics: AnalyticsSummary,
+    pub last_foreground_pid: Option<u32>,
+    pub hotkey_handle: Option<crate::daemon::hotkeys::HotkeyHandle>,
+    pub resource_threshold_tracker: HashMap<(String, u32), Instant>,
+    pub execution_abort_handles: HashMap<u64, (String, tokio::task::AbortHandle)>,
     action_tx: mpsc::UnboundedSender<ActionCompletionEvent>,
     action_rx: mpsc::UnboundedReceiver<ActionCompletionEvent>,
 }
 
 impl DaemonEngine {
-    pub const MAX_LOGS: usize = 100;
+    pub const MAX_LOGS: usize = 500;
 
     pub fn new(config: AppConfig) -> Self {
         let (action_tx, action_rx) = mpsc::unbounded_channel();
@@ -83,8 +91,33 @@ impl DaemonEngine {
             rule_last_triggered: HashMap::new(),
             active_rule_pids: HashMap::new(),
             active_executions: HashMap::new(),
+            analytics: AnalyticsSummary::default(),
+            last_foreground_pid: None,
+            hotkey_handle: None,
+            resource_threshold_tracker: HashMap::new(),
+            execution_abort_handles: HashMap::new(),
             action_tx,
             action_rx,
+        }
+    }
+
+    pub fn is_rule_executing(&self, rule_id: &str) -> bool {
+        self.active_executions.values().any(|e| e.rule_id == rule_id)
+            || self.execution_abort_handles.values().any(|(r_id, _)| r_id == rule_id)
+    }
+
+    pub fn stop_rule_execution(&mut self, rule_id: &str) {
+        let to_abort: Vec<u64> = self.execution_abort_handles
+            .iter()
+            .filter_map(|(&id, (r_id, _))| if r_id == rule_id { Some(id) } else { None })
+            .collect();
+
+        for id in to_abort {
+            if let Some((_, abort_handle)) = self.execution_abort_handles.remove(&id) {
+                abort_handle.abort();
+                self.active_executions.remove(&id);
+                self.log("INFO", "RULE", &format!("Stopped execution of rule: {}", rule_id));
+            }
         }
     }
 
@@ -115,6 +148,7 @@ impl DaemonEngine {
                 }
                 ActionCompletionEvent::RuleExecutionFinished { execution_id, .. } => {
                     self.active_executions.remove(&execution_id);
+                    self.execution_abort_handles.remove(&execution_id);
                 }
                 ActionCompletionEvent::SetRuleCustomIcon { rule_id, icon_path } => {
                     let mut updated_name = None;
@@ -136,7 +170,12 @@ impl DaemonEngine {
     pub fn log(&mut self, level: &str, category: &str, message: &str) {
         let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
         while self.logs.len() >= Self::MAX_LOGS {
-            self.logs.remove(0);
+            // Prioritize preserving RULE and ERROR logs: evict oldest entry that is neither RULE nor ERROR
+            if let Some(pos) = self.logs.iter().position(|l| !l.category.eq_ignore_ascii_case("RULE") && !l.level.eq_ignore_ascii_case("ERROR")) {
+                self.logs.remove(pos);
+            } else {
+                self.logs.remove(0);
+            }
         }
         self.logs.push(LogItem {
             timestamp,
@@ -443,6 +482,116 @@ impl DaemonEngine {
                 }
             }
         }
+
+        #[cfg(windows)]
+        {
+            use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+            let hwnd = unsafe { GetForegroundWindow() };
+            if hwnd.0 != std::ptr::null_mut() {
+                let mut fg_pid = 0u32;
+                unsafe { GetWindowThreadProcessId(hwnd, Some(&mut fg_pid)) };
+                if fg_pid != 0 && self.last_foreground_pid != Some(fg_pid) {
+                    let old_pid = self.last_foreground_pid;
+                    self.last_foreground_pid = Some(fg_pid);
+
+                    let snap = ProcessWatcher::snapshot_process_map();
+                    if let Some(fg_name) = snap.get(&fg_pid).cloned() {
+                        for rule in &rules {
+                            if !rule.is_enabled {
+                                continue;
+                            }
+                            if let Some(Trigger::WindowFocus {
+                                process_name,
+                                on_focus_gained,
+                                ..
+                            }) = &rule.trigger
+                            {
+                                if *on_focus_gained
+                                    && Self::matches_process(
+                                        process_name,
+                                        &fg_name,
+                                        ProcessMatchMode::Exact,
+                                    )
+                                {
+                                    let _ = self
+                                        .try_execute_rule(
+                                            rule,
+                                            &format!("WindowFocus Gained {}", fg_name),
+                                            fg_pid,
+                                        )
+                                        .await;
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(old_id) = old_pid {
+                        if let Some(old_name) = snap.get(&old_id).cloned() {
+                            for rule in &rules {
+                                if !rule.is_enabled {
+                                    continue;
+                                }
+                                if let Some(Trigger::WindowFocus {
+                                    process_name,
+                                    on_focus_lost,
+                                    ..
+                                }) = &rule.trigger
+                                {
+                                    if *on_focus_lost
+                                        && Self::matches_process(
+                                            process_name,
+                                            &old_name,
+                                            ProcessMatchMode::Exact,
+                                        )
+                                    {
+                                        let _ = self
+                                            .try_execute_rule(
+                                                rule,
+                                                &format!("WindowFocus Lost {}", old_name),
+                                                old_id,
+                                            )
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Evaluate ResourceThreshold rules
+        let has_resource_rules = rules.iter().any(|r| r.is_enabled && matches!(r.trigger, Some(Trigger::ResourceThreshold { .. })));
+        if has_resource_rules {
+            let snap = ProcessWatcher::get_detailed_snapshot();
+            for rule in &rules {
+                if !rule.is_enabled {
+                    continue;
+                }
+                if let Some(Trigger::ResourceThreshold { process_name, ram_mb, cpu_percent: _, duration_sec }) = &rule.trigger {
+                    for proc in &snap {
+                        if Self::matches_process(process_name, &proc.name, ProcessMatchMode::Exact) {
+                            let mem_mb = proc.memory_bytes / (1024 * 1024);
+                            let over_mem = ram_mb.map_or(false, |limit| mem_mb >= limit);
+                            let key = (rule.id.clone(), proc.pid);
+
+                            if over_mem {
+                                let start = self.resource_threshold_tracker.entry(key).or_insert_with(Instant::now);
+                                if start.elapsed().as_secs() >= *duration_sec {
+                                    let _ = self.try_execute_rule(
+                                        rule,
+                                        &format!("Resource Threshold: {} ({} MB)", proc.name, mem_mb),
+                                        proc.pid,
+                                    ).await;
+                                }
+                            } else {
+                                self.resource_threshold_tracker.remove(&key);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub async fn try_execute_rule(
@@ -451,7 +600,32 @@ impl DaemonEngine {
         context_name: &str,
         pid: u32,
     ) -> Option<tokio::task::JoinHandle<()>> {
+        self.try_execute_rule_with_context(rule, context_name, pid, HashMap::new()).await
+    }
+
+    pub async fn try_execute_rule_with_context(
+        &mut self,
+        rule: &Rule,
+        context_name: &str,
+        pid: u32,
+        extra_ctx: HashMap<String, String>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
         self.drain_action_events();
+
+        if let Some(limit) = rule.max_executions {
+            if rule.execution_count >= limit {
+                self.log(
+                    "WARN",
+                    "RULE",
+                    &format!("Rule '{}' reached execution limit ({}/{}). Pausing.", rule.name, rule.execution_count, limit),
+                );
+                if let Some(r) = self.config.rules.iter_mut().find(|r| r.id == rule.id) {
+                    r.is_enabled = false;
+                    let _ = self.config.save_to_file(AppConfig::config_path());
+                }
+                return None;
+            }
+        }
 
         if let Some(last) = self.rule_last_triggered.get(&rule.id) {
             if last.elapsed().as_secs_f64() < rule.cooldown_seconds && context_name != "MANUAL_TEST" {
@@ -485,15 +659,58 @@ impl DaemonEngine {
         ctx.insert("ProcessId".into(), pid.to_string());
         ctx.insert("Timestamp".into(), chrono::Local::now().to_rfc3339());
 
+        if pid > 0 {
+            if let Some(path) = ProcessWatcher::get_process_image_path(pid) {
+                ctx.insert("ProcessPath".into(), path.clone());
+                if let Some(dir) = std::path::Path::new(&path).parent().and_then(|p| p.to_str()) {
+                    ctx.insert("ProcessDir".into(), dir.to_string());
+                }
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+            let hwnd = unsafe { GetForegroundWindow() };
+            if !hwnd.0.is_null() {
+                let mut buf = [0u16; 512];
+                let len = unsafe { GetWindowTextW(hwnd, &mut buf) };
+                if len > 0 {
+                    let title = String::from_utf16_lossy(&buf[..len as usize]);
+                    ctx.insert("WindowTitle".into(), title);
+                }
+            }
+        }
+
+        ctx.extend(extra_ctx);
+
         let actions = rule.actions.clone();
         let rule_name = rule.name.clone();
         let rule_id = rule.id.clone();
+        let stop_on_error = rule.stop_on_error;
         let context_name = context_name.to_string();
         let tx = self.action_tx.clone();
 
         static EXECUTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let execution_id = EXECUTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let total_steps = actions.len();
+
+        let mut quota_msg = None;
+        if let Some(r) = self.config.rules.iter_mut().find(|r| r.id == rule.id) {
+            r.execution_count += 1;
+            if let Some(limit) = r.max_executions {
+                if r.execution_count >= limit {
+                    r.is_enabled = false;
+                    quota_msg = Some(format!("Rule '{}' completed quota ({}/{}) and has been auto-paused.", r.name, r.execution_count, limit));
+                }
+            }
+            let _ = self.config.save_to_file(AppConfig::config_path());
+        }
+        if let Some(msg) = quota_msg {
+            self.log("INFO", "RULE", &msg);
+        }
+
+        self.analytics.total_executions += 1;
 
         let _ = tx.send(ActionCompletionEvent::RuleExecutionStarted {
             execution_id,
@@ -503,7 +720,9 @@ impl DaemonEngine {
             is_exit: false,
         });
 
+        let execution_rule_id = rule_id.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let spawn_rule_id = rule_id.clone();
             let join_handle = handle.spawn(async move {
                 struct ExecGuard {
                     id: u64,
@@ -518,19 +737,24 @@ impl DaemonEngine {
                         });
                     }
                 }
-                let _guard = ExecGuard { id: execution_id, r_id: rule_id.clone(), tx: tx.clone() };
+                let _guard = ExecGuard { id: execution_id, r_id: spawn_rule_id.clone(), tx: tx.clone() };
+                let mut ctx = ctx;
 
                 for (step_idx, action) in actions.iter().enumerate() {
                     let _ = tx.send(ActionCompletionEvent::RuleExecutionStep {
                         execution_id,
-                        _rule_id: rule_id.clone(),
+                        _rule_id: spawn_rule_id.clone(),
                         step_index: step_idx,
                         total_steps,
                         is_exit: false,
                     });
 
-                    match ActionRunner::execute(action, &ctx).await {
-                        Ok(()) => {
+                    match ActionRunner::execute_with_output(action, &ctx).await {
+                        Ok(out_opt) => {
+                            if let Some(out) = out_opt {
+                                ctx.insert("PrevOutput".to_string(), out.clone());
+                                ctx.insert(format!("Step{}.Output", step_idx + 1), out);
+                            }
                             if let Action::StartProcess { file_path, close_on_exit: true, .. } = action {
                                 let _ = tx.send(ActionCompletionEvent::AddBoundProcess(BoundProcess {
                                     rule_id: rule_id.clone(),
@@ -546,10 +770,19 @@ impl DaemonEngine {
                                 category: "ACTION".to_string(),
                                 message: format!("Action failed in '{}': {}", rule_name, err),
                             });
+                            if stop_on_error {
+                                let _ = tx.send(ActionCompletionEvent::Log {
+                                    level: "WARN".to_string(),
+                                    category: "RULE".to_string(),
+                                    message: format!("Pipeline stopped for rule '{}' at step {} due to error", rule_name, step_idx + 1),
+                                });
+                                break;
+                            }
                         }
                     }
                 }
             });
+            self.execution_abort_handles.insert(execution_id, (execution_rule_id, join_handle.abort_handle()));
             Some(join_handle)
         } else {
             let _ = tx.send(ActionCompletionEvent::RuleExecutionFinished {
@@ -578,9 +811,19 @@ impl DaemonEngine {
         ctx.insert("ProcessId".into(), pid.to_string());
         ctx.insert("Timestamp".into(), chrono::Local::now().to_rfc3339());
 
+        if pid > 0 {
+            if let Some(path) = ProcessWatcher::get_process_image_path(pid) {
+                ctx.insert("ProcessPath".into(), path.clone());
+                if let Some(dir) = std::path::Path::new(&path).parent().and_then(|p| p.to_str()) {
+                    ctx.insert("ProcessDir".into(), dir.to_string());
+                }
+            }
+        }
+
         let actions = rule.on_exit_actions.clone();
         let rule_name = rule.name.clone();
         let rule_id = rule.id.clone();
+        let stop_on_error = rule.stop_on_error;
         let tx = self.action_tx.clone();
 
         static EXIT_EXECUTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -595,7 +838,9 @@ impl DaemonEngine {
             is_exit: true,
         });
 
+        let execution_rule_id = rule_id.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let spawn_rule_id = rule_id.clone();
             let join_handle = handle.spawn(async move {
                 struct ExecGuard {
                     id: u64,
@@ -610,26 +855,39 @@ impl DaemonEngine {
                         });
                     }
                 }
-                let _guard = ExecGuard { id: execution_id, r_id: rule_id.clone(), tx: tx.clone() };
+                let _guard = ExecGuard { id: execution_id, r_id: spawn_rule_id.clone(), tx: tx.clone() };
+                let mut ctx = ctx;
 
                 for (step_idx, action) in actions.iter().enumerate() {
                     let _ = tx.send(ActionCompletionEvent::RuleExecutionStep {
                         execution_id,
-                        _rule_id: rule_id.clone(),
+                        _rule_id: spawn_rule_id.clone(),
                         step_index: step_idx,
                         total_steps,
                         is_exit: true,
                     });
 
-                    if let Err(err) = ActionRunner::execute(action, &ctx).await {
-                        let _ = tx.send(ActionCompletionEvent::Log {
-                            level: "ERROR".to_string(),
-                            category: "ACTION".to_string(),
-                            message: format!("Exit action failed in '{}': {}", rule_name, err),
-                        });
+                    match ActionRunner::execute_with_output(action, &ctx).await {
+                        Ok(out_opt) => {
+                            if let Some(out) = out_opt {
+                                ctx.insert("PrevOutput".to_string(), out.clone());
+                                ctx.insert(format!("Step{}.Output", step_idx + 1), out);
+                            }
+                        }
+                        Err(err) => {
+                            let _ = tx.send(ActionCompletionEvent::Log {
+                                level: "ERROR".to_string(),
+                                category: "ACTION".to_string(),
+                                message: format!("Exit action failed in '{}': {}", rule_name, err),
+                            });
+                            if stop_on_error {
+                                break;
+                            }
+                        }
                     }
                 }
             });
+            self.execution_abort_handles.insert(execution_id, (execution_rule_id, join_handle.abort_handle()));
             Some(join_handle)
         } else {
             let _ = tx.send(ActionCompletionEvent::RuleExecutionFinished {
@@ -659,6 +917,9 @@ impl DaemonEngine {
                 if tray_changed {
                     crate::daemon::tray::update_tray_icon(new_tray_path);
                 }
+                if let Some(h) = &self.hotkey_handle {
+                    h.reload(&self.config.rules);
+                }
                 self.log("INFO", "CONFIG", "Configuration updated and saved");
                 IpcResponse::Ok
             }
@@ -670,12 +931,18 @@ impl DaemonEngine {
                     self.config.rules.push(rule);
                 }
                 let _ = self.config.save_to_file(AppConfig::config_path());
+                if let Some(h) = &self.hotkey_handle {
+                    h.reload(&self.config.rules);
+                }
                 IpcResponse::Ok
             }
 
             IpcRequest::DeleteRule(id) => {
                 self.config.rules.retain(|r| r.id != id);
                 let _ = self.config.save_to_file(AppConfig::config_path());
+                if let Some(h) = &self.hotkey_handle {
+                    h.reload(&self.config.rules);
+                }
                 IpcResponse::Ok
             }
 
@@ -683,6 +950,9 @@ impl DaemonEngine {
                 if let Some(rule) = self.config.rules.iter_mut().find(|r| r.id == id) {
                     rule.is_enabled = enabled;
                     let _ = self.config.save_to_file(AppConfig::config_path());
+                }
+                if let Some(h) = &self.hotkey_handle {
+                    h.reload(&self.config.rules);
                 }
                 IpcResponse::Ok
             }
@@ -753,8 +1023,24 @@ impl DaemonEngine {
                     count += 1;
                 }
                 let _ = self.config.save_to_file(AppConfig::config_path());
+                if let Some(h) = &self.hotkey_handle {
+                    h.reload(&self.config.rules);
+                }
                 self.log("INFO", "CONFIG", &format!("Imported {count} automations"));
                 IpcResponse::Ok
+            }
+
+            IpcRequest::TestStep { action, context } => {
+                let res = ActionRunner::execute(&action, &context).await.map_err(|e| e.to_string());
+                match &res {
+                    Ok(()) => {
+                        self.log("INFO", "TEST", "Step test executed successfully");
+                    }
+                    Err(err) => {
+                        self.log("ERROR", "TEST", &format!("Step test failed: {err}"));
+                    }
+                }
+                IpcResponse::TestStepResult(res)
             }
 
             IpcRequest::ShutdownDaemon => {
@@ -821,6 +1107,7 @@ impl DaemonEngine {
             config: self.config.clone(),
             logs: self.logs.clone(),
             active_rule_executions,
+            analytics: self.analytics.clone(),
         }
     }
 
@@ -845,17 +1132,17 @@ mod tests {
     use chrono::{Datelike, Timelike};
 
     #[test]
-    fn test_log_limit_100() {
+    fn test_log_limit_500() {
         let mut engine = DaemonEngine::new(AppConfig::default());
         assert_eq!(engine.logs.len(), 0);
 
-        for i in 1..=150 {
+        for i in 1..=600 {
             engine.log("INFO", "TEST", &format!("Log message {}", i));
         }
 
-        assert_eq!(engine.logs.len(), 100);
-        assert_eq!(engine.logs[0].message, "Log message 51");
-        assert_eq!(engine.logs[99].message, "Log message 150");
+        assert_eq!(engine.logs.len(), 500);
+        assert_eq!(engine.logs[0].message, "Log message 101");
+        assert_eq!(engine.logs[499].message, "Log message 600");
     }
 
     #[test]
@@ -1041,6 +1328,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1085,6 +1373,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1130,6 +1419,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1170,6 +1460,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1217,6 +1508,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1249,6 +1541,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1338,6 +1631,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1382,6 +1676,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         });
 
         let mut engine = DaemonEngine::new(config);
@@ -1424,6 +1719,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         };
         let rule_short = Rule {
             id: "short_rule".into(),
@@ -1437,6 +1733,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         };
 
         let mut engine = DaemonEngine::new(config);
@@ -1474,6 +1771,7 @@ mod tests {
             execution_count: 0,
             custom_icon_path: None,
             auto_process_icon: false,
+            ..Default::default()
         };
 
         let mut engine = DaemonEngine::new(config);

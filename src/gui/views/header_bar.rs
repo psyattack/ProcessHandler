@@ -34,7 +34,7 @@ pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
     // 4. Center: Navigation Tabs (strictly centered in the middle of the window)
     let tabs = [
         (ActiveView::Rules, loc.tab_automations, loc.tab_automations_tip),
-        (ActiveView::LiveStream, loc.tab_logs, loc.tab_logs_tip),
+        (ActiveView::Analytics, loc.tab_analytics, loc.tab_analytics_tip),
         (ActiveView::Settings, loc.tab_settings, loc.tab_settings_tip),
     ];
 
@@ -51,11 +51,11 @@ pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
     let center_x = full_rect.center().x;
     let mut current_x = (center_x - total_tabs_w / 2.0).round();
 
-    for (view, label, tip, galley, w) in galleys {
+    for (view, _label, tip, galley, w) in galleys {
         let tab_rect = Rect::from_min_size(pos2(current_x, full_rect.top()), vec2(w, h));
         current_x += w;
 
-        let resp = ui.interact(tab_rect, ui.id().with(view as usize), egui::Sense::click());
+        let mut resp = ui.interact(tab_rect, ui.id().with(view as usize), egui::Sense::click());
         if resp.clicked() {
             if view != state.active_view {
                 if let Some(rule) = state.editing_rule.take() {
@@ -76,7 +76,9 @@ pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
             ui.painter().rect_filled(span, CornerRadius::ZERO, t.invert_bg);
         }
         widgets::paint_centred(ui, tab_rect, galley, if on { t.invert_fg } else { t.muted });
-        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, state.active_view == view, label));
-        resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand);
+        if !tip.trim().is_empty() {
+            resp = resp.on_hover_text(tip);
+        }
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     }
 }
