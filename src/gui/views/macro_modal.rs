@@ -23,6 +23,10 @@ enum TimelineItem {
         start_idx: usize,
         count: usize,
     },
+    MoveGroupExpandedHead {
+        start_idx: usize,
+        count: usize,
+    },
     FullKeyPress {
         start_idx: usize,
         count: usize,
@@ -33,7 +37,11 @@ enum TimelineItem {
     },
 }
 
-fn partition_timeline_items(events: &[MacroEvent], group_presses: bool) -> Vec<TimelineItem> {
+fn partition_timeline_items(
+    events: &[MacroEvent],
+    group_presses: bool,
+    expanded_groups: &std::collections::HashSet<usize>,
+) -> Vec<TimelineItem> {
     let mut items = Vec::new();
     let mut i = 0;
     while i < events.len() {
@@ -45,7 +53,14 @@ fn partition_timeline_items(events: &[MacroEvent], group_presses: bool) -> Vec<T
                 i += 1;
             }
             if count >= 2 {
-                items.push(TimelineItem::MoveGroup { start_idx: start, count });
+                if expanded_groups.contains(&start) {
+                    items.push(TimelineItem::MoveGroupExpandedHead { start_idx: start, count });
+                    for sub in (start + 1)..(start + count) {
+                        items.push(TimelineItem::Single(sub));
+                    }
+                } else {
+                    items.push(TimelineItem::MoveGroup { start_idx: start, count });
+                }
             } else {
                 items.push(TimelineItem::Single(start));
             }
@@ -433,7 +448,10 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                             return;
                         }
 
-                        let items = partition_timeline_items(events, state.group_full_presses);
+                        let expand_id = ui.id().with("macro_expanded_move_groups");
+                        let mut expanded_groups: std::collections::HashSet<usize> = ui.data(|d| d.get_temp(expand_id).unwrap_or_default());
+
+                        let items = partition_timeline_items(events, state.group_full_presses, &expanded_groups);
 
                         // Robust Drag & Drop tracking (using continuous vertical Y-centers pattern)
                         let dnd_id = ui.id().with("macro_timeline_dnd_src");
@@ -476,9 +494,6 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                 }
                             }
                         }
-
-                        let expand_id = ui.id().with("macro_expanded_move_groups");
-                        let mut expanded_groups: std::collections::HashSet<usize> = ui.data(|d| d.get_temp(expand_id).unwrap_or_default());
 
                         let mut drag_started_idx = None;
                         let mut to_remove: Option<TimelineItem> = None;
@@ -541,6 +556,14 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     widgets::hud(ui, &format!("{:02}", ev_idx + 1), t.faint);
                                                     ui.add_space(4.0);
 
+                                                    // Align subsequent moves in an expanded MoveGroup with the MoveGroupExpandedHead chip
+                                                    let is_subsequent_group_move = matches!(events[*ev_idx], MacroEvent::MouseMove { .. })
+                                                        && *ev_idx > 0
+                                                        && matches!(events[*ev_idx - 1], MacroEvent::MouseMove { .. });
+                                                    if is_subsequent_group_move {
+                                                        ui.add_space(18.0);
+                                                    }
+
                                                     // Render clear, focused inline row by type
                                                     render_timeline_row_inline(ui, &mut events[*ev_idx], *ev_idx, loc, &t);
 
@@ -560,24 +583,14 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     widgets::hud(ui, &format!("{:02}-{:02}", start_idx + 1, start_idx + count), t.faint);
                                                     ui.add_space(4.0);
 
-                                                    // Expand / Collapse toggle button
-                                                    let is_expanded = expanded_groups.contains(start_idx);
-                                                    let arrow = if is_expanded { "▼" } else { "▶" };
+                                                    // Expand toggle button
                                                     let toggle_resp = ui.add(
-                                                        egui::Button::new(RichText::new(arrow).font(egui::FontId::new(10.0, theme::mono_bold())).color(t.accent_ink))
+                                                        egui::Button::new(RichText::new("▶").font(egui::FontId::new(10.0, theme::mono_bold())).color(t.accent_ink))
                                                             .frame(false)
                                                             .min_size(vec2(16.0, 18.0)),
-                                                    ).on_hover_text(if is_expanded {
-                                                        loc.macro_studio_tip_collapse_moves
-                                                    } else {
-                                                        loc.macro_studio_tip_expand_moves
-                                                    });
+                                                    ).on_hover_text(loc.macro_studio_tip_expand_moves);
                                                     if toggle_resp.clicked() {
-                                                        if is_expanded {
-                                                            expanded_groups.remove(start_idx);
-                                                        } else {
-                                                            expanded_groups.insert(*start_idx);
-                                                        }
+                                                        expanded_groups.insert(*start_idx);
                                                     }
                                                     ui.add_space(2.0);
 
@@ -592,6 +605,51 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     let summary = format!("A: ({}, {}) → B: ({}, {}) • {} {}", p_start.0, p_start.1, p_end.0, p_end.1, count, loc.macro_studio_pts_suffix);
                                                     widgets::hud(ui, &summary, t.ink_strong);
 
+                                                    ui.add_space(8.0);
+
+                                                    // Batch Smooth & Organic controls for the whole movement sequence
+                                                    let all_smooth = events[*start_idx..*start_idx + *count].iter().all(|e| match e {
+                                                        MacroEvent::MouseMove { smooth, .. } => *smooth,
+                                                        _ => false,
+                                                    });
+                                                    let mut group_smooth = all_smooth;
+                                                    let smooth_resp = ui.checkbox(&mut group_smooth, loc.macro_studio_checkbox_smooth);
+                                                    if smooth_resp.changed() {
+                                                        for ev in &mut events[*start_idx..*start_idx + *count] {
+                                                            if let MacroEvent::MouseMove { smooth, .. } = ev {
+                                                                *smooth = group_smooth;
+                                                            }
+                                                        }
+                                                    }
+
+                                                    if group_smooth {
+                                                        let mut group_dur = match &events[*start_idx] {
+                                                            MacroEvent::MouseMove { duration_ms, .. } => duration_ms.unwrap_or(200),
+                                                            _ => 200,
+                                                        };
+                                                        if ui.add(egui::DragValue::new(&mut group_dur).range(10..=5000).suffix(" ms").prefix("⏱ ")).changed() {
+                                                            for ev in &mut events[*start_idx..*start_idx + *count] {
+                                                                if let MacroEvent::MouseMove { duration_ms, .. } = ev {
+                                                                    *duration_ms = Some(group_dur);
+                                                                }
+                                                            }
+                                                        }
+
+                                                        let all_organic = events[*start_idx..*start_idx + *count].iter().all(|e| match e {
+                                                            MacroEvent::MouseMove { organic, .. } => *organic,
+                                                            _ => false,
+                                                        });
+                                                        let mut group_organic = all_organic;
+                                                        let org_resp = ui.checkbox(&mut group_organic, loc.macro_studio_label_organic);
+                                                        if org_resp.changed() {
+                                                            for ev in &mut events[*start_idx..*start_idx + *count] {
+                                                                if let MacroEvent::MouseMove { organic, .. } = ev {
+                                                                    *organic = group_organic;
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
                                                     // Action buttons on the right
                                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                         ui.add_space(8.0);
@@ -599,6 +657,36 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                             to_remove = Some(item.clone());
                                                         }
                                                         if ghost_icon_button(ui, widgets::Glyph::Clone, loc.macro_studio_tip_duplicate_group, false).clicked() {
+                                                            to_duplicate = Some(item.clone());
+                                                        }
+                                                    });
+                                                }
+                                                TimelineItem::MoveGroupExpandedHead { start_idx, count: _ } => {
+                                                    // Step index for the first coordinate in the sequence
+                                                    widgets::hud(ui, &format!("{:02}", start_idx + 1), t.faint);
+                                                    ui.add_space(4.0);
+
+                                                    // Collapse toggle button
+                                                    let toggle_resp = ui.add(
+                                                        egui::Button::new(RichText::new("▼").font(egui::FontId::new(10.0, theme::mono_bold())).color(t.accent_ink))
+                                                            .frame(false)
+                                                            .min_size(vec2(16.0, 18.0)),
+                                                    ).on_hover_text(loc.macro_studio_tip_collapse_moves);
+                                                    if toggle_resp.clicked() {
+                                                        expanded_groups.remove(start_idx);
+                                                    }
+                                                    ui.add_space(2.0);
+
+                                                    // Render as a regular single move step
+                                                    render_timeline_row_inline(ui, &mut events[*start_idx], *start_idx, loc, &t);
+
+                                                    // Action buttons on the right: duplicate this step, delete this step
+                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                        ui.add_space(8.0);
+                                                        if ghost_icon_button(ui, widgets::Glyph::Close, loc.macro_studio_tip_delete_step, true).clicked() {
+                                                            to_remove = Some(item.clone());
+                                                        }
+                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, loc.macro_studio_tip_duplicate_step, false).clicked() {
                                                             to_duplicate = Some(item.clone());
                                                         }
                                                     });
@@ -700,52 +788,8 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                             }
                                         });
                                     });
-
-                                    // If MoveGroup is expanded, unfold the list of individual movements right below
-                                    if let TimelineItem::MoveGroup { start_idx, count } = item {
-                                        if expanded_groups.contains(start_idx) {
-                                            ui.add_space(2.0);
-                                            egui::Frame::new()
-                                                .fill(t.sunken)
-                                                .corner_radius(CornerRadius::same(2))
-                                                .stroke(Stroke::new(1.0, t.hairline().color))
-                                                .inner_margin(egui::Margin { left: 32, right: 14, top: 4, bottom: 4 })
-                                                .show(ui, |ui| {
-                                                    ui.spacing_mut().interact_size.y = 19.0;
-                                                    ui.spacing_mut().item_spacing.y = 2.0;
-                                                    for sub_i in 0..*count {
-                                                        let sub_ev_idx = start_idx + sub_i;
-                                                        if let MacroEvent::MouseMove { x, y, coord_mode, .. } = &mut events[sub_ev_idx] {
-                                                            ui.horizontal(|ui| {
-                                                                widgets::hud(ui, &format!("#{:02}", sub_i + 1), t.faint);
-                                                                ui.add_space(4.0);
-                                                                let is_rel = *coord_mode == MouseCoordMode::Relative;
-                                                                if is_rel {
-                                                                    ui.add(egui::DragValue::new(x).prefix("ΔX: ").speed(2.0));
-                                                                    ui.add(egui::DragValue::new(y).prefix("ΔY: ").speed(2.0));
-                                                                } else {
-                                                                    ui.add(egui::DragValue::new(x).prefix("X: "));
-                                                                    ui.add(egui::DragValue::new(y).prefix("Y: "));
-                                                                    let mut ox = Some(*x);
-                                                                    let mut oy = Some(*y);
-                                                                    let p_id = ui.id().with(sub_ev_idx).with("group_sub_picker");
-                                                                    render_compact_coord_picker(ui, p_id, &mut ox, &mut oy, loc);
-                                                                    if let (Some(nx), Some(ny)) = (ox, oy) {
-                                                                        *x = nx;
-                                                                        *y = ny;
-                                                                    }
-                                                                }
-                                                            });
-                                                        }
-                                                    }
-                                                });
-                                            ui.add_space(2.0);
-                                        }
-                                    }
                                 }
                             });
-
-                        ui.data_mut(|d| d.insert_temp(expand_id, expanded_groups));
 
                         // Calculate target drop index across continuous vertical space
                         let mut target_idx = None;
@@ -793,6 +837,7 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                         TimelineItem::MoveGroup { start_idx, count }
                                         | TimelineItem::FullKeyPress { start_idx, count }
                                         | TimelineItem::FullMouseClick { start_idx, count } => (start_idx, count),
+                                        TimelineItem::MoveGroupExpandedHead { start_idx, .. } => (start_idx, 1),
                                     };
                                     let mut dst_event_idx = if dst_item_idx < items.len() {
                                         match items[dst_item_idx] {
@@ -800,6 +845,7 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                             TimelineItem::MoveGroup { start_idx, .. }
                                             | TimelineItem::FullKeyPress { start_idx, .. }
                                             | TimelineItem::FullMouseClick { start_idx, .. } => start_idx,
+                                            TimelineItem::MoveGroupExpandedHead { start_idx, .. } => start_idx,
                                         }
                                     } else {
                                         events.len()
@@ -827,6 +873,19 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                 TimelineItem::Single(idx) => {
                                     if idx < events.len() {
                                         events.remove(idx);
+                                        let mut updated = std::collections::HashSet::new();
+                                        for g in expanded_groups.drain() {
+                                            if g > idx {
+                                                updated.insert(g - 1);
+                                            } else if g == idx {
+                                                if idx < events.len() && matches!(events[idx], MacroEvent::MouseMove { .. }) {
+                                                    updated.insert(idx);
+                                                }
+                                            } else {
+                                                updated.insert(g);
+                                            }
+                                        }
+                                        expanded_groups = updated;
                                     }
                                 }
                                 TimelineItem::MoveGroup { start_idx, count }
@@ -834,6 +893,34 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                 | TimelineItem::FullMouseClick { start_idx, count } => {
                                     if start_idx + count <= events.len() {
                                         events.drain(start_idx..start_idx + count);
+                                        expanded_groups.remove(&start_idx);
+                                        let mut updated = std::collections::HashSet::new();
+                                        for g in expanded_groups.drain() {
+                                            if g > start_idx {
+                                                updated.insert(g.saturating_sub(count));
+                                            } else {
+                                                updated.insert(g);
+                                            }
+                                        }
+                                        expanded_groups = updated;
+                                    }
+                                }
+                                TimelineItem::MoveGroupExpandedHead { start_idx, .. } => {
+                                    if start_idx < events.len() {
+                                        events.remove(start_idx);
+                                        let mut updated = std::collections::HashSet::new();
+                                        for g in expanded_groups.drain() {
+                                            if g > start_idx {
+                                                updated.insert(g - 1);
+                                            } else if g == start_idx {
+                                                if start_idx < events.len() && matches!(events[start_idx], MacroEvent::MouseMove { .. }) {
+                                                    updated.insert(start_idx);
+                                                }
+                                            } else {
+                                                updated.insert(g);
+                                            }
+                                        }
+                                        expanded_groups = updated;
                                     }
                                 }
                             }
@@ -843,6 +930,15 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                     if idx < events.len() {
                                         let clone_ev = events[idx].clone();
                                         events.insert(idx + 1, clone_ev);
+                                        let mut updated = std::collections::HashSet::new();
+                                        for g in expanded_groups.drain() {
+                                            if g > idx {
+                                                updated.insert(g + 1);
+                                            } else {
+                                                updated.insert(g);
+                                            }
+                                        }
+                                        expanded_groups = updated;
                                     }
                                 }
                                 TimelineItem::MoveGroup { start_idx, count }
@@ -855,8 +951,25 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                         }
                                     }
                                 }
+                                TimelineItem::MoveGroupExpandedHead { start_idx, .. } => {
+                                    if start_idx < events.len() {
+                                        let clone_ev = events[start_idx].clone();
+                                        events.insert(start_idx + 1, clone_ev);
+                                        let mut updated = std::collections::HashSet::new();
+                                        for g in expanded_groups.drain() {
+                                            if g > start_idx {
+                                                updated.insert(g + 1);
+                                            } else {
+                                                updated.insert(g);
+                                            }
+                                        }
+                                        expanded_groups = updated;
+                                    }
+                                }
                             }
                         }
+
+                        ui.data_mut(|d| d.insert_temp(expand_id, expanded_groups));
 
                         ui.add_space(8.0);
                     });
@@ -1134,7 +1247,7 @@ fn render_timeline_row_inline(
         }
 
         // --- MOUSE MOVE & GAME CAMERA TURN ---
-        MacroEvent::MouseMove { x, y, coord_mode, smooth, duration_ms, .. } => {
+        MacroEvent::MouseMove { x, y, coord_mode, smooth, duration_ms, organic } => {
             let is_rel = *coord_mode == MouseCoordMode::Relative;
             let chip_title = if is_rel {
                 loc.macro_studio_chip_turn
@@ -1178,6 +1291,7 @@ fn render_timeline_row_inline(
                 if ui.add(egui::DragValue::new(&mut dur).range(10..=5000).suffix(" ms").prefix("⏱ ")).changed() {
                     *duration_ms = Some(dur);
                 }
+                ui.checkbox(organic, loc.macro_studio_label_organic);
             }
         }
 
@@ -1385,7 +1499,7 @@ mod tests {
         ];
 
         // Without group_presses: keys/mouse stay Single, moves group into MoveGroup
-        let unpartitioned = partition_timeline_items(&events, false);
+        let unpartitioned = partition_timeline_items(&events, false, &std::collections::HashSet::new());
         assert_eq!(unpartitioned.len(), 7);
         assert_eq!(unpartitioned[0], TimelineItem::Single(0));
         assert_eq!(unpartitioned[1], TimelineItem::Single(1));
@@ -1396,11 +1510,21 @@ mod tests {
         assert_eq!(unpartitioned[6], TimelineItem::MoveGroup { start_idx: 6, count: 2 });
 
         // With group_presses: KeyDown+Delay+KeyUp -> FullKeyPress, MouseDown+Delay+MouseUp -> FullMouseClick
-        let partitioned = partition_timeline_items(&events, true);
+        let partitioned = partition_timeline_items(&events, true, &std::collections::HashSet::new());
         assert_eq!(partitioned.len(), 3);
         assert_eq!(partitioned[0], TimelineItem::FullKeyPress { start_idx: 0, count: 3 });
         assert_eq!(partitioned[1], TimelineItem::FullMouseClick { start_idx: 3, count: 3 });
         assert_eq!(partitioned[2], TimelineItem::MoveGroup { start_idx: 6, count: 2 });
+
+        // With expanded move group: MoveGroupExpandedHead + Single
+        let mut expanded = std::collections::HashSet::new();
+        expanded.insert(6);
+        let partitioned_exp = partition_timeline_items(&events, true, &expanded);
+        assert_eq!(partitioned_exp.len(), 4);
+        assert_eq!(partitioned_exp[0], TimelineItem::FullKeyPress { start_idx: 0, count: 3 });
+        assert_eq!(partitioned_exp[1], TimelineItem::FullMouseClick { start_idx: 3, count: 3 });
+        assert_eq!(partitioned_exp[2], TimelineItem::MoveGroupExpandedHead { start_idx: 6, count: 2 });
+        assert_eq!(partitioned_exp[3], TimelineItem::Single(7));
     }
 
     #[test]

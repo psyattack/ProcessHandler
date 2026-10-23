@@ -10,8 +10,8 @@ use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
 use crate::models::{
-    Action, PowerPlanType, ProcessAudioActionType, ProcessMatchMode,
-    ProcessPriorityLevel, ProcessSnapshotItem, Rule, ScheduleType,
+    Action, ConditionOperator, PowerPlanType, ProcessAudioActionType, ProcessMatchMode,
+    ProcessPriorityLevel, ProcessSnapshotItem, Rule, RuleCondition, RuleConditionItem, ScheduleType,
     SystemEventType, SystemPowerType, Trigger, WindowActionType,
 };
 use chrono::{Datelike, Timelike};
@@ -1089,15 +1089,21 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
             ui.add_space(8.0);
 
+            // 3. Pre-conditions (Section 03)
+            widgets::eyebrow(ui, "03", loc.inspector_eyebrow_conditions);
+            render_conditions_section(ui, state, rule, t);
+
+            ui.add_space(8.0);
+
             let is_process_trigger = matches!(rule.trigger, Some(Trigger::Process { .. }));
 
-            // 3. Action Sequence Builder (Execution on trigger)
+            // 4. Action Sequence Builder (Execution on trigger)
             let action_header = if is_process_trigger {
                 loc.inspector_eyebrow_actions_start
             } else {
                 loc.inspector_eyebrow_actions_pipeline
             };
-            widgets::eyebrow(ui, "03", action_header);
+            widgets::eyebrow(ui, "04", action_header);
 
             let exec_opt = state.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
 
@@ -1113,10 +1119,10 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                 state.open_process_picker(crate::gui::state::ProcessPickerTarget::Action(idx));
             }
 
-            // 4. Actions on Process Exit
+            // 5. Actions on Process Exit
             if is_process_trigger {
                 ui.add_space(8.0);
-                widgets::eyebrow(ui, "04", loc.inspector_eyebrow_actions_exit);
+                widgets::eyebrow(ui, "05", loc.inspector_eyebrow_actions_exit);
 
                 if let Some(idx) = render_actions_pipeline(
                     ui,
@@ -1215,6 +1221,7 @@ fn action_type_badge(action: &Action, loc: &crate::i18n::Strings) -> &'static st
         Action::DefaultDevice { .. } | Action::AudioDevice { .. } | Action::MicrophoneDevice { .. } => loc.inspector_badge_default_device,
         Action::ExecuteScript { .. } | Action::PowerShell { .. } | Action::Cmd { .. } | Action::LuaScript { .. } => loc.inspector_badge_execute_script,
         Action::Macro { .. } => loc.inspector_badge_macro,
+        Action::IfElse { .. } => loc.inspector_badge_if_else,
     }
 }
 
@@ -1330,6 +1337,15 @@ fn action_summary_preview(action: &Action) -> String {
             let spd_str = if (*speed - 1.0).abs() > 0.05 { format!(" @{:.1}x", speed) } else { String::new() };
             format!("Macro: {} events{}{}", events.len(), rep_str, spd_str)
         }
+        Action::IfElse { conditions, condition, then_actions, else_if_branches, else_actions } => {
+            let glyph = conditions.first().map(|c| c.condition.icon_glyph()).or_else(|| condition.as_ref().map(|c| c.icon_glyph())).unwrap_or("❓");
+            let count = if !conditions.is_empty() { conditions.len() } else if condition.is_some() { 1 } else { 0 };
+            if else_if_branches.is_empty() {
+                format!("If {} ({} cond) [then: {}, else: {}]", glyph, count, then_actions.len(), else_actions.len())
+            } else {
+                format!("If {} ({} cond) [then: {}, elif: {}, else: {}]", glyph, count, then_actions.len(), else_if_branches.len(), else_actions.len())
+            }
+        }
         _ => "Legacy Action".into(),
     }
 }
@@ -1337,12 +1353,12 @@ fn action_summary_preview(action: &Action) -> String {
 #[allow(clippy::too_many_arguments)]
 fn render_drop_slot(
     ui: &mut Ui,
-    loc: &crate::i18n::Strings,
+    _loc: &crate::i18n::Strings,
     slot_idx: usize,
     active_dst: Option<usize>,
     active_src: Option<usize>,
     pipeline_id: &str,
-    is_exit_pipeline: bool,
+    prefix: &str,
     t: &Tokens,
 ) {
     let is_targeted = if let (Some(dst), Some(src)) = (active_dst, active_src) {
@@ -1381,7 +1397,6 @@ fn render_drop_slot(
         );
 
         // Step number label at the right of the drop line
-        let prefix = if is_exit_pipeline { loc.inspector_exit_prefix } else { loc.inspector_step_prefix };
         let step_num = if let Some(src) = active_src {
             if slot_idx > src {
                 slot_idx
@@ -1406,7 +1421,7 @@ fn render_floating_drag_preview(
     action: &Action,
     session: DndDragSession,
     pointer_pos: Option<Pos2>,
-    is_exit_pipeline: bool,
+    prefix: &str,
     pipeline_id: &str,
     t: &Tokens,
 ) {
@@ -1446,9 +1461,9 @@ fn render_floating_drag_preview(
     }
 
     // Step indicator: "STEP 01"
-    let prefix = if is_exit_pipeline { loc.inspector_exit_prefix } else { loc.inspector_step_prefix };
     let step_txt = format!("{} {:02}", prefix, session.source_idx + 1);
     let step_galley = widgets::caps(ui, &step_txt, 11.0, theme::mono_bold(), 1.0, t.accent_ink);
+    let step_w = step_galley.size().x;
     painter.galley_with_override_text_color(
         pos2(preview_rect.left() + 26.0, preview_rect.top() + 8.0),
         step_galley,
@@ -1459,7 +1474,7 @@ fn render_floating_drag_preview(
     let type_badge = action_type_badge(action, loc);
     let badge_galley = widgets::caps(ui, type_badge, 10.0, theme::mono(), 1.0, t.ink_strong);
     let badge_rect = Rect::from_min_size(
-        pos2(preview_rect.left() + 84.0, preview_rect.top() + 7.0),
+        pos2(preview_rect.left() + 26.0 + step_w + 8.0, preview_rect.top() + 7.0),
         vec2(badge_galley.size().x + 10.0, 18.0),
     );
     painter.rect_filled(badge_rect, CornerRadius::ZERO, t.sunken);
@@ -1569,9 +1584,11 @@ fn render_actions_pipeline(
     let total = actions.len();
     let mut has_infinite_prior = false;
 
+    let prefix = if is_exit_pipeline { loc.inspector_exit_prefix } else { loc.inspector_step_prefix };
+
     for (idx, action) in actions.iter_mut().enumerate() {
         // Render drop slot BEFORE card idx
-        render_drop_slot(ui, loc, idx, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
+        render_drop_slot(ui, loc, idx, active_dst, active_src, pipeline_id, prefix, t);
 
         // Render card idx
         let is_ghost = active_src == Some(idx);
@@ -1615,11 +1632,17 @@ fn render_actions_pipeline(
         if resp.switch_to_hunter {
             switch_to_hunter_idx = Some(idx);
         }
+        if let Some(target) = resp.open_catalog_nested {
+            state.open_action_catalog_nested(is_exit_pipeline, target);
+        }
+        if let Some(target) = resp.pick_target {
+            state.open_process_picker(target);
+        }
     }
 
     // Render trailing drop slot (after last card)
     if total > 0 {
-        render_drop_slot(ui, loc, total, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
+        render_drop_slot(ui, loc, total, active_dst, active_src, pipeline_id, prefix, t);
     }
 
     // Update target_idx using fresh current_centers from this exact frame
@@ -1698,7 +1721,7 @@ fn render_actions_pipeline(
             &actions[session.source_idx],
             session,
             pointer_pos,
-            is_exit_pipeline,
+            prefix,
             pipeline_id,
             t,
         );
@@ -1723,7 +1746,18 @@ struct ActionCardResponse {
     pub expand_macro: bool,
     pub drag_started: bool,
     pub switch_to_hunter: bool,
+    pub open_catalog_nested: Option<crate::gui::state::IfElseCatalogTarget>,
+    pub pick_target: Option<crate::gui::state::ProcessPickerTarget>,
     pub card_rect: Rect,
+}
+
+#[derive(Default)]
+struct ActionFieldsResponse {
+    pub expand_script: Option<ScriptLanguage>,
+    pub expand_macro: bool,
+    pub switch_to_hunter: bool,
+    pub open_catalog_nested: Option<crate::gui::state::IfElseCatalogTarget>,
+    pub pick_target: Option<crate::gui::state::ProcessPickerTarget>,
 }
 
 fn render_infinite_macro_warning(ui: &mut Ui, state: &GuiState, t: &Tokens) {
@@ -1768,10 +1802,8 @@ fn render_action_card(
     let loc = state.loc();
     let mut remove_clicked = false;
     let mut clone_clicked = false;
-    let mut expand_script = None;
-    let mut expand_macro = false;
     let mut drag_started = false;
-    let mut switch_to_hunter = false;
+    let mut fields_resp = ActionFieldsResponse::default();
 
     action.migrate_to_unified();
 
@@ -1897,9 +1929,56 @@ fn render_action_card(
 
                 widgets::hrule(ui);
 
+                let default_picker = if is_exit_pipeline {
+                    crate::gui::state::ProcessPickerTarget::ExitAction(idx)
+                } else {
+                    crate::gui::state::ProcessPickerTarget::Action(idx)
+                };
+
                 // 2. CARD BODY: Full-width stacked parameter fields
-                ui.add_enabled_ui(!is_being_dragged && !is_dimmed, |ui| {
-                    match action {
+                fields_resp = ui.add_enabled_ui(!is_being_dragged && !is_dimmed, |ui| {
+                    render_action_parameter_fields(
+                        ui,
+                        state,
+                        action,
+                        idx,
+                        is_exit_pipeline,
+                        default_picker,
+                        t,
+                        0,
+                    )
+                }).inner;
+            });
+        });
+
+    ActionCardResponse {
+        remove_clicked,
+        clone_clicked,
+        expand_script: fields_resp.expand_script,
+        expand_macro: fields_resp.expand_macro,
+        drag_started,
+        switch_to_hunter: fields_resp.switch_to_hunter,
+        open_catalog_nested: fields_resp.open_catalog_nested,
+        pick_target: fields_resp.pick_target,
+        card_rect: card_response.response.rect,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_action_parameter_fields(
+    ui: &mut Ui,
+    state: &GuiState,
+    action: &mut Action,
+    idx: usize,
+    is_exit_pipeline: bool,
+    default_picker_target: crate::gui::state::ProcessPickerTarget,
+    t: &Tokens,
+    depth: usize,
+) -> ActionFieldsResponse {
+    let loc = state.loc();
+    let mut resp = ActionFieldsResponse::default();
+
+    match action {
                     Action::StartProcess {
                         file_path,
                         arguments,
@@ -1981,7 +2060,7 @@ fn render_action_card(
                             ui.set_width(ui.available_width());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if render_process_picker(ui, loc) {
-                                    switch_to_hunter = true;
+                                    resp.pick_target = Some(default_picker_target);
                                 }
                                 ui.add(
                                     egui::TextEdit::singleline(process_name)
@@ -2032,7 +2111,7 @@ fn render_action_card(
                             ui.set_width(ui.available_width());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if render_process_picker(ui, loc) {
-                                    switch_to_hunter = true;
+                                    resp.pick_target = Some(default_picker_target);
                                 }
                                 ui.add(
                                     egui::TextEdit::singleline(process_name)
@@ -2135,7 +2214,7 @@ fn render_action_card(
                             ui.set_width(ui.available_width());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if render_process_picker(ui, loc) {
-                                    switch_to_hunter = true;
+                                    resp.pick_target = Some(default_picker_target);
                                 }
                                 if ui.add(
                                     egui::TextEdit::singleline(&mut proc_str)
@@ -2222,7 +2301,7 @@ fn render_action_card(
                             ui.set_width(ui.available_width());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if render_process_picker(ui, loc) {
-                                    switch_to_hunter = true;
+                                    resp.pick_target = Some(default_picker_target);
                                 }
                                 if ui.add(
                                     egui::TextEdit::singleline(&mut proc_str)
@@ -2299,7 +2378,7 @@ fn render_action_card(
                             ui.set_width(ui.available_width());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if render_process_picker(ui, loc) {
-                                    switch_to_hunter = true;
+                                    resp.pick_target = Some(default_picker_target);
                                 }
                                 ui.add(
                                     egui::TextEdit::singleline(process_name)
@@ -2466,7 +2545,7 @@ fn render_action_card(
                             widgets::hud(ui, loc.inspector_script_interpreter, t.muted);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if widgets::glyph_button(ui, Glyph::Expand, loc.inspector_script_expand_tip).clicked() {
-                                    expand_script = Some(match interpreter {
+                                    resp.expand_script = Some(match interpreter {
                                         crate::models::ScriptType::PowerShell => ScriptLanguage::PowerShell,
                                         crate::models::ScriptType::Batch => ScriptLanguage::Batch,
                                         crate::models::ScriptType::Lua => ScriptLanguage::Lua,
@@ -2506,11 +2585,11 @@ fn render_action_card(
 
                     Action::Macro { .. } => {
                         let banner_h = 44.0;
-                        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), banner_h), Sense::click());
-                        let hovered = resp.hovered();
+                        let (rect, macro_btn_resp) = ui.allocate_exact_size(vec2(ui.available_width(), banner_h), Sense::click());
+                        let hovered = macro_btn_resp.hovered();
 
-                        if resp.clicked() {
-                            expand_macro = true;
+                        if macro_btn_resp.clicked() {
+                            resp.expand_macro = true;
                         }
 
                         let p = ui.painter();
@@ -2552,20 +2631,1038 @@ fn render_action_card(
                             if hovered { t.accent_ink } else { t.faint },
                         );
                     }
-                    _ => {}
+
+        Action::IfElse { conditions, condition, then_actions, else_if_branches, else_actions } => {
+            if depth > 0 {
+                ui.label(egui::RichText::new(loc.inspector_ifelse_nested_not_supported).color(t.muted));
+            } else {
+                if conditions.is_empty() {
+                    if let Some(c) = condition.take() {
+                        conditions.push(RuleConditionItem::new(c));
+                    } else {
+                        conditions.push(RuleConditionItem::new(RuleCondition::default_process()));
+                    }
                 }
-            });
+
+                // ── 1. PRIMARY IF BLOCK ──
+                ui.horizontal(|ui| {
+                    widgets::hud(ui, loc.inspector_ifelse_then_badge, t.good);
+                });
+
+                let mut remove_if_cond_idx = None;
+                let total_if_conds = conditions.len();
+                for (c_idx, c_item) in conditions.iter_mut().enumerate() {
+                    if c_idx > 0 {
+                        render_condition_operator_connector(ui, &mut c_item.operator, loc, t);
+                    }
+                    if render_condition_card(
+                        ui,
+                        c_idx,
+                        c_item,
+                        loc,
+                        t,
+                        true,
+                        total_if_conds > 1,
+                        || {
+                            resp.pick_target = Some(crate::gui::state::ProcessPickerTarget::ActionCondition {
+                                action_idx: idx,
+                                cond_idx: c_idx,
+                                is_exit: is_exit_pipeline,
+                            });
+                        },
+                    ) {
+                        if total_if_conds > 1 {
+                            remove_if_cond_idx = Some(c_idx);
+                        }
+                    }
+                }
+                if let Some(c_idx) = remove_if_cond_idx {
+                    if c_idx < conditions.len() {
+                        conditions.remove(c_idx);
+                    }
+                }
+
+                if render_add_condition_button(ui, loc, t) {
+                    conditions.push(RuleConditionItem::new(RuleCondition::default_process()));
+                }
+
+                ui.add_space(6.0);
+
+                // THEN branch actions
+                ui.horizontal(|ui| {
+                    widgets::hud(ui, loc.inspector_ifelse_then_execute, t.good);
+                });
+
+                render_subactions_branch_pipeline(
+                    ui,
+                    state,
+                    then_actions,
+                    idx,
+                    "then",
+                    "THEN",
+                    is_exit_pipeline,
+                    BranchPickerKind::Then,
+                    loc.inspector_ifelse_add_then,
+                    t,
+                    depth + 1,
+                    &mut resp,
+                    Some(crate::gui::state::IfElseCatalogTarget::Then(idx)),
+                );
+
+                // ── 2. ELSE IF BRANCHES ──
+                let mut remove_branch_idx = None;
+                for (b_idx, branch) in else_if_branches.iter_mut().enumerate() {
+                    ui.add_space(8.0);
+                    widgets::hrule(ui);
+
+                    ui.horizontal(|ui| {
+                        let b_lbl = format!("{} {:02}", loc.inspector_ifelse_elseif_badge, b_idx + 1);
+                        widgets::hud(ui, &b_lbl, t.warn);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if widgets::glyph_button(ui, Glyph::Close, loc.inspector_ifelse_remove_branch_tip).clicked() {
+                                remove_branch_idx = Some(b_idx);
+                            }
+                        });
+                    });
+
+                    if branch.conditions.is_empty() {
+                        branch.conditions.push(RuleConditionItem::new(RuleCondition::default_process()));
+                    }
+
+                    let mut remove_elif_cond_idx = None;
+                    let total_elif_conds = branch.conditions.len();
+                    for (c_idx, c_item) in branch.conditions.iter_mut().enumerate() {
+                        if c_idx > 0 {
+                            render_condition_operator_connector(ui, &mut c_item.operator, loc, t);
+                        }
+                        if render_condition_card(
+                            ui,
+                            c_idx,
+                            c_item,
+                            loc,
+                            t,
+                            true,
+                            total_elif_conds > 1,
+                            || {
+                                resp.pick_target = Some(crate::gui::state::ProcessPickerTarget::ActionElseIfCondition {
+                                    action_idx: idx,
+                                    branch_idx: b_idx,
+                                    cond_idx: c_idx,
+                                    is_exit: is_exit_pipeline,
+                                });
+                            },
+                        ) {
+                            if total_elif_conds > 1 {
+                                remove_elif_cond_idx = Some(c_idx);
+                            }
+                        }
+                    }
+                    if let Some(c_idx) = remove_elif_cond_idx {
+                        if c_idx < branch.conditions.len() {
+                            branch.conditions.remove(c_idx);
+                        }
+                    }
+
+                    if render_add_condition_button(ui, loc, t) {
+                        branch.conditions.push(RuleConditionItem::new(RuleCondition::default_process()));
+                    }
+
+                    ui.add_space(6.0);
+
+                    // Branch actions header
+                    let branch_lbl = format!("ELIF {:02}", b_idx + 1);
+                    ui.horizontal(|ui| {
+                        widgets::hud(ui, loc.inspector_ifelse_then_execute, t.warn);
+                    });
+
+                    render_subactions_branch_pipeline(
+                        ui,
+                        state,
+                        &mut branch.actions,
+                        idx,
+                        &format!("elif_{}", b_idx),
+                        &branch_lbl,
+                        is_exit_pipeline,
+                        BranchPickerKind::ElseIf(b_idx),
+                        loc.inspector_ifelse_add_then,
+                        t,
+                        depth + 1,
+                        &mut resp,
+                        Some(crate::gui::state::IfElseCatalogTarget::ElseIf {
+                            parent_idx: idx,
+                            branch_idx: b_idx,
+                        }),
+                    );
+                }
+                if let Some(b_idx) = remove_branch_idx {
+                    if b_idx < else_if_branches.len() {
+                        else_if_branches.remove(b_idx);
+                    }
+                }
+
+                // Full-width button to add an Else If branch with separator above and below
+                ui.add_space(8.0);
+                widgets::hrule(ui);
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    widgets::hud(ui, loc.inspector_ifelse_elseif_badge, t.warn);
+                });
+                ui.add_space(4.0);
+                if render_full_width_action_button(ui, loc.inspector_ifelse_add_elseif, loc.inspector_ifelse_add_elseif, t) {
+                    else_if_branches.push(crate::models::ElseIfBranch::new());
+                }
+                ui.add_space(6.0);
+                widgets::hrule(ui);
+                ui.add_space(8.0);
+
+                // ── 3. ELSE BRANCH ──
+                ui.horizontal(|ui| {
+                    widgets::hud(ui, loc.inspector_ifelse_else_badge, t.bad);
+                });
+
+                render_subactions_branch_pipeline(
+                    ui,
+                    state,
+                    else_actions,
+                    idx,
+                    "else",
+                    "ELSE",
+                    is_exit_pipeline,
+                    BranchPickerKind::Else,
+                    loc.inspector_ifelse_add_else,
+                    t,
+                    depth + 1,
+                    &mut resp,
+                    Some(crate::gui::state::IfElseCatalogTarget::Else(idx)),
+                );
+            }
+        }
+        _ => {}
+    }
+
+    resp
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConditionKind {
+    Process,
+    Window,
+    Time,
+    Power,
+    File,
+}
+
+impl ConditionKind {
+    fn from_condition(c: &RuleCondition) -> Self {
+        match c {
+            RuleCondition::ProcessRunning { .. } => ConditionKind::Process,
+            RuleCondition::WindowFocused { .. } => ConditionKind::Window,
+            RuleCondition::TimeRange { .. } => ConditionKind::Time,
+            RuleCondition::PowerSource { .. } => ConditionKind::Power,
+            RuleCondition::FileExists { .. } => ConditionKind::File,
+        }
+    }
+
+    fn label(&self, loc: &crate::i18n::Strings) -> &'static str {
+        match self {
+            ConditionKind::Process => loc.inspector_cond_type_process,
+            ConditionKind::Window => loc.inspector_cond_type_window,
+            ConditionKind::Time => loc.inspector_cond_type_time,
+            ConditionKind::Power => loc.inspector_cond_type_power,
+            ConditionKind::File => loc.inspector_cond_type_file,
+        }
+    }
+
+    fn default_condition(&self) -> RuleCondition {
+        match self {
+            ConditionKind::Process => RuleCondition::default_process(),
+            ConditionKind::Window => RuleCondition::default_window(),
+            ConditionKind::Time => RuleCondition::default_time(),
+            ConditionKind::Power => RuleCondition::default_power(),
+            ConditionKind::File => RuleCondition::default_file(),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_condition_card(
+    ui: &mut Ui,
+    idx: usize,
+    item: &mut RuleConditionItem,
+    loc: &crate::i18n::Strings,
+    t: &Tokens,
+    is_nested: bool,
+    can_remove: bool,
+    on_pick_process: impl FnMut(),
+) -> bool {
+    let mut remove_clicked = false;
+    let mut kind = ConditionKind::from_condition(&item.condition);
+
+    let (fill, stroke) = if is_nested {
+        (t.bg, Stroke::new(1.0, t.line_strong.gamma_multiply(0.45)))
+    } else {
+        (t.sunken, t.hairline())
+    };
+
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(CornerRadius::ZERO)
+        .inner_margin(egui::Margin::symmetric(14, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 8.0;
+
+                // 1. Top Strip: Step index + Badge on left; Close button on right (hidden if cannot be removed)
+                ui.horizontal(|ui| {
+                    let pfx = format!("{} {:02}", loc.inspector_conditions_badge, idx + 1);
+                    widgets::hud(ui, &pfx, t.accent_ink);
+                    widgets::badge(ui, kind.label(loc), t.muted);
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if can_remove && widgets::glyph_button(ui, Glyph::Close, loc.inspector_cond_remove_tip).clicked() {
+                            remove_clicked = true;
+                        }
+                    });
+                });
+
+                widgets::hrule(ui);
+
+                // 2. Condition Kind Selector using widgets::cells
+                widgets::hud(ui, loc.inspector_cond_type_label, t.muted);
+                let kind_options = [
+                    (ConditionKind::Process, Cell::new(loc.inspector_cond_tab_process, "")),
+                    (ConditionKind::Window, Cell::new(loc.inspector_cond_tab_window, "")),
+                    (ConditionKind::Time, Cell::new(loc.inspector_cond_tab_time, "")),
+                    (ConditionKind::Power, Cell::new(loc.inspector_cond_tab_power, "")),
+                    (ConditionKind::File, Cell::new(loc.inspector_cond_tab_file, "")),
+                ];
+                let prev_kind = kind;
+                if widgets::cells(ui, &mut kind, &kind_options) && kind != prev_kind {
+                    item.condition = kind.default_condition();
+                }
+
+                ui.add_space(4.0);
+
+                // 3. Condition Parameter Fields
+                render_single_condition_editor(ui, loc, &mut item.condition, on_pick_process, t);
             });
         });
 
-    ActionCardResponse {
+    remove_clicked
+}
+
+fn render_condition_operator_connector(
+    ui: &mut Ui,
+    op: &mut ConditionOperator,
+    loc: &crate::i18n::Strings,
+    t: &Tokens,
+) {
+    ui.add_space(2.0);
+    let avail_w = ui.available_width();
+    let op_options = [
+        (ConditionOperator::And, Cell::new(loc.inspector_cond_op_and, loc.inspector_cond_op_and_tip)),
+        (ConditionOperator::Or, Cell::new(loc.inspector_cond_op_or, loc.inspector_cond_op_or_tip)),
+    ];
+
+    let mut cells_w = 0.0;
+    for (_, c) in &op_options {
+        let galley = widgets::caps(ui, c.label, theme::HUD_SIZE, theme::mono_bold(), theme::BUTTON_SPACING, t.ink);
+        cells_w += (galley.size().x + 24.0).max(theme::CONTROL_H);
+    }
+
+    let side_w = ((avail_w - cells_w - 12.0) * 0.5).max(12.0);
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+
+        let (rect_left, _) = ui.allocate_exact_size(vec2(side_w, theme::CONTROL_H), Sense::hover());
+        ui.painter().line_segment(
+            [pos2(rect_left.left(), rect_left.center().y), pos2(rect_left.right(), rect_left.center().y)],
+            Stroke::new(1.0, t.muted.gamma_multiply(0.25)),
+        );
+
+        widgets::cells(ui, op, &op_options);
+
+        let rem_w = (ui.available_width() - 2.0).max(0.0);
+        if rem_w > 0.0 {
+            let (rect_right, _) = ui.allocate_exact_size(vec2(rem_w, theme::CONTROL_H), Sense::hover());
+            ui.painter().line_segment(
+                [pos2(rect_right.left(), rect_right.center().y), pos2(rect_right.right(), rect_right.center().y)],
+                Stroke::new(1.0, t.muted.gamma_multiply(0.25)),
+            );
+        }
+    });
+    ui.add_space(2.0);
+}
+
+fn render_full_width_action_button(
+    ui: &mut Ui,
+    label: &str,
+    tip: &str,
+    t: &Tokens,
+) -> bool {
+    ui.add_space(2.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
+    let is_hov = resp.hovered();
+    let p = ui.painter();
+
+    let border = if is_hov {
+        Stroke::new(1.0, t.accent_ink)
+    } else {
+        Stroke::new(1.0, t.muted.gamma_multiply(0.35))
+    };
+    p.rect_stroke(rect, CornerRadius::same(2), border, egui::StrokeKind::Inside);
+
+    let text_color = if is_hov { t.accent_ink } else { t.faint };
+    let plus_galley = p.layout_no_wrap(
+        egui_phosphor::regular::PLUS.to_string(),
+        egui::FontId::new(12.0, theme::phosphor()),
+        text_color,
+    );
+    let label_galley = widgets::caps(ui, label, 10.0, theme::mono(), 0.8, text_color);
+
+    let spacing = 8.0;
+    let plus_w = plus_galley.size().x;
+    let plus_h = plus_galley.size().y;
+    let total_w = plus_w + spacing + label_galley.size().x;
+    let start_x = rect.center().x - total_w * 0.5;
+
+    let plus_pos = pos2(start_x, rect.center().y - plus_h * 0.5);
+    p.galley(plus_pos, plus_galley, text_color);
+
+    let label_pos = pos2(start_x + plus_w + spacing, rect.center().y - label_galley.size().y * 0.5);
+    p.galley_with_override_text_color(label_pos, label_galley, text_color);
+
+    let resp = resp
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(tip);
+
+    resp.clicked()
+}
+
+fn render_add_condition_button(
+    ui: &mut Ui,
+    loc: &crate::i18n::Strings,
+    t: &Tokens,
+) -> bool {
+    render_full_width_action_button(ui, loc.inspector_conditions_btn_add, loc.inspector_conditions_btn_add, t)
+}
+
+fn render_single_condition_editor(
+    ui: &mut Ui,
+    loc: &crate::i18n::Strings,
+    cond: &mut RuleCondition,
+    mut on_pick_process: impl FnMut(),
+    t: &Tokens,
+) {
+    match cond {
+        RuleCondition::ProcessRunning { process_name, match_mode, must_be_running } => {
+            widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if render_process_picker(ui, loc) {
+                        on_pick_process();
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(process_name)
+                            .hint_text("game.exe")
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .vertical_align(egui::Align::Center)
+                            .margin(vec2(10.0, 8.0)),
+                    );
+                });
+            });
+
+            widgets::hud(ui, loc.inspector_field_match_mode, t.muted);
+            let match_options = [
+                (ProcessMatchMode::Exact, Cell::new(loc.inspector_match_tab_exact, "")),
+                (ProcessMatchMode::Wildcard, Cell::new(loc.inspector_match_tab_wildcard, "")),
+                (ProcessMatchMode::Regex, Cell::new(loc.inspector_match_tab_regex, "")),
+            ];
+            widgets::cells(ui, match_mode, &match_options);
+
+            ui.add_space(2.0);
+            widgets::hud(ui, loc.inspector_cond_state_label, t.muted);
+            let state_options = [
+                (true, Cell::new(loc.inspector_cond_state_running, "")),
+                (false, Cell::new(loc.inspector_cond_state_not_running, "")),
+            ];
+            widgets::cells(ui, must_be_running, &state_options);
+        }
+        RuleCondition::WindowFocused { process_name, match_mode, must_be_focused } => {
+            widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if render_process_picker(ui, loc) {
+                        on_pick_process();
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(process_name)
+                            .hint_text("game.exe")
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .vertical_align(egui::Align::Center)
+                            .margin(vec2(10.0, 8.0)),
+                    );
+                });
+            });
+
+            widgets::hud(ui, loc.inspector_field_match_mode, t.muted);
+            let match_options = [
+                (ProcessMatchMode::Exact, Cell::new(loc.inspector_match_tab_exact, "")),
+                (ProcessMatchMode::Wildcard, Cell::new(loc.inspector_match_tab_wildcard, "")),
+                (ProcessMatchMode::Regex, Cell::new(loc.inspector_match_tab_regex, "")),
+            ];
+            widgets::cells(ui, match_mode, &match_options);
+
+            ui.add_space(2.0);
+            widgets::hud(ui, loc.inspector_cond_focus_label, t.muted);
+            let state_options = [
+                (true, Cell::new(loc.inspector_cond_state_focused, "")),
+                (false, Cell::new(loc.inspector_cond_state_not_focused, "")),
+            ];
+            widgets::cells(ui, must_be_focused, &state_options);
+        }
+        RuleCondition::TimeRange { start_time, end_time, days_of_week } => {
+            widgets::hud(ui, loc.inspector_cond_time_range_label, t.muted);
+            ui.horizontal(|ui| {
+                widgets::hud(ui, loc.inspector_cond_time_from, t.muted);
+                ui.add(
+                    egui::TextEdit::singleline(start_time)
+                        .hint_text("09:00")
+                        .desired_width(65.0)
+                        .min_size(vec2(0.0, theme::CONTROL_H))
+                        .vertical_align(egui::Align::Center)
+                        .margin(vec2(8.0, 6.0)),
+                );
+                widgets::hud(ui, loc.inspector_cond_time_to, t.muted);
+                ui.add(
+                    egui::TextEdit::singleline(end_time)
+                        .hint_text("18:00")
+                        .desired_width(65.0)
+                        .min_size(vec2(0.0, theme::CONTROL_H))
+                        .vertical_align(egui::Align::Center)
+                        .margin(vec2(8.0, 6.0)),
+                );
+            });
+
+            widgets::hud(ui, loc.inspector_active_days_of_week, t.muted);
+            let dow_names = [
+                (1, loc.inspector_dow_mon),
+                (2, loc.inspector_dow_tue),
+                (3, loc.inspector_dow_wed),
+                (4, loc.inspector_dow_thu),
+                (5, loc.inspector_dow_fri),
+                (6, loc.inspector_dow_sat),
+                (7, loc.inspector_dow_sun),
+            ];
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                for (val, label) in dow_names {
+                    let is_on = days_of_week.is_empty() || days_of_week.contains(&val);
+                    if widgets::button(ui, label, if is_on { Kind::Primary } else { Kind::Secondary }, 0.0).clicked() {
+                        if days_of_week.is_empty() {
+                            *days_of_week = vec![1, 2, 3, 4, 5, 6, 7];
+                            days_of_week.retain(|&d| d != val);
+                        } else if days_of_week.contains(&val) {
+                            days_of_week.retain(|&d| d != val);
+                        } else {
+                            days_of_week.push(val);
+                            days_of_week.sort();
+                        }
+                    }
+                }
+                let all_active = days_of_week.is_empty() || days_of_week.len() == 7;
+                if widgets::button(ui, loc.inspector_btn_all_days, if all_active { Kind::Primary } else { Kind::Secondary }, 0.0).clicked() {
+                    days_of_week.clear();
+                }
+            });
+        }
+        RuleCondition::PowerSource { require_ac } => {
+            widgets::hud(ui, loc.inspector_cond_power_label, t.muted);
+            let power_options = [
+                (true, Cell::new(loc.inspector_cond_power_ac, "")),
+                (false, Cell::new(loc.inspector_cond_power_battery, "")),
+            ];
+            widgets::cells(ui, require_ac, &power_options);
+        }
+        RuleCondition::FileExists { path, must_exist } => {
+            widgets::hud(ui, loc.inspector_cond_file_path_label, t.muted);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let btn_w = widgets::button_width(ui, loc.inspector_btn_folder, 0.0);
+                    if widgets::button(ui, loc.inspector_btn_folder, Kind::Secondary, btn_w).clicked() {
+                        if let Some(file) = rfd::FileDialog::new().pick_file() {
+                            *path = file.to_string_lossy().to_string();
+                        }
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(path)
+                            .hint_text("C:\\path\\to\\file.ext")
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .vertical_align(egui::Align::Center)
+                            .margin(vec2(10.0, 8.0)),
+                    );
+                });
+            });
+
+            widgets::hud(ui, loc.inspector_cond_file_state_label, t.muted);
+            let file_options = [
+                (true, Cell::new(loc.inspector_cond_file_exists, "")),
+                (false, Cell::new(loc.inspector_cond_file_not_exists, "")),
+            ];
+            widgets::cells(ui, must_exist, &file_options);
+        }
+    }
+}
+
+fn render_conditions_section(
+    ui: &mut Ui,
+    state: &mut GuiState,
+    rule: &mut Rule,
+    t: &Tokens,
+) {
+    let loc = state.loc();
+    let mut remove_idx = None;
+    let mut pick_cond_idx = None;
+
+    for (idx, item) in rule.conditions.iter_mut().enumerate() {
+        if idx > 0 {
+            render_condition_operator_connector(ui, &mut item.operator, loc, t);
+        }
+
+        if render_condition_card(
+            ui,
+            idx,
+            item,
+            loc,
+            t,
+            false,
+            true,
+            || { pick_cond_idx = Some(idx); },
+        ) {
+            remove_idx = Some(idx);
+        }
+    }
+
+    if let Some(idx) = remove_idx {
+        state.push_undo_snapshot();
+        if idx < rule.conditions.len() {
+            rule.conditions.remove(idx);
+        }
+    }
+
+    if let Some(idx) = pick_cond_idx {
+        state.open_process_picker(crate::gui::state::ProcessPickerTarget::Condition(idx));
+    }
+
+    // 44px Add Condition button at the bottom of the section
+    if render_add_condition_button(ui, loc, t) {
+        state.push_undo_snapshot();
+        rule.conditions.push(RuleConditionItem::new(
+            RuleCondition::default_process(),
+        ));
+    }
+}
+
+struct SubActionResponse {
+    pub remove_clicked: bool,
+    pub clone_clicked: bool,
+    pub expand_script: Option<ScriptLanguage>,
+    pub expand_macro: bool,
+    pub pick_target: Option<crate::gui::state::ProcessPickerTarget>,
+    pub drag_started: bool,
+    pub card_rect: Rect,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_subaction_card(
+    ui: &mut Ui,
+    state: &GuiState,
+    sub_act: &mut Action,
+    parent_idx: usize,
+    sub_idx: usize,
+    branch_label: &str,
+    default_picker: crate::gui::state::ProcessPickerTarget,
+    is_exit_pipeline: bool,
+    is_being_dragged: bool,
+    can_remove: bool,
+    t: &Tokens,
+    depth: usize,
+) -> SubActionResponse {
+    let loc = state.loc();
+    let mut remove_clicked = false;
+    let mut clone_clicked = false;
+    let mut drag_started = false;
+    let type_badge = action_type_badge(sub_act, loc);
+
+    let mut fields_resp = ActionFieldsResponse::default();
+
+    let ghost_id = ui.id().with(("sub_card_ghost", parent_idx, branch_label, sub_idx));
+    let ghost_anim = ui.ctx().animate_bool_with_time_and_easing(ghost_id, is_being_dragged, 0.15, easing::cubic_out);
+
+    let (fill, stroke) = if ghost_anim > 0.001 {
+        (
+            t.bg,
+            Stroke::new(1.0, t.accent_ink.gamma_multiply(0.45 * ghost_anim)),
+        )
+    } else if depth > 0 {
+        (t.bg, Stroke::new(1.0, t.line_strong.gamma_multiply(0.45)))
+    } else {
+        (t.sunken, t.hairline())
+    };
+
+    let card_response = egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(CornerRadius::ZERO)
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 8.0;
+
+                // Sub-action top bar: Step # + Type badge on left; Test / Clone / Remove on right
+                ui.horizontal(|ui| {
+                    ui.set_width(ui.available_width());
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if can_remove && widgets::glyph_button(ui, Glyph::Close, loc.inspector_tip_remove_step).clicked() {
+                            remove_clicked = true;
+                        }
+                        if widgets::glyph_button(ui, Glyph::Clone, loc.inspector_tip_clone_step).clicked() {
+                            clone_clicked = true;
+                        }
+                        if widgets::glyph_button(ui, Glyph::Play, loc.inspector_btn_test_step).clicked() {
+                            let (ok, msg) = match sub_act {
+                                Action::Macro { events, speed, .. } => {
+                                    if events.is_empty() {
+                                        (false, loc.inspector_macro_test_empty.to_string())
+                                    } else {
+                                        crate::gui::macro_recorder::run_macro_test_safe(events.clone(), *speed);
+                                        (true, loc.inspector_macro_testing_actions.replace("{}", &events.len().to_string()))
+                                    }
+                                }
+                                _ => {
+                                    let mut ctx = std::collections::HashMap::new();
+                                    ctx.insert("ProcessName".to_string(), "test.exe".to_string());
+                                    ctx.insert("Timestamp".to_string(), chrono::Local::now().to_rfc3339());
+                                    let res = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::TestStep {
+                                        action: sub_act.clone(),
+                                        context: ctx,
+                                    });
+                                    let ok = matches!(res, Ok(crate::ipc::IpcResponse::TestStepResult(Ok(()))));
+                                    let msg = match res {
+                                        Ok(crate::ipc::IpcResponse::TestStepResult(Ok(()))) => "Step passed".to_string(),
+                                        Ok(crate::ipc::IpcResponse::TestStepResult(Err(e))) => format!("Failed: {e}"),
+                                        Ok(crate::ipc::IpcResponse::Error(e)) => format!("Error: {e}"),
+                                        Err(e) => format!("IPC Error: {e}"),
+                                        _ => "Unknown result".to_string(),
+                                    };
+                                    (ok, msg)
+                                }
+                            };
+                            let sub_test_key = ui.id().with(("sub_test_res", parent_idx, branch_label, sub_idx));
+                            ui.data_mut(|d| d.insert_temp(sub_test_key, (ok, msg, std::time::Instant::now())));
+                        }
+
+                        let sub_test_key = ui.id().with(("sub_test_res", parent_idx, branch_label, sub_idx));
+                        if let Some((ok, msg, at)) = ui.data(|d| d.get_temp::<(bool, String, std::time::Instant)>(sub_test_key)) {
+                            if at.elapsed().as_secs() < 8 {
+                                let badge_color = if ok { t.good } else { t.bad };
+                                widgets::badge(ui, if ok { "PASS" } else { "FAIL" }, badge_color).on_hover_text(msg);
+                            }
+                        }
+
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            // Drag grip handle on far left
+                            let grip_resp = widgets::drag_handle(ui, loc.inspector_tip_drag_step);
+                            if grip_resp.drag_started() {
+                                drag_started = true;
+                            }
+
+                            widgets::hud(ui, &format!("{} {:02}", branch_label, sub_idx + 1), t.accent_ink);
+
+                            if is_being_dragged {
+                                widgets::badge(ui, loc.inspector_badge_moving_step, t.accent_ink);
+                            } else {
+                                widgets::badge(ui, type_badge, t.muted);
+                            }
+
+                            // Middle blank space on top strip is also draggable
+                            let empty_w = (ui.available_width() - 4.0).max(0.0);
+                            if empty_w > 0.0 {
+                                let (_, strip_resp) = ui.allocate_exact_size(vec2(empty_w, theme::CONTROL_H), Sense::click_and_drag());
+                                if strip_resp.drag_started() {
+                                    drag_started = true;
+                                }
+                                if strip_resp.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                }
+                            }
+                        });
+                    });
+                });
+
+                widgets::hrule(ui);
+
+                // Sub-action full parameter fields!
+                fields_resp = ui.add_enabled_ui(!is_being_dragged, |ui| {
+                    render_action_parameter_fields(
+                        ui,
+                        state,
+                        sub_act,
+                        parent_idx * 100 + sub_idx + 500,
+                        is_exit_pipeline,
+                        default_picker,
+                        t,
+                        depth,
+                    )
+                }).inner;
+            });
+        });
+
+    SubActionResponse {
         remove_clicked,
         clone_clicked,
-        expand_script,
-        expand_macro,
+        expand_script: fields_resp.expand_script,
+        expand_macro: fields_resp.expand_macro,
+        pick_target: fields_resp.pick_target,
         drag_started,
-        switch_to_hunter,
         card_rect: card_response.response.rect,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BranchPickerKind {
+    Then,
+    ElseIf(usize),
+    Else,
+}
+
+impl BranchPickerKind {
+    fn make_target(self, parent_idx: usize, sub_idx: usize, is_exit: bool) -> crate::gui::state::ProcessPickerTarget {
+        match self {
+            BranchPickerKind::Then => crate::gui::state::ProcessPickerTarget::IfElseThen { parent_idx, sub_idx, is_exit },
+            BranchPickerKind::ElseIf(branch_idx) => crate::gui::state::ProcessPickerTarget::IfElseElseIf { parent_idx, branch_idx, sub_idx, is_exit },
+            BranchPickerKind::Else => crate::gui::state::ProcessPickerTarget::IfElseElse { parent_idx, sub_idx, is_exit },
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_subactions_branch_pipeline(
+    ui: &mut Ui,
+    state: &GuiState,
+    sub_actions: &mut Vec<Action>,
+    parent_idx: usize,
+    branch_key: &str,
+    branch_label: &str,
+    is_exit_pipeline: bool,
+    picker_kind: BranchPickerKind,
+    add_btn_label: &str,
+    t: &Tokens,
+    depth: usize,
+    resp: &mut ActionFieldsResponse,
+    catalog_target: Option<crate::gui::state::IfElseCatalogTarget>,
+) {
+    let pipeline_id = format!("sub_{}_{}_{}", parent_idx, branch_key, if is_exit_pipeline { "exit" } else { "main" });
+    let dnd_id = ui.id().with(("subaction_pipeline_dnd", &pipeline_id));
+
+    let mut dnd_session: Option<DndDragSession> = ui.data_mut(|d| d.get_temp(dnd_id));
+
+    // Cancel on Escape key
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        dnd_session = None;
+        ui.data_mut(|d| d.remove_temp::<DndDragSession>(dnd_id));
+    }
+
+    let pointer_released = ui.input(|i| i.pointer.any_released());
+    let pointer_pos = ui.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
+
+    // When dragging: handle mouse wheel scrolling and edge auto-scrolling
+    if dnd_session.is_some() {
+        let wheel_delta_y = ui.input(|i| i.smooth_scroll_delta.y);
+        if wheel_delta_y != 0.0 {
+            ui.scroll_with_delta(vec2(0.0, wheel_delta_y * 1.5));
+            ui.ctx().request_repaint();
+        }
+
+        if let Some(pointer) = pointer_pos {
+            let viewport = ui.clip_rect();
+            if pointer.x >= viewport.left() - 60.0 && pointer.x <= viewport.right() + 60.0 {
+                let edge_zone = 90.0;
+                let view_top = viewport.top();
+                let view_bottom = viewport.bottom();
+
+                if pointer.y < view_top + edge_zone {
+                    let factor = ((view_top + edge_zone - pointer.y) / edge_zone).clamp(0.1, 3.0);
+                    let scroll_speed = 8.0 + 26.0 * factor;
+                    ui.scroll_with_delta(vec2(0.0, scroll_speed));
+                    ui.ctx().request_repaint();
+                } else if pointer.y > view_bottom - edge_zone {
+                    let factor = ((pointer.y - (view_bottom - edge_zone)) / edge_zone).clamp(0.1, 3.0);
+                    let scroll_speed = 8.0 + 26.0 * factor;
+                    ui.scroll_with_delta(vec2(0.0, -scroll_speed));
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
+    }
+
+    let active_src = dnd_session.as_ref().map(|s| s.source_idx);
+    let active_dst = dnd_session.as_ref().map(|s| s.target_idx);
+
+    let mut remove_idx = None;
+    let mut clone_idx = None;
+    let mut drag_started_idx = None;
+    let mut current_centers = Vec::with_capacity(sub_actions.len());
+
+    let loc = state.loc();
+    let total = sub_actions.len();
+
+    for (s_idx, sub_act) in sub_actions.iter_mut().enumerate() {
+        // Drop slot BEFORE card s_idx
+        render_drop_slot(ui, loc, s_idx, active_dst, active_src, &pipeline_id, branch_label, t);
+
+        let is_ghost = active_src == Some(s_idx);
+        let picker_target = picker_kind.make_target(parent_idx, s_idx, is_exit_pipeline);
+
+        let sub_res = render_subaction_card(
+            ui,
+            state,
+            sub_act,
+            parent_idx,
+            s_idx,
+            branch_label,
+            picker_target,
+            is_exit_pipeline,
+            is_ghost,
+            true,
+            t,
+            depth,
+        );
+
+        current_centers.push(sub_res.card_rect.center().y);
+
+        if sub_res.remove_clicked {
+            remove_idx = Some(s_idx);
+        }
+        if sub_res.clone_clicked {
+            clone_idx = Some(s_idx);
+        }
+        if let Some(target) = sub_res.pick_target {
+            resp.pick_target = Some(target);
+        }
+        if let Some(sc) = sub_res.expand_script {
+            resp.expand_script = Some(sc);
+        }
+        if sub_res.expand_macro {
+            resp.expand_macro = true;
+        }
+        if sub_res.drag_started {
+            drag_started_idx = Some(s_idx);
+        }
+    }
+
+    // Render trailing drop slot (after last card)
+    if total > 0 {
+        render_drop_slot(ui, loc, total, active_dst, active_src, &pipeline_id, branch_label, t);
+    }
+
+    // Update target_idx using fresh current_centers from this exact frame
+    if let (Some(session), Some(pointer)) = (&mut dnd_session, pointer_pos) {
+        let n = current_centers.len();
+        if n > 0 {
+            if pointer.y < current_centers[0] {
+                session.target_idx = 0;
+            } else if pointer.y >= current_centers[n - 1] {
+                session.target_idx = n;
+            } else {
+                for i in 0..(n - 1) {
+                    if pointer.y >= current_centers[i] && pointer.y < current_centers[i + 1] {
+                        session.target_idx = i + 1;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Commit reorder on mouse release
+    if pointer_released {
+        if let Some(session) = dnd_session {
+            let src = session.source_idx;
+            let dst = session.target_idx;
+            if src < sub_actions.len() && dst <= sub_actions.len() {
+                if dst < src {
+                    let item = sub_actions.remove(src);
+                    sub_actions.insert(dst, item);
+                } else if dst > src + 1 {
+                    let item = sub_actions.remove(src);
+                    sub_actions.insert(dst - 1, item);
+                }
+            }
+            dnd_session = None;
+            ui.data_mut(|d| d.remove_temp::<DndDragSession>(dnd_id));
+        }
+    }
+
+    // Handle cloning
+    if let Some(idx) = clone_idx {
+        if idx < sub_actions.len() {
+            let cloned = sub_actions[idx].clone();
+            sub_actions.insert(idx + 1, cloned);
+        }
+    }
+
+    // Handle removal
+    if let Some(idx) = remove_idx {
+        if idx < sub_actions.len() {
+            sub_actions.remove(idx);
+        }
+    }
+
+    // Handle newly started drag
+    if let Some(src_idx) = drag_started_idx {
+        dnd_session = Some(DndDragSession {
+            source_idx: src_idx,
+            target_idx: src_idx,
+            card_width: ui.available_width(),
+        });
+    }
+
+    // Save or clear dnd_session
+    if let Some(session) = dnd_session {
+        ui.data_mut(|d| d.insert_temp(dnd_id, session));
+        ui.ctx().request_repaint();
+
+        // Render floating drag preview card!
+        render_floating_drag_preview(
+            ui,
+            loc,
+            &sub_actions[session.source_idx],
+            session,
+            pointer_pos,
+            branch_label,
+            &pipeline_id,
+            t,
+        );
+    }
+
+    // Full-width 44px Add Step button at the bottom of the branch!
+    if render_full_width_action_button(ui, add_btn_label, add_btn_label, t) {
+        if let Some(target) = catalog_target {
+            resp.open_catalog_nested = Some(target);
+        }
     }
 }
 

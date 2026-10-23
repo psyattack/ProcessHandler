@@ -355,8 +355,9 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             ui,
             "Анатомия Правила",
             "1. Триггер (Trigger) — единственный источник события (запуск процесса, фокус окна, таймер, горячая клавиша, файл или вебхук).\n\
-             2. Actions Pipeline — последовательная цепочка основных шагов, исполняемых сверху вниз.\n\
-             3. Exit Actions — завершающие шаги, исполняемые при закрытии отслеживаемого процесса или завершении задачи.",
+             2. Предварительные Условия (Pre-conditions) — опциональная цепочка проверок (процесс, окно, время, питание, файл) с логикой И / ИЛИ. Если условия не выполнены, запуск правила пропускается.\n\
+             3. Actions Pipeline — последовательная цепочка основных шагов, исполняемых сверху вниз.\n\
+             4. Exit Actions — завершающие шаги, исполняемые при закрытии отслеживаемого процесса или завершении задачи.",
             t,
             true,
         );
@@ -386,8 +387,9 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             ui,
             "Rule Anatomy",
             "1. Trigger — the single origin event (process start, window focus, schedule, hotkey, file, or webhook).\n\
-             2. Actions Pipeline — ordered sequential pipeline of steps executed top-to-bottom.\n\
-             3. Exit Actions — optional clean-up actions executed when the tracked process terminates.",
+             2. Pre-conditions — optional gating criteria (process running, active window focus, time range & days, AC/battery power, file existence) chained with AND / OR operators. If not met, execution is skipped.\n\
+             3. Actions Pipeline — ordered sequential pipeline of steps executed top-to-bottom.\n\
+             4. Exit Actions — optional clean-up actions executed when the tracked process terminates.",
             t,
             true,
         );
@@ -510,6 +512,17 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         ui.add_space(2.0);
         doc_callout(
             ui,
+            "Предварительные Условия Правил (Pre-conditions)",
+            "• Фильтрация запуска: правило сработает только тогда, когда соблюдены все необходимые системные критерии.\n\
+             • Доступные условия: наличие или отсутствие процесса в памяти, фокус конкретного окна, заданный интервал времени (чч:мм) с фильтром по дням недели, источник питания (от сети AC или от батареи), а также существование файла по указанному пути.\n\
+             • Гибкая логика связывания: условия можно объединять операторами И (AND) и ИЛИ (OR) в любой последовательности.\n\
+             • Пропуск без ошибок: если условия не выполнены в момент срабатывания триггера, выполнение правила пропускается без генерации ошибок в логах.",
+            t,
+            false,
+        );
+
+        doc_callout(
+            ui,
             "File Watcher для папок и одиночных файлов",
             "File Watcher умеет следить как за целыми папками, так и за отдельным конкретным файлом. Отслеживаются события: On Created, On Modified, On Deleted.",
             t,
@@ -553,6 +566,17 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "SYSTEM", "Advanced triggers: Resource thresholds (CPU/RAM), global keyboard/mouse hotkeys with Hold mode, File Watcher, and local HTTP Webhooks.", t);
 
         ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Rule Pre-conditions",
+            "• Gating Executions: ensure rules execute only when specific environmental criteria are satisfied.\n\
+             • Available Condition Checks: process running or not running, window focused or unfocused, active time window (HH:MM) with day-of-week filters, power source (Mains AC vs Battery), and file existence check.\n\
+             • Chainable Logic: seamlessly chain condition items with AND / OR boolean operators.\n\
+             • Silent Skip: when preconditions fail upon trigger activation, the rule gracefully skips without logging errors.",
+            t,
+            false,
+        );
+
         doc_callout(
             ui,
             "File Watcher for Directories and Single Files",
@@ -609,6 +633,7 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Отправка исходящих REST-запросов (GET, POST, PUT, DELETE) с заголовками и телом.", t);
         doc_table_row(ui, "Power & System", "Схемы питания Windows; переход в сон, гибернация, перезагрузка, выключение и блокировка.", t);
         doc_table_row(ui, "Delay & Notification", "Асинхронные паузы между шагами, всплывающие уведомления Windows и воспроизведение WAV.", t);
+        doc_table_row(ui, "Ветвление (Если / Иначе)", "Динамическая проверка условий на лету с выполнением веток Если (THEN), Иначе Если (ELSE IF) и Иначе (ELSE).", t);
 
         ui.add_space(2.0);
         doc_callout(
@@ -617,9 +642,10 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             "• Объединенный конвейер: любые комбинации физических нажатий клавиш, кнопок мыши, прокрутки колеса, набора текста, пауз и перемещений курсора.\n\
              • Интерактивная Студия: модальное окно с визуальным таймлайном, Drag & Drop сортировкой со скроллом колесиком и безопасным тестом (F10).\n\
              • Повороты Камеры в Играх (Relative Mode): воспроизведение импульсов смещения ΔX, ΔY с линейной угловой скоростью и частотой 200–300 Гц для плавного движения камеры в 3D-играх.\n\
+             • Плавность и Органика: поддержка настраиваемой длительности движения (мс) и флуктуаций (Organic) для естественного человекоподобного перемещения.\n\
              • Запись по F9: глобальный аппаратный перехват в реальном времени с настраиваемыми фильтрами и звуковым подтверждением.\n\
              • Бесконечный Режим: циклическое воспроизведение макроса с возможностью прерывания по хоткею или при отпускании в Hold mode.\n\
-             • Группировка Движений: последовательные перемещения курсора без задержек автоматически объединяются в раскрываемый блок «A → B» без потери координат.\n\
+             • Группировка Движений: последовательные перемещения курсора объединяются в блоки «A → B» с возможностью раскрытия для детальной правки координат.\n\
              • Вся Органика: включение случайных микро-флуктуаций (±30%) на все паузы для обхода бот-детекторов.\n\
              • Объединять Нажатия: компактное группирование связанных шагов (Зажатие + Пауза + Отпускание) в единую карточку.",
             t,
@@ -640,6 +666,7 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Send outbound HTTP requests (GET, POST, PUT, DELETE) with custom headers and body.", t);
         doc_table_row(ui, "Power & System", "Windows power plans; sleep, hibernate, restart, shutdown, and workstation lock.", t);
         doc_table_row(ui, "Delay & Notification", "Non-blocking delay pauses in pipeline, Windows desktop toast notifications, and WAV audio chimes.", t);
+        doc_table_row(ui, "Branching (If / Else)", "Evaluate conditions dynamically and branch into Then, Else If, and Else sub-action sequences.", t);
 
         ui.add_space(2.0);
         doc_callout(
@@ -648,9 +675,10 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             "• Unified Workflow: seamlessly combine physical key presses, mouse buttons, wheel scroll, text typing, delays, and cursor motion.\n\
              • Interactive Studio: full-featured modal canvas with visual event rows, smooth Drag & Drop reordering with wheel scroll, and test run (F10).\n\
              • In-Game 3D Camera Turns: relative displacement pulses ΔX, ΔY paced at 200–300 Hz with linear angular velocity for smooth camera rotations in 3D games.\n\
+             • Smooth & Organic Motion: configurable duration (ms) and organic humanized curve toggles to simulate realistic mouse movements.\n\
              • F9 Global Recording: real-time low-level hardware capture with customizable action filters and audio chime confirmation.\n\
              • Infinite Mode: continuous macro cycling with on-demand cancellation via hotkey toggle or release in Hold mode.\n\
-             • Stacked Move Sequences: sequential mouse movements without delays automatically group into an expandable «A → B» block without losing precision.\n\
+             • Stacked Move Sequences: sequential mouse movements group into expandable «A → B» blocks with inline inspection.\n\
              • Global Organic Delays: optional random humanized jitter (±30%) across all pauses and typing to evade anti-bot detection.\n\
              • Group Presses: optional visual grouping of connected Down, Delay, and Up events into single cards.",
             t,

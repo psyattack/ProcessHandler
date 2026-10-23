@@ -26,7 +26,7 @@ struct CatalogItem {
     constructor: fn() -> Action,
 }
 
-const CATALOG_ITEMS: [CatalogItem; 17] = [
+const CATALOG_ITEMS: [CatalogItem; 18] = [
     // 1. Process Management
     CatalogItem {
         category_idx: 1,
@@ -225,6 +225,25 @@ const CATALOG_ITEMS: [CatalogItem; 17] = [
             method: "POST".into(),
             headers: None,
             payload: None,
+        },
+    },
+    CatalogItem {
+        category_idx: 3,
+        badge: "LOGIC",
+        title: |loc| loc.catalog_title_if_else,
+        description: |loc| loc.catalog_desc_if_else,
+        glyph: egui_phosphor::regular::GIT_FORK,
+        tint: |t| t.accent_ink,
+        keywords: &[
+            "if", "else", "condition", "branch", "logic", "toggle", "check", "flow",
+            "если", "иначе", "ветвление", "условие", "логика", "проверка",
+        ],
+        constructor: || Action::IfElse {
+            condition: None,
+            conditions: vec![crate::models::RuleConditionItem::new(crate::models::RuleCondition::default_process())],
+            then_actions: Vec::new(),
+            else_if_branches: Vec::new(),
+            else_actions: Vec::new(),
         },
     },
 
@@ -438,12 +457,26 @@ pub fn render_action_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
                         .show(ui, |ui| {
                             ui.spacing_mut().item_spacing.y = 4.0;
 
+                            let is_item_allowed = |item: &CatalogItem| -> bool {
+                                if modal_state.ifelse_target.is_some() && item.badge == "LOGIC" {
+                                    return false;
+                                }
+                                true
+                            };
+
+                            let count_for = |cat_idx: usize| -> usize {
+                                CATALOG_ITEMS
+                                    .iter()
+                                    .filter(|i| is_item_allowed(i) && (cat_idx == 0 || i.category_idx == cat_idx))
+                                    .count()
+                            };
+
                             let categories = [
-                                (0, loc.catalog_cat_all, egui_phosphor::regular::SPARKLE, CATALOG_ITEMS.len()),
-                                (1, loc.catalog_cat_process, egui_phosphor::regular::CPU, CATALOG_ITEMS.iter().filter(|i| i.category_idx == 1).count()),
-                                (2, loc.catalog_cat_audio, egui_phosphor::regular::SPEAKER_HIGH, CATALOG_ITEMS.iter().filter(|i| i.category_idx == 2).count()),
-                                (3, loc.catalog_cat_automation, egui_phosphor::regular::CODE, CATALOG_ITEMS.iter().filter(|i| i.category_idx == 3).count()),
-                                (4, loc.catalog_cat_system, egui_phosphor::regular::GEAR, CATALOG_ITEMS.iter().filter(|i| i.category_idx == 4).count()),
+                                (0, loc.catalog_cat_all, egui_phosphor::regular::SPARKLE, count_for(0)),
+                                (1, loc.catalog_cat_process, egui_phosphor::regular::CPU, count_for(1)),
+                                (2, loc.catalog_cat_audio, egui_phosphor::regular::SPEAKER_HIGH, count_for(2)),
+                                (3, loc.catalog_cat_automation, egui_phosphor::regular::CODE, count_for(3)),
+                                (4, loc.catalog_cat_system, egui_phosphor::regular::GEAR, count_for(4)),
                             ];
 
                             for (cat_idx, cat_name, icon, count) in categories {
@@ -527,9 +560,20 @@ pub fn render_action_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
 
                 // Filter actions
                 let query_lower = modal_state.search_query.trim().to_lowercase();
+                let is_item_allowed = |item: &CatalogItem| -> bool {
+                    if modal_state.ifelse_target.is_some() && item.badge == "LOGIC" {
+                        return false;
+                    }
+                    true
+                };
+
                 let filtered_items: Vec<&CatalogItem> = CATALOG_ITEMS
                     .iter()
                     .filter(|item| {
+                        if !is_item_allowed(item) {
+                            return false;
+                        }
+
                         if !query_lower.is_empty() {
                             let title = (item.title)(loc).to_lowercase();
                             let desc = (item.description)(loc).to_lowercase();
@@ -689,7 +733,7 @@ pub fn render_action_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
         });
 
     if let Some(act) = chosen_action {
-        state.add_action_from_catalog(act, modal_state.is_exit_pipeline, modal_state.insert_idx);
+        state.add_action_from_catalog(act, modal_state.is_exit_pipeline, modal_state.insert_idx, modal_state.ifelse_target);
     } else if let Some(res) = modal_res {
         if res.close_requested {
             state.close_action_catalog();

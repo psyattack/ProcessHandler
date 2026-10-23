@@ -620,7 +620,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
         // F9 controls start / stop recording - always swallow and never record into timeline!
         if vk == VK_F9.0 as u32 {
             if elapsed_start > 250 && is_down {
-                let _ = rec.stop_recording();
+                rec.stop_recording();
                 let _ = MessageBeep(windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE(0));
             }
             return LRESULT(1);
@@ -634,7 +634,7 @@ unsafe extern "system" fn low_level_keyboard_proc(
         // Escape also stops recording if active (ignore during first 250ms)
         if vk == VK_ESCAPE.0 as u32 && rec.is_recording.load(Ordering::SeqCst) && elapsed_start > 250 {
             if is_down {
-                let _ = rec.stop_recording();
+                rec.stop_recording();
                 let _ = MessageBeep(windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE(0));
             }
             return LRESULT(1);

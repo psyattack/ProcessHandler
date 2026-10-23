@@ -32,6 +32,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 * **Event-driven process detection** via native Windows WMI subscriptions and low-latency snapshotting
 * **Versatile trigger engine** spanning process lifecycles, window focus, CPU/RAM thresholds, global hotkeys, file watcher, webhooks, and schedules
+* **Pre-conditions & logic branching** with multi-condition checks (running apps, window focus, time/days, power, files), AND/OR chaining, and dynamic If/Else action flows
 * **Flexible action pipeline** covering process control, window management, CPU/memory tuning, scripts, macros, audio devices, and webhooks
 * **Embedded Lua 5.4 runtime** (`mlua`) with dedicated `ph` API alongside PowerShell and Batch scripting
 * **Macro Studio** with hardware keyboard/mouse recording, in-game 3D camera rotation support, timeline editing, loop control, and organic jitter
@@ -63,7 +64,11 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Local Webhooks*: Inbound HTTP REST requests (`http://127.0.0.1:48123/api/v1/trigger/{endpoint}`).
   - *Schedules & Alarms*: Fixed intervals, daily recurring schedules, and one-shot date/time alarms.
   - *System & Power*: User idle/active state, session lock/unlock, sleep/wake, and AC/battery transitions.
+- **Rule Pre-conditions**:
+  - *Gating Criteria*: Running process, active window focus, time window & days of week, power source (AC mains vs battery), and file existence check.
+  - *Chainable Logic*: Combine multiple conditions with boolean AND / OR operators.
 - **Action Pipelines**:
+  - *Logic & Branching*: Dynamic If / Else If / Else actions with condition checks to execute conditional sub-pipelines.
   - *Process Control*: Launch (custom arguments, working dir, admin, hidden mode), terminate process trees, or restart.
   - *Window Management*: Minimize, maximize, restore, hide, show, close, transparency, always-on-top, and screen positioning.
   - *Process Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and trim memory working sets.

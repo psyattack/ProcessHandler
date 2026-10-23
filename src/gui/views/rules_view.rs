@@ -480,6 +480,33 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
         }
         Action::AudioDevice { device_name } => format!("AUDIO DEV {}", device_name),
         Action::MicrophoneDevice { device_name } => format!("MIC DEV {}", device_name),
+        Action::IfElse { conditions, condition, then_actions, else_actions, .. } => {
+            let first_cond = conditions.first().map(|c| &c.condition).or(condition.as_ref());
+            let cond_summary = if let Some(cond) = first_cond {
+                match cond {
+                    crate::models::RuleCondition::ProcessRunning { process_name, must_be_running, .. } => {
+                        if *must_be_running { format!("RUN:{}", process_name) } else { format!("!RUN:{}", process_name) }
+                    }
+                    crate::models::RuleCondition::WindowFocused { process_name, must_be_focused, .. } => {
+                        if *must_be_focused { format!("FOCUS:{}", process_name) } else { format!("!FOCUS:{}", process_name) }
+                    }
+                    crate::models::RuleCondition::TimeRange { start_time, end_time, .. } => {
+                        format!("{}-{}", start_time, end_time)
+                    }
+                    crate::models::RuleCondition::PowerSource { require_ac } => {
+                        if *require_ac { "AC".to_string() } else { "BATTERY".to_string() }
+                    }
+                    crate::models::RuleCondition::FileExists { path, must_exist } => {
+                        let fname = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy();
+                        if *must_exist { format!("FILE:{}", fname) } else { format!("!FILE:{}", fname) }
+                    }
+                }
+            } else {
+                "COND".to_string()
+            };
+            let count_suffix = if conditions.len() > 1 { format!("+{}", conditions.len() - 1) } else { String::new() };
+            format!("IF {}{} [{} | {}]", cond_summary, count_suffix, then_actions.len(), else_actions.len())
+        }
     }
 }
 
@@ -580,7 +607,7 @@ fn render_pipeline_summary(
                 if a_idx > 0 {
                     widgets::hud(ui, "→", t.faint);
                 }
-                let is_current = exec_opt.map_or(false, |e| !e.is_exit && e.current_step == a_idx);
+                let is_current = exec_opt.is_some_and(|e| !e.is_exit && e.current_step == a_idx);
                 let brief = format_action_brief(action, loc);
                 if is_current {
                     let label = format!("▶ [{}/{}] {}", a_idx + 1, rule.actions.len(), brief);
@@ -604,7 +631,7 @@ fn render_pipeline_summary(
                 if e_idx > 0 {
                     widgets::hud(ui, "→", t.faint);
                 }
-                let is_current = exec_opt.map_or(false, |e| e.is_exit && e.current_step == e_idx);
+                let is_current = exec_opt.is_some_and(|e| e.is_exit && e.current_step == e_idx);
                 let brief = format_action_brief(action, loc);
                 if is_current {
                     let label = format!("▶ [{}/{}] {}", e_idx + 1, rule.on_exit_actions.len(), brief);

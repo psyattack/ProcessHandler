@@ -52,7 +52,7 @@ impl FileWatcherService {
                 if let Some(prev) = prev_state {
                     // 1. Created files
                     if *on_created {
-                        for (file, _) in &current_state {
+                        for file in current_state.keys() {
                             if !prev.contains_key(file) {
                                 self.trigger_file_event(rule, "File Created", file).await;
                             }
@@ -72,7 +72,7 @@ impl FileWatcherService {
 
                     // 3. Deleted files
                     if *on_deleted {
-                        for (file, _) in &prev {
+                        for file in prev.keys() {
                             if !current_state.contains_key(file) {
                                 self.trigger_file_event(rule, "File Deleted", file).await;
                             }

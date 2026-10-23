@@ -568,6 +568,38 @@ impl ActionRunner {
                 Ok(())
             }
 
+            Action::IfElse { conditions, condition, then_actions, else_if_branches, else_actions } => {
+                let is_true = if !conditions.is_empty() {
+                    crate::daemon::engine::DaemonEngine::evaluate_rule_conditions(conditions)
+                } else if let Some(c) = condition {
+                    crate::daemon::engine::DaemonEngine::evaluate_condition(c)
+                } else {
+                    true
+                };
+                if is_true {
+                    for sub_action in then_actions {
+                        Box::pin(Self::execute(sub_action, context)).await?;
+                    }
+                } else {
+                    let mut matched = false;
+                    for branch in else_if_branches {
+                        if !branch.conditions.is_empty() && crate::daemon::engine::DaemonEngine::evaluate_rule_conditions(&branch.conditions) {
+                            for sub_action in &branch.actions {
+                                Box::pin(Self::execute(sub_action, context)).await?;
+                            }
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if !matched {
+                        for sub_action in else_actions {
+                            Box::pin(Self::execute(sub_action, context)).await?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+
             _ => Ok(()),
         }
     }
@@ -1376,8 +1408,8 @@ fn simulate_text_typing(text: &str, delay_ms: u32, organic: bool, jitter_percent
             if let Some(end_brace) = remaining.find('}') {
                 let token = remaining[1..end_brace].trim();
                 let lower = token.to_lowercase();
-                if lower.starts_with("delay ") {
-                    if let Ok(ms) = lower[6..].trim().parse::<u64>() {
+                if let Some(stripped) = lower.strip_prefix("delay ") {
+                    if let Ok(ms) = stripped.trim().parse::<u64>() {
                         std::thread::sleep(std::time::Duration::from_millis(ms));
                     }
                     remaining = &remaining[end_brace + 1..];
@@ -2065,5 +2097,36 @@ mod tests {
             );
             assert!(res.is_ok());
         }
+    }
+
+    #[tokio::test]
+    async fn test_if_else_branches_execution() {
+        let temp_dir = std::env::temp_dir();
+        let existing_path = temp_dir.join("ph_action_test_exists.tmp");
+        std::fs::write(&existing_path, b"1").unwrap();
+        let non_existing_path = temp_dir.join("ph_action_test_never_exists.tmp");
+
+        let action = crate::models::Action::IfElse {
+            condition: None,
+            conditions: vec![crate::models::RuleConditionItem::new(crate::models::RuleCondition::FileExists {
+                path: non_existing_path.to_string_lossy().to_string(),
+                must_exist: true,
+            })],
+            then_actions: vec![crate::models::Action::Delay { seconds: 0.001 }],
+            else_if_branches: vec![crate::models::ElseIfBranch {
+                conditions: vec![crate::models::RuleConditionItem::new(crate::models::RuleCondition::FileExists {
+                    path: existing_path.to_string_lossy().to_string(),
+                    must_exist: true,
+                })],
+                actions: vec![crate::models::Action::Delay { seconds: 0.001 }],
+            }],
+            else_actions: vec![],
+        };
+
+        let context = std::collections::HashMap::new();
+        let res = ActionRunner::execute(&action, &context).await;
+        assert!(res.is_ok());
+
+        let _ = std::fs::remove_file(&existing_path);
     }
 }

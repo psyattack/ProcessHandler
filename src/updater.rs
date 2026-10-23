@@ -29,7 +29,7 @@ pub enum UpdateEvent {
 /// Parses a semver-like version string into (major, minor, patch).
 /// Strips leading 'v' / 'V' and ignores trailing metadata/pre-release tags.
 pub fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
-    let clean = v.trim().trim_start_matches(|c| c == 'v' || c == 'V');
+    let clean = v.trim().trim_start_matches(['v', 'V']);
     // Take only the numeric part before any '-' or '+' (e.g. 1.0.1-beta -> 1.0.1)
     let num_part = clean.split(&['-', '+'][..]).next().unwrap_or(clean);
     let mut parts = num_part.split('.');
@@ -47,8 +47,8 @@ pub fn is_newer_version(current: &str, remote: &str) -> bool {
         }
         _ => {
             // Fallback string comparison if unable to parse standard digits
-            let c_clean = current.trim().trim_start_matches(|c| c == 'v' || c == 'V');
-            let r_clean = remote.trim().trim_start_matches(|c| c == 'v' || c == 'V');
+            let c_clean = current.trim().trim_start_matches(['v', 'V']);
+            let r_clean = remote.trim().trim_start_matches(['v', 'V']);
             r_clean != c_clean
         }
     }
@@ -99,7 +99,7 @@ pub async fn check_github_release(repo: &str, current_version: &str) -> Result<O
         .await
         .map_err(|e| format!("Failed to parse release metadata: {e}"))?;
 
-    let remote_ver = release.tag_name.trim().trim_start_matches(|c| c == 'v' || c == 'V').to_string();
+    let remote_ver = release.tag_name.trim().trim_start_matches(['v', 'V']).to_string();
 
     if !is_newer_version(current_version, &release.tag_name) {
         return Ok(None);

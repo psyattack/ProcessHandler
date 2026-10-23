@@ -4,8 +4,8 @@ use tokio::sync::mpsc;
 use crate::config::AppConfig;
 use crate::ipc::{DaemonState, IpcRequest, IpcResponse};
 use crate::models::{
-    Action, AnalyticsSummary, LogItem, ProcessMatchMode,
-    Rule, ScheduleType, SystemEventType, Trigger,
+    Action, AnalyticsSummary, ConditionOperator, LogItem, ProcessMatchMode,
+    Rule, RuleCondition, RuleConditionItem, ScheduleType, SystemEventType, Trigger,
 };
 use crate::daemon::actions::ActionRunner;
 use crate::daemon::watcher::{ProcessEvent, ProcessWatcher};
@@ -75,6 +75,41 @@ pub struct DaemonEngine {
     pub execution_abort_handles: HashMap<u64, (String, tokio::task::AbortHandle)>,
     action_tx: mpsc::UnboundedSender<ActionCompletionEvent>,
     action_rx: mpsc::UnboundedReceiver<ActionCompletionEvent>,
+}
+
+#[cfg(windows)]
+pub fn get_current_foreground_process() -> Option<String> {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    let hwnd = unsafe { GetForegroundWindow() };
+    if !hwnd.0.is_null() {
+        let mut fg_pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut fg_pid)) };
+        if fg_pid != 0 {
+            let snap = ProcessWatcher::snapshot_process_map();
+            return snap.get(&fg_pid).cloned();
+        }
+    }
+    None
+}
+#[cfg(not(windows))]
+pub fn get_current_foreground_process() -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
+pub fn is_power_ac() -> bool {
+    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+    unsafe {
+        let mut sps: SYSTEM_POWER_STATUS = std::mem::zeroed();
+        if GetSystemPowerStatus(&mut sps).is_ok() {
+            return sps.ACLineStatus == 1;
+        }
+    }
+    true
+}
+#[cfg(not(windows))]
+pub fn is_power_ac() -> bool {
+    true
 }
 
 impl DaemonEngine {
@@ -227,6 +262,81 @@ impl DaemonEngine {
                 actual.to_lowercase().contains(&pattern.to_lowercase())
             }
         }
+    }
+
+    pub fn evaluate_condition(condition: &RuleCondition) -> bool {
+        match condition {
+            RuleCondition::ProcessRunning { process_name, match_mode, must_be_running } => {
+                let snap = ProcessWatcher::snapshot_process_map();
+                let is_running = snap.values().any(|name| Self::matches_process(process_name, name, *match_mode));
+                is_running == *must_be_running
+            }
+            RuleCondition::WindowFocused { process_name, match_mode, must_be_focused } => {
+                let fg_name = get_current_foreground_process();
+                let is_focused = fg_name.as_deref().is_some_and(|name| Self::matches_process(process_name, name, *match_mode));
+                is_focused == *must_be_focused
+            }
+            RuleCondition::TimeRange { start_time, end_time, days_of_week } => {
+                let now = chrono::Local::now();
+                if !days_of_week.is_empty() {
+                    use chrono::Datelike;
+                    let dow = now.weekday().number_from_monday() as u8;
+                    if !days_of_week.contains(&dow) {
+                        return false;
+                    }
+                }
+                if start_time.is_empty() && end_time.is_empty() {
+                    return true;
+                }
+                let cur_hm = now.format("%H:%M").to_string();
+                let st = if start_time.is_empty() { "00:00" } else { start_time.as_str() };
+                let et = if end_time.is_empty() { "23:59" } else { end_time.as_str() };
+                if st <= et {
+                    cur_hm.as_str() >= st && cur_hm.as_str() <= et
+                } else {
+                    cur_hm.as_str() >= st || cur_hm.as_str() <= et
+                }
+            }
+            RuleCondition::PowerSource { require_ac } => {
+                let is_ac = is_power_ac();
+                is_ac == *require_ac
+            }
+            RuleCondition::FileExists { path, must_exist } => {
+                let exists = std::path::Path::new(path).exists();
+                exists == *must_exist
+            }
+        }
+    }
+
+    pub fn evaluate_rule_conditions(conditions: &[RuleConditionItem]) -> bool {
+        if conditions.is_empty() {
+            return true;
+        }
+
+        let mut current_group_satisfied = true;
+        let mut any_group_satisfied = false;
+
+        for (i, item) in conditions.iter().enumerate() {
+            let cond_val = Self::evaluate_condition(&item.condition);
+            if i == 0 {
+                current_group_satisfied = cond_val;
+            } else {
+                match item.operator {
+                    ConditionOperator::And => {
+                        current_group_satisfied = current_group_satisfied && cond_val;
+                    }
+                    ConditionOperator::Or => {
+                        if current_group_satisfied {
+                            return true;
+                        }
+                        any_group_satisfied = any_group_satisfied || current_group_satisfied;
+                        current_group_satisfied = cond_val;
+                    }
+                }
+            }
+        }
+
+        any_group_satisfied || current_group_satisfied
     }
 
     pub async fn handle_process_event(&mut self, event: ProcessEvent) {
@@ -498,7 +608,7 @@ impl DaemonEngine {
         {
             use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
             let hwnd = unsafe { GetForegroundWindow() };
-            if hwnd.0 != std::ptr::null_mut() {
+            if !hwnd.0.is_null() {
                 let mut fg_pid = 0u32;
                 unsafe { GetWindowThreadProcessId(hwnd, Some(&mut fg_pid)) };
                 if fg_pid != 0 && self.last_foreground_pid != Some(fg_pid) {
@@ -583,7 +693,7 @@ impl DaemonEngine {
                     for proc in &snap {
                         if Self::matches_process(process_name, &proc.name, ProcessMatchMode::Exact) {
                             let mem_mb = proc.memory_bytes / (1024 * 1024);
-                            let over_mem = ram_mb.map_or(false, |limit| mem_mb >= limit);
+                            let over_mem = ram_mb.is_some_and(|limit| mem_mb >= limit);
                             let key = (rule.id.clone(), proc.pid);
 
                             if over_mem {
@@ -636,6 +746,10 @@ impl DaemonEngine {
                 }
                 return None;
             }
+        }
+
+        if context_name != "MANUAL_TEST" && !rule.conditions.is_empty() && !Self::evaluate_rule_conditions(&rule.conditions) {
+            return None;
         }
 
         if let Some(last) = self.rule_last_triggered.get(&rule.id) {
@@ -1879,6 +1993,103 @@ mod tests {
         // Join handle should return error (cancelled)
         let res = h.await;
         assert!(res.is_err(), "Aborted task must return join error");
+    }
+
+    #[test]
+    fn test_condition_evaluation_logic() {
+        let temp_dir = std::env::temp_dir();
+        let existing_path = temp_dir.join("processhandler_test_cond.tmp");
+        let _ = std::fs::write(&existing_path, "test");
+        let non_existing_path = temp_dir.join("processhandler_non_existing_file_12345.tmp");
+
+        let cond_file_exists = RuleCondition::FileExists {
+            path: existing_path.to_string_lossy().to_string(),
+            must_exist: true,
+        };
+        let cond_file_not_exists = RuleCondition::FileExists {
+            path: non_existing_path.to_string_lossy().to_string(),
+            must_exist: true,
+        };
+
+        assert!(DaemonEngine::evaluate_condition(&cond_file_exists));
+        assert!(!DaemonEngine::evaluate_condition(&cond_file_not_exists));
+
+        let cond_file_must_not_exist = RuleCondition::FileExists {
+            path: non_existing_path.to_string_lossy().to_string(),
+            must_exist: false,
+        };
+        assert!(DaemonEngine::evaluate_condition(&cond_file_must_not_exist));
+
+        // Test operators: (1 AND 2) OR (3 AND 4)
+        // Case 1: C0 (true) AND C1 (true) -> true
+        let all_ok = vec![
+            RuleConditionItem::new(cond_file_exists.clone()),
+            RuleConditionItem::with_operator(ConditionOperator::And, cond_file_must_not_exist.clone()),
+        ];
+        assert!(DaemonEngine::evaluate_rule_conditions(&all_ok));
+
+        // Case 2: C0 (true) AND C1 (false) -> false
+        let one_fail = vec![
+            RuleConditionItem::new(cond_file_exists.clone()),
+            RuleConditionItem::with_operator(ConditionOperator::And, cond_file_not_exists.clone()),
+        ];
+        assert!(!DaemonEngine::evaluate_rule_conditions(&one_fail));
+
+        // Case 3: C0 (true) AND C1 (false) OR C2 (true) -> true (first group fails, second group succeeds)
+        let or_branch = vec![
+            RuleConditionItem::new(cond_file_exists.clone()),
+            RuleConditionItem::with_operator(ConditionOperator::And, cond_file_not_exists.clone()),
+            RuleConditionItem::with_operator(ConditionOperator::Or, cond_file_must_not_exist.clone()),
+        ];
+        assert!(DaemonEngine::evaluate_rule_conditions(&or_branch));
+
+        // Case 4: (1 and 2) or (3 and 4)
+        let two_by_two = vec![
+            RuleConditionItem::new(cond_file_exists.clone()),
+            RuleConditionItem::with_operator(ConditionOperator::And, cond_file_not_exists.clone()), // Group 1 fails
+            RuleConditionItem::with_operator(ConditionOperator::Or, cond_file_exists.clone()),
+            RuleConditionItem::with_operator(ConditionOperator::And, cond_file_must_not_exist.clone()), // Group 2 passes
+        ];
+        assert!(DaemonEngine::evaluate_rule_conditions(&two_by_two));
+
+        let _ = std::fs::remove_file(&existing_path);
+    }
+
+    #[tokio::test]
+    async fn test_preconditions_gate_rule_execution() {
+        let temp_dir = std::env::temp_dir();
+        let non_existing_path = temp_dir.join("processhandler_never_exists_abc.tmp");
+
+        let config = AppConfig::default();
+        let rule = Rule {
+            id: "gated_rule".into(),
+            name: "Gated Rule".into(),
+            description: "".into(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: None,
+            conditions: vec![
+                RuleConditionItem::new(RuleCondition::FileExists {
+                    path: non_existing_path.to_string_lossy().to_string(),
+                    must_exist: true,
+                }),
+            ],
+            actions: vec![
+                Action::Delay { seconds: 0.05 },
+            ],
+            ..Default::default()
+        };
+
+        let mut engine = DaemonEngine::new(config);
+
+        // When triggered by a real trigger (e.g. process or schedule), conditions fail -> returns None
+        let handle = engine.try_execute_rule(&rule, "AUTO_TRIGGER", 0).await;
+        assert!(handle.is_none(), "Rule execution must be skipped when preconditions are not met");
+
+        // MANUAL_TEST bypasses preconditions so users can test steps directly
+        let manual_handle = engine.try_execute_rule(&rule, "MANUAL_TEST", 0).await;
+        assert!(manual_handle.is_some(), "Manual test should execute");
+        let _ = manual_handle.unwrap().await;
     }
 }
 

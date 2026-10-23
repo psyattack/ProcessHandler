@@ -43,6 +43,19 @@ pub enum ProcessPickerTarget {
     Trigger,
     Action(usize),
     ExitAction(usize),
+    Condition(usize),
+    ActionCondition { action_idx: usize, cond_idx: usize, is_exit: bool },
+    ActionElseIfCondition { action_idx: usize, branch_idx: usize, cond_idx: usize, is_exit: bool },
+    IfElseThen { parent_idx: usize, sub_idx: usize, is_exit: bool },
+    IfElseElseIf { parent_idx: usize, branch_idx: usize, sub_idx: usize, is_exit: bool },
+    IfElseElse { parent_idx: usize, sub_idx: usize, is_exit: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IfElseCatalogTarget {
+    Then(usize),
+    ElseIf { parent_idx: usize, branch_idx: usize },
+    Else(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +64,7 @@ pub struct ActionCatalogModalState {
     pub insert_idx: Option<usize>,
     pub selected_category: usize,
     pub search_query: String,
+    pub ifelse_target: Option<IfElseCatalogTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -226,6 +240,19 @@ impl GuiState {
             insert_idx,
             selected_category: 0,
             search_query: String::new(),
+            ifelse_target: None,
+        };
+        self.action_catalog = Some(catalog.clone());
+        self.last_action_catalog = Some(catalog);
+    }
+
+    pub fn open_action_catalog_nested(&mut self, is_exit_pipeline: bool, target: IfElseCatalogTarget) {
+        let catalog = ActionCatalogModalState {
+            is_exit_pipeline,
+            insert_idx: None,
+            selected_category: 0,
+            search_query: String::new(),
+            ifelse_target: Some(target),
         };
         self.action_catalog = Some(catalog.clone());
         self.last_action_catalog = Some(catalog);
@@ -240,19 +267,47 @@ impl GuiState {
         action: crate::models::Action,
         is_exit_pipeline: bool,
         insert_idx: Option<usize>,
+        ifelse_target: Option<IfElseCatalogTarget>,
     ) {
         self.push_undo_snapshot();
         if let Some(rule) = &mut self.editing_rule {
-            let list = if is_exit_pipeline {
-                &mut rule.on_exit_actions
+            if let Some(target) = ifelse_target {
+                let list = if is_exit_pipeline {
+                    &mut rule.on_exit_actions
+                } else {
+                    &mut rule.actions
+                };
+                match target {
+                    IfElseCatalogTarget::Then(parent_idx) => {
+                        if let Some(crate::models::Action::IfElse { then_actions, .. }) = list.get_mut(parent_idx) {
+                            then_actions.push(action);
+                        }
+                    }
+                    IfElseCatalogTarget::ElseIf { parent_idx, branch_idx } => {
+                        if let Some(crate::models::Action::IfElse { else_if_branches, .. }) = list.get_mut(parent_idx) {
+                            if let Some(branch) = else_if_branches.get_mut(branch_idx) {
+                                branch.actions.push(action);
+                            }
+                        }
+                    }
+                    IfElseCatalogTarget::Else(parent_idx) => {
+                        if let Some(crate::models::Action::IfElse { else_actions, .. }) = list.get_mut(parent_idx) {
+                            else_actions.push(action);
+                        }
+                    }
+                }
             } else {
-                &mut rule.actions
-            };
-            if let Some(idx) = insert_idx {
-                let clamped = idx.min(list.len());
-                list.insert(clamped, action);
-            } else {
-                list.push(action);
+                let list = if is_exit_pipeline {
+                    &mut rule.on_exit_actions
+                } else {
+                    &mut rule.actions
+                };
+                if let Some(idx) = insert_idx {
+                    let clamped = idx.min(list.len());
+                    list.insert(clamped, action);
+                } else {
+                    list.push(action);
+                }
             }
         }
         self.close_action_catalog();
@@ -406,6 +461,7 @@ impl GuiState {
             on_exit_actions: Vec::new(),
             custom_icon_path: None,
             auto_process_icon: false,
+            conditions: Vec::new(),
         }
     }
 
@@ -510,45 +566,62 @@ impl GuiState {
             match target {
                 Some(ProcessPickerTarget::Action(idx)) => {
                     if let Some(action) = rule.actions.get_mut(idx) {
-                        match action {
-                            crate::models::Action::KillProcess { process_name, .. } => {
-                                *process_name = proc_name.to_string();
-                            }
-                            crate::models::Action::ProcessAudio { process_name, .. } => {
-                                *process_name = proc_name.to_string();
-                            }
-                            crate::models::Action::Firewall { process_name, .. } => {
-                                *process_name = proc_name.to_string();
-                            }
-                            crate::models::Action::Window { target_process, .. } => {
-                                *target_process = Some(proc_name.to_string());
-                            }
-                            crate::models::Action::ProcessTuning { target_process, .. } => {
-                                *target_process = Some(proc_name.to_string());
-                            }
-                            _ => {}
-                        }
+                        apply_process_to_action(action, proc_name);
                     }
                 }
                 Some(ProcessPickerTarget::ExitAction(idx)) => {
                     if let Some(action) = rule.on_exit_actions.get_mut(idx) {
-                        match action {
-                            crate::models::Action::KillProcess { process_name, .. } => {
-                                *process_name = proc_name.to_string();
+                        apply_process_to_action(action, proc_name);
+                    }
+                }
+                Some(ProcessPickerTarget::Condition(idx)) => {
+                    if let Some(item) = rule.conditions.get_mut(idx) {
+                        apply_process_to_condition(&mut item.condition, proc_name);
+                    }
+                }
+                Some(ProcessPickerTarget::ActionCondition { action_idx, cond_idx, is_exit }) => {
+                    let list = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { conditions, condition, .. }) = list.get_mut(action_idx) {
+                        if let Some(item) = conditions.get_mut(cond_idx) {
+                            apply_process_to_condition(&mut item.condition, proc_name);
+                        } else if let Some(c) = condition.as_mut() {
+                            apply_process_to_condition(c, proc_name);
+                        }
+                    }
+                }
+                Some(ProcessPickerTarget::ActionElseIfCondition { action_idx, branch_idx, cond_idx, is_exit }) => {
+                    let list = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { else_if_branches, .. }) = list.get_mut(action_idx) {
+                        if let Some(branch) = else_if_branches.get_mut(branch_idx) {
+                            if let Some(item) = branch.conditions.get_mut(cond_idx) {
+                                apply_process_to_condition(&mut item.condition, proc_name);
                             }
-                            crate::models::Action::ProcessAudio { process_name, .. } => {
-                                *process_name = proc_name.to_string();
+                        }
+                    }
+                }
+                Some(ProcessPickerTarget::IfElseThen { parent_idx, sub_idx, is_exit }) => {
+                    let list = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { then_actions, .. }) = list.get_mut(parent_idx) {
+                        if let Some(sub_action) = then_actions.get_mut(sub_idx) {
+                            apply_process_to_action(sub_action, proc_name);
+                        }
+                    }
+                }
+                Some(ProcessPickerTarget::IfElseElseIf { parent_idx, branch_idx, sub_idx, is_exit }) => {
+                    let list = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { else_if_branches, .. }) = list.get_mut(parent_idx) {
+                        if let Some(branch) = else_if_branches.get_mut(branch_idx) {
+                            if let Some(sub_action) = branch.actions.get_mut(sub_idx) {
+                                apply_process_to_action(sub_action, proc_name);
                             }
-                            crate::models::Action::Firewall { process_name, .. } => {
-                                *process_name = proc_name.to_string();
-                            }
-                            crate::models::Action::Window { target_process, .. } => {
-                                *target_process = Some(proc_name.to_string());
-                            }
-                            crate::models::Action::ProcessTuning { target_process, .. } => {
-                                *target_process = Some(proc_name.to_string());
-                            }
-                            _ => {}
+                        }
+                    }
+                }
+                Some(ProcessPickerTarget::IfElseElse { parent_idx, sub_idx, is_exit }) => {
+                    let list = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { else_actions, .. }) = list.get_mut(parent_idx) {
+                        if let Some(sub_action) = else_actions.get_mut(sub_idx) {
+                            apply_process_to_action(sub_action, proc_name);
                         }
                     }
                 }
@@ -780,6 +853,39 @@ impl GuiState {
     }
 }
 
+fn apply_process_to_action(action: &mut crate::models::Action, proc_name: &str) {
+    match action {
+        crate::models::Action::KillProcess { process_name, .. } => {
+            *process_name = proc_name.to_string();
+        }
+        crate::models::Action::ProcessAudio { process_name, .. } => {
+            *process_name = proc_name.to_string();
+        }
+        crate::models::Action::Firewall { process_name, .. } => {
+            *process_name = proc_name.to_string();
+        }
+        crate::models::Action::Window { target_process, .. } => {
+            *target_process = Some(proc_name.to_string());
+        }
+        crate::models::Action::ProcessTuning { target_process, .. } => {
+            *target_process = Some(proc_name.to_string());
+        }
+        _ => {}
+    }
+}
+
+fn apply_process_to_condition(cond: &mut crate::models::RuleCondition, proc_name: &str) {
+    match cond {
+        crate::models::RuleCondition::ProcessRunning { process_name, .. } => {
+            *process_name = proc_name.to_string();
+        }
+        crate::models::RuleCondition::WindowFocused { process_name, .. } => {
+            *process_name = proc_name.to_string();
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -801,6 +907,7 @@ mod tests {
             insert_idx: None,
             search_query: String::new(),
             selected_category: 0,
+            ifelse_target: None,
         });
         assert!(state.is_modal_open());
         state.action_catalog = None;

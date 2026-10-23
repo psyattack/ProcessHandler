@@ -122,6 +122,157 @@ pub enum ScheduleType {
     OneShot,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ConditionOperator {
+    #[default]
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(from = "RuleConditionItemHelper", into = "RuleConditionItemHelper")]
+pub struct RuleConditionItem {
+    pub operator: ConditionOperator,
+    pub condition: RuleCondition,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+enum RuleConditionItemHelper {
+    Item {
+        #[serde(default)]
+        operator: ConditionOperator,
+        condition: RuleCondition,
+    },
+    Bare(RuleCondition),
+}
+
+impl From<RuleConditionItemHelper> for RuleConditionItem {
+    fn from(helper: RuleConditionItemHelper) -> Self {
+        match helper {
+            RuleConditionItemHelper::Item { operator, condition } => Self { operator, condition },
+            RuleConditionItemHelper::Bare(condition) => Self {
+                operator: ConditionOperator::And,
+                condition,
+            },
+        }
+    }
+}
+
+impl From<RuleConditionItem> for RuleConditionItemHelper {
+    fn from(item: RuleConditionItem) -> Self {
+        RuleConditionItemHelper::Item {
+            operator: item.operator,
+            condition: item.condition,
+        }
+    }
+}
+
+impl RuleConditionItem {
+    pub fn new(condition: RuleCondition) -> Self {
+        Self {
+            operator: ConditionOperator::And,
+            condition,
+        }
+    }
+
+    pub fn with_operator(operator: ConditionOperator, condition: RuleCondition) -> Self {
+        Self {
+            operator,
+            condition,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "$condition_type", rename_all = "snake_case")]
+pub enum RuleCondition {
+    #[serde(rename = "process_running")]
+    ProcessRunning {
+        process_name: String,
+        #[serde(default)]
+        match_mode: ProcessMatchMode,
+        #[serde(default = "default_true")]
+        must_be_running: bool,
+    },
+    #[serde(rename = "window_focused")]
+    WindowFocused {
+        process_name: String,
+        #[serde(default)]
+        match_mode: ProcessMatchMode,
+        #[serde(default = "default_true")]
+        must_be_focused: bool,
+    },
+    #[serde(rename = "time_range")]
+    TimeRange {
+        start_time: String, // "HH:MM"
+        end_time: String,   // "HH:MM"
+        #[serde(default)]
+        days_of_week: Vec<u8>, // 1 = Monday .. 7 = Sunday
+    },
+    #[serde(rename = "power_source")]
+    PowerSource {
+        #[serde(default = "default_true")]
+        require_ac: bool,
+    },
+    #[serde(rename = "file_exists")]
+    FileExists {
+        path: String,
+        #[serde(default = "default_true")]
+        must_exist: bool,
+    },
+}
+
+impl RuleCondition {
+    pub fn default_process() -> Self {
+        Self::ProcessRunning {
+            process_name: String::new(),
+            match_mode: ProcessMatchMode::Exact,
+            must_be_running: true,
+        }
+    }
+
+    pub fn default_window() -> Self {
+        Self::WindowFocused {
+            process_name: String::new(),
+            match_mode: ProcessMatchMode::Exact,
+            must_be_focused: true,
+        }
+    }
+
+    pub fn default_time() -> Self {
+        Self::TimeRange {
+            start_time: "09:00".to_string(),
+            end_time: "18:00".to_string(),
+            days_of_week: vec![1, 2, 3, 4, 5],
+        }
+    }
+
+    pub fn default_power() -> Self {
+        Self::PowerSource {
+            require_ac: true,
+        }
+    }
+
+    pub fn default_file() -> Self {
+        Self::FileExists {
+            path: String::new(),
+            must_exist: true,
+        }
+    }
+
+    pub fn icon_glyph(&self) -> &'static str {
+        match self {
+            Self::ProcessRunning { .. } => egui_phosphor::regular::CPU,
+            Self::WindowFocused { .. } => egui_phosphor::regular::APP_WINDOW,
+            Self::TimeRange { .. } => egui_phosphor::regular::CLOCK,
+            Self::PowerSource { .. } => egui_phosphor::regular::PLUG,
+            Self::FileExists { .. } => egui_phosphor::regular::FILE,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "$action_type", rename_all = "snake_case")]
 pub enum Action {
@@ -299,6 +450,36 @@ pub enum Action {
     MicrophoneDevice {
         device_name: String,
     },
+    #[serde(rename = "if_else")]
+    IfElse {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        condition: Option<RuleCondition>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        conditions: Vec<RuleConditionItem>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        then_actions: Vec<Action>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        else_if_branches: Vec<ElseIfBranch>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        else_actions: Vec<Action>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ElseIfBranch {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<RuleConditionItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<Action>,
+}
+
+impl ElseIfBranch {
+    pub fn new() -> Self {
+        Self {
+            conditions: vec![RuleConditionItem::new(RuleCondition::default_process())],
+            actions: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -544,6 +725,8 @@ pub struct Rule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trigger: Option<Trigger>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<RuleConditionItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<Action>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub on_exit_actions: Vec<Action>,
@@ -565,6 +748,7 @@ impl Default for Rule {
             execution_count: 0,
             stop_on_error: true,
             trigger: None,
+            conditions: Vec::new(),
             actions: Vec::new(),
             on_exit_actions: Vec::new(),
             custom_icon_path: None,
@@ -636,6 +820,11 @@ impl Action {
                     run_in_window: false,
                 };
             }
+            Action::IfElse { condition, conditions, .. } if conditions.is_empty() => {
+                if let Some(c) = condition.take() {
+                    conditions.push(RuleConditionItem::new(c));
+                }
+            }
             _ => {}
         }
     }
@@ -699,6 +888,7 @@ impl Rule {
                 Action::Display { .. } => egui_phosphor::regular::MONITOR,
                 Action::AudioDevice { .. } => egui_phosphor::regular::HEADPHONES,
                 Action::MicrophoneDevice { .. } => egui_phosphor::regular::MICROPHONE,
+                Action::IfElse { .. } => egui_phosphor::regular::GIT_FORK,
             }
         } else if let Some(trigger) = &self.trigger {
             match trigger {
@@ -801,6 +991,7 @@ mod tests {
             on_exit_actions: vec![],
             custom_icon_path: Some("C:\\game.exe".into()),
             auto_process_icon: true,
+            conditions: vec![],
         };
 
         let cloned = original.clone_with_new_id();
@@ -834,6 +1025,7 @@ mod tests {
             on_exit_actions: vec![],
             custom_icon_path: None,
             auto_process_icon: false,
+            conditions: vec![],
         };
 
         // Fallback when empty
@@ -955,10 +1147,39 @@ mod tests {
                 Action::MicrophoneDevice {
                     device_name: "Microphone".into(),
                 },
+                Action::IfElse {
+                    condition: None,
+                    conditions: vec![RuleConditionItem::new(RuleCondition::ProcessRunning {
+                        process_name: "game.exe".into(),
+                        match_mode: ProcessMatchMode::Exact,
+                        must_be_running: true,
+                    })],
+                    then_actions: vec![Action::Delay { seconds: 1.0 }],
+                    else_if_branches: vec![ElseIfBranch {
+                        conditions: vec![RuleConditionItem::new(RuleCondition::PowerSource {
+                            require_ac: true,
+                        })],
+                        actions: vec![Action::Delay { seconds: 2.0 }],
+                    }],
+                    else_actions: vec![],
+                },
             ],
             on_exit_actions: vec![],
             custom_icon_path: None,
             auto_process_icon: true,
+            conditions: vec![
+                RuleConditionItem::new(RuleCondition::WindowFocused {
+                    process_name: "game.exe".into(),
+                    match_mode: ProcessMatchMode::Exact,
+                    must_be_focused: true,
+                }),
+                RuleConditionItem::with_operator(
+                    ConditionOperator::Or,
+                    RuleCondition::PowerSource {
+                        require_ac: true,
+                    },
+                ),
+            ],
         };
 
         let json = serde_json::to_string(&rule).expect("Serialization must succeed");
@@ -968,7 +1189,8 @@ mod tests {
         assert_eq!(decoded.max_executions, Some(5));
         assert_eq!(decoded.execution_count, 2);
         assert!(decoded.stop_on_error);
-        assert_eq!(decoded.actions.len(), 10);
+        assert_eq!(decoded.actions.len(), 11);
+        assert_eq!(decoded.conditions.len(), 2);
         assert_eq!(decoded, rule);
     }
 

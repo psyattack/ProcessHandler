@@ -124,7 +124,7 @@ fn run_hotkey_poll_loop(event_tx: tokio::sync::mpsc::UnboundedSender<HotkeyEvent
 }
 
 pub fn parse_hotkey_vkeys(combo: &str) -> Option<Vec<i32>> {
-    let clean = combo.replace('{', "").replace('}', "");
+    let clean = combo.replace(['{', '}'], "");
     let parts: Vec<&str> = clean.split('+').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
     if parts.is_empty() {
         return None;
