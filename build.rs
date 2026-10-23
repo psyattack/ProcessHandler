@@ -9,10 +9,10 @@ fn main() {
         res.set("LegalCopyright", "psyattack");
         res.set("OriginalFilename", "ProcessHandler.exe");
         res.set("InternalName", "ProcessHandler");
-        res.set("FileVersion", "2.1.0.0");
-        res.set("ProductVersion", "2.1.0.0");
-        res.set_version_info(winres::VersionInfo::FILEVERSION, 0x0002000100000000);
-        res.set_version_info(winres::VersionInfo::PRODUCTVERSION, 0x0002000100000000);
+        res.set("FileVersion", "2.2.0.0");
+        res.set("ProductVersion", "2.2.0.0");
+        res.set_version_info(winres::VersionInfo::FILEVERSION, 0x0002000200000000);
+        res.set_version_info(winres::VersionInfo::PRODUCTVERSION, 0x0002000200000000);
         let _ = res.compile();
     }
 }
