@@ -1,10 +1,10 @@
 //! Preferences and System Settings:
-//! Windows Registry autorun, tray icon picker, engine polling intervals,
-//! memory architecture status, language, appearance, and application updates.
+//! Modern Master-Detail layout with clean sidebar categories, toggle switches,
+//! theme palette cards, live tray icon preview, and direct configuration folder access.
 
-use egui::{CornerRadius, Ui, vec2};
+use egui::{Color32, CornerRadius, Rect, Sense, Stroke, Ui, pos2, vec2};
 use crate::gui::components::widgets::{self, Kind};
-use crate::gui::state::GuiState;
+use crate::gui::state::{GuiState, SettingsTab};
 use crate::gui::theme::{self, Tokens};
 
 pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
@@ -27,69 +27,71 @@ pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let available_w = ui.available_width();
-            let two_columns = available_w >= 680.0;
+            let is_wide = available_w >= 620.0;
 
-            if two_columns {
-                ui.spacing_mut().item_spacing.y = 16.0;
+            if is_wide {
+                let start_top = ui.cursor().top();
+                let initial_avail_h = ui.available_height();
 
-                // ROW 1: System (01) opposite Engine (02)
-                let row1_id = egui::Id::new("settings_row1_h");
-                let prev_target1: f32 = ui.data(|d| d.get_temp(row1_id)).unwrap_or(0.0);
-                let mut nat_system = 0.0;
-                let mut nat_engine = 0.0;
+                let mut sidebar_rect = Rect::NOTHING;
+                let mut content_rect = Rect::NOTHING;
 
-                ui.columns(2, |cols| {
-                    nat_system = render_card(&mut cols[0], "01", loc.settings_eyebrow_system, prev_target1, &t, |ui| {
-                        render_system_content(ui, state, &mut cfg, &mut changed, current_autorun, &t, loc);
-                    });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 24.0;
 
-                    nat_engine = render_card(&mut cols[1], "02", loc.settings_eyebrow_kernel, prev_target1, &t, |ui| {
-                        render_kernel_content(ui, &mut cfg, &mut changed, &t, loc);
-                    });
+                    // Left Column: Navigation Sidebar
+                    let sidebar_w = 190.0;
+                    let resp_side = ui.allocate_ui_with_layout(
+                        vec2(sidebar_w, ui.available_height()),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.y = 4.0;
+                            render_sidebar(ui, state, loc, &t, sidebar_w);
+                        },
+                    );
+                    sidebar_rect = resp_side.response.rect;
+
+                    // Space reserved for the vertical divider
+                    ui.add_space(1.0);
+
+                    // Right Column: Active Content Panel
+                    let content_w = ui.available_width();
+                    let resp_content = ui.allocate_ui_with_layout(
+                        vec2(content_w, ui.available_height()),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.y = 12.0;
+                            render_content_panel(ui, state, &mut cfg, &mut changed, current_autorun, &t, loc);
+                        },
+                    );
+                    content_rect = resp_content.response.rect;
                 });
 
-                let new_target1 = nat_system.max(nat_engine);
-                if (new_target1 - prev_target1).abs() > 0.5 {
-                    ui.data_mut(|d| d.insert_temp(row1_id, new_target1));
-                    ui.ctx().request_repaint();
-                }
+                // Vertical divider spanning almost to the bottom with symmetrical padding to the top
+                let div_x = sidebar_rect.right() + 12.0;
+                let offset = 8.0;
+                let top_y = start_top + offset;
+                let bottom_y = (start_top + initial_avail_h)
+                    .max(content_rect.bottom())
+                    .max(sidebar_rect.bottom())
+                    - offset;
 
-                // ROW 2: Appearance (03) opposite Updates (04)
-                let row2_id = egui::Id::new("settings_row2_h");
-                let prev_target2: f32 = ui.data(|d| d.get_temp(row2_id)).unwrap_or(0.0);
-                let mut nat_appearance = 0.0;
-                let mut nat_updates = 0.0;
-
-                ui.columns(2, |cols| {
-                    nat_appearance = render_card(&mut cols[0], "03", loc.settings_eyebrow_appearance, prev_target2, &t, |ui| {
-                        render_appearance_content(ui, state, &mut cfg, &t, loc);
-                    });
-
-                    nat_updates = render_card(&mut cols[1], "04", loc.settings_eyebrow_updates, prev_target2, &t, |ui| {
-                        render_updates_content(ui, state, &mut cfg, &mut changed, &t, loc);
-                    });
-                });
-
-                let new_target2 = nat_appearance.max(nat_updates);
-                if (new_target2 - prev_target2).abs() > 0.5 {
-                    ui.data_mut(|d| d.insert_temp(row2_id, new_target2));
-                    ui.ctx().request_repaint();
+                if bottom_y > top_y {
+                    ui.painter().vline(div_x, top_y..=bottom_y, t.hairline());
                 }
             } else {
+                // Narrow / Compact Responsive Fallback: Top segmented tabs + panel
                 ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 16.0;
-                    render_card(ui, "01", loc.settings_eyebrow_system, 0.0, &t, |ui| {
-                        render_system_content(ui, state, &mut cfg, &mut changed, current_autorun, &t, loc);
-                    });
-                    render_card(ui, "02", loc.settings_eyebrow_kernel, 0.0, &t, |ui| {
-                        render_kernel_content(ui, &mut cfg, &mut changed, &t, loc);
-                    });
-                    render_card(ui, "03", loc.settings_eyebrow_appearance, 0.0, &t, |ui| {
-                        render_appearance_content(ui, state, &mut cfg, &t, loc);
-                    });
-                    render_card(ui, "04", loc.settings_eyebrow_updates, 0.0, &t, |ui| {
-                        render_updates_content(ui, state, &mut cfg, &mut changed, &t, loc);
-                    });
+                    ui.spacing_mut().item_spacing.y = 12.0;
+                    let tab_options = [
+                        (SettingsTab::General, widgets::Cell::new(loc.settings_tab_general, "")),
+                        (SettingsTab::Appearance, widgets::Cell::new(loc.settings_tab_appearance, "")),
+                        (SettingsTab::Engine, widgets::Cell::new(loc.settings_tab_engine, "")),
+                        (SettingsTab::Updates, widgets::Cell::new(loc.settings_tab_updates, "")),
+                    ];
+                    widgets::cells(ui, &mut state.settings_tab, &tab_options);
+                    widgets::hrule(ui);
+                    render_content_panel(ui, state, &mut cfg, &mut changed, current_autorun, &t, loc);
                 });
             }
         });
@@ -102,39 +104,65 @@ pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
     }
 }
 
-fn render_card<F: FnOnce(&mut Ui)>(
-    ui: &mut Ui,
-    eyebrow_idx: &str,
-    eyebrow_label: &str,
-    target_height: f32,
-    t: &Tokens,
-    add_contents: F,
-) -> f32 {
-    widgets::eyebrow(ui, eyebrow_idx, eyebrow_label);
+fn render_sidebar(ui: &mut Ui, state: &mut GuiState, loc: &crate::i18n::Strings, t: &Tokens, w: f32) {
+    let tabs = [
+        (SettingsTab::General, "01", loc.settings_tab_general),
+        (SettingsTab::Appearance, "02", loc.settings_tab_appearance),
+        (SettingsTab::Engine, "03", loc.settings_tab_engine),
+        (SettingsTab::Updates, "04", loc.settings_tab_updates),
+    ];
 
-    let mut natural_frame_h = 0.0;
-    egui::Frame::new()
-        .fill(t.sunken)
-        .stroke(t.hairline())
-        .corner_radius(CornerRadius::ZERO)
-        .inner_margin(egui::Margin::symmetric(16, 12))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            if target_height > 24.0 {
-                ui.set_min_height(target_height - 24.0);
-            }
-            let inner = ui.vertical(|ui| {
-                ui.set_width(ui.available_width());
-                ui.spacing_mut().item_spacing.y = 10.0;
-                add_contents(ui);
-            });
-            natural_frame_h = inner.response.rect.height() + 24.0;
-        });
+    for (tab, idx, label) in tabs {
+        let is_active = state.settings_tab == tab;
+        let (rect, resp) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
+        if resp.clicked() {
+            state.settings_tab = tab;
+        }
+        let enabled = ui.is_enabled();
+        let hovered = resp.hovered() && enabled;
 
-    natural_frame_h
+        let bg_fill = if is_active {
+            t.sunken
+        } else if hovered {
+            t.sunken.gamma_multiply(0.6)
+        } else {
+            Color32::TRANSPARENT
+        };
+
+        ui.painter().rect_filled(rect, CornerRadius::ZERO, bg_fill);
+
+        if is_active {
+            let bar_rect = Rect::from_min_size(rect.min, vec2(3.0, rect.height()));
+            ui.painter().rect_filled(bar_rect, CornerRadius::ZERO, t.accent);
+        }
+
+        let text_y = rect.center().y;
+        let idx_color = if is_active { t.accent_ink } else { t.faint };
+        let idx_galley = widgets::caps(ui, idx, 10.0, theme::mono(), 1.0, idx_color);
+        let sep_galley = widgets::caps(ui, " / ", 10.0, theme::mono(), 1.0, t.faint);
+        let label_color = if is_active {
+            t.ink_strong
+        } else if hovered {
+            t.ink
+        } else {
+            t.muted
+        };
+        let label_galley = widgets::caps(ui, label, 11.0, theme::mono_bold(), theme::BUTTON_SPACING, label_color);
+
+        let mut x = rect.left() + 14.0;
+        widgets::paint_left(ui, Rect::from_min_size(pos2(x, text_y - idx_galley.size().y / 2.0), idx_galley.size()), idx_galley.clone(), idx_color);
+        x += idx_galley.size().x;
+        widgets::paint_left(ui, Rect::from_min_size(pos2(x, text_y - sep_galley.size().y / 2.0), sep_galley.size()), sep_galley.clone(), t.faint);
+        x += sep_galley.size().x;
+        widgets::paint_left(ui, Rect::from_min_size(pos2(x, text_y - label_galley.size().y / 2.0), label_galley.size()), label_galley, label_color);
+
+        if enabled {
+            resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+        }
+    }
 }
 
-fn render_system_content(
+fn render_content_panel(
     ui: &mut Ui,
     state: &mut GuiState,
     cfg: &mut crate::config::AppConfig,
@@ -143,53 +171,144 @@ fn render_system_content(
     t: &Tokens,
     loc: &crate::i18n::Strings,
 ) {
-    // Windows Registry Autorun
-    let btn_label = if current_autorun { loc.settings_btn_disable_autorun } else { loc.settings_btn_enable_autorun };
-    let btn_kind = if current_autorun { Kind::Secondary } else { Kind::Primary };
+    egui::Frame::new()
+        .fill(t.sunken)
+        .stroke(t.hairline())
+        .corner_radius(CornerRadius::ZERO)
+        .inner_margin(egui::Margin::symmetric(20, 16))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 12.0;
 
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
-        if widgets::button(ui, btn_label, btn_kind, 0.0).clicked() {
-            state.toggle_autorun(!current_autorun);
+            match state.settings_tab {
+                SettingsTab::General => {
+                    render_general_content(ui, state, cfg, changed, current_autorun, t, loc);
+                }
+                SettingsTab::Appearance => {
+                    render_appearance_content(ui, state, cfg, t, loc);
+                }
+                SettingsTab::Engine => {
+                    render_engine_content(ui, cfg, changed, t, loc);
+                }
+                SettingsTab::Updates => {
+                    render_updates_content(ui, state, cfg, changed, t, loc);
+                }
+            }
+        });
+}
+
+fn render_setting_row<F: FnOnce(&mut Ui)>(
+    ui: &mut Ui,
+    title: &str,
+    subtitle: &str,
+    t: &Tokens,
+    add_control: F,
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 16.0;
+        let available_w = ui.available_width();
+        let control_w_estimate = 260.0;
+        let text_w = (available_w - control_w_estimate).max(140.0);
+
+        ui.allocate_ui_with_layout(
+            vec2(text_w, 36.0),
+            egui::Layout::top_down(egui::Align::LEFT),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.add(egui::Label::new(
+                    egui::RichText::new(title)
+                        .font(egui::FontId::new(13.0, theme::medium()))
+                        .color(t.ink_strong),
+                ));
+                ui.add(egui::Label::new(
+                    egui::RichText::new(subtitle)
+                        .font(egui::FontId::new(11.0, egui::FontFamily::Proportional))
+                        .color(t.muted),
+                ));
+            },
+        );
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            add_control(ui);
+        });
+    });
+}
+
+fn render_general_content(
+    ui: &mut Ui,
+    state: &mut GuiState,
+    cfg: &mut crate::config::AppConfig,
+    changed: &mut bool,
+    current_autorun: bool,
+    t: &Tokens,
+    loc: &crate::i18n::Strings,
+) {
+    // 1. Windows Startup Toggle
+    render_setting_row(ui, loc.settings_autorun_title, loc.settings_autorun_desc, t, |ui| {
+        let mut autorun_val = current_autorun;
+        if widgets::toggle_switch(ui, &mut autorun_val).changed() {
+            state.toggle_autorun(autorun_val);
         }
-        let status_badge = if current_autorun { "[ACTIVE]" } else { "[DISABLED]" };
-        let status_color = if current_autorun { t.good } else { t.faint };
-        widgets::hud(ui, status_badge, status_color);
     });
 
     widgets::hrule(ui);
 
-    // Custom Tray Icon Override
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 6.0;
-        widgets::hud(ui, loc.settings_tray_icon_override, t.muted);
-
-        let mut path = cfg.tray_icon_path.clone().unwrap_or_default();
+    // 2. Custom Tray Icon with live thumbnail preview
+    render_setting_row(ui, loc.settings_tray_icon_title, loc.settings_tray_icon_desc, t, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
 
-            let browse_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
-            let has_reset = cfg.tray_icon_path.is_some();
-            let reset_w = if has_reset {
-                widgets::button_width(ui, loc.settings_btn_reset, 0.0) + 8.0
-            } else {
-                0.0
-            };
-            let input_width = (ui.available_width() - browse_w - reset_w - 8.0).max(80.0);
+            // Live preview button matching the exact size of the input line (theme::CONTROL_H x theme::CONTROL_H)
+            let preview_size = vec2(theme::CONTROL_H, theme::CONTROL_H);
+            let (p_rect, p_resp) = ui.allocate_exact_size(preview_size, Sense::click());
+            let p_hovered = p_resp.hovered();
+            let p_stroke = if p_hovered { Stroke::new(1.0, t.line_strong) } else { t.hairline() };
+            ui.painter().rect(p_rect, CornerRadius::ZERO, t.bg, p_stroke, egui::StrokeKind::Inside);
 
-            if ui.add(
-                egui::TextEdit::singleline(&mut path)
-                    .hint_text(loc.settings_tray_icon_placeholder)
-                    .desired_width(input_width)
-                    .min_size(vec2(input_width, theme::CONTROL_H))
-                    .vertical_align(egui::Align::Center)
-                    .margin(vec2(10.0, 8.0)),
-            ).changed() {
-                cfg.tray_icon_path = if path.trim().is_empty() { None } else { Some(path) };
-                *changed = true;
+            let mut icon_rendered = false;
+            if let Some(ref path) = cfg.tray_icon_path {
+                if let Some(tex) = state.icon_cache.get_icon_from_path(ui.ctx(), path) {
+                    let img_rect = Rect::from_center_size(p_rect.center(), vec2(22.0, 22.0));
+                    ui.painter().image(
+                        tex.id(),
+                        img_rect,
+                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    icon_rendered = true;
+                }
             }
 
-            if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, browse_w).clicked() {
+            // By default, display the official application logo icon (not a simple glyph)
+            if !icon_rendered {
+                if let Some(app_tex) = state.icon_cache.get_app_icon(ui.ctx()) {
+                    let img_rect = Rect::from_center_size(p_rect.center(), vec2(22.0, 22.0));
+                    ui.painter().image(
+                        app_tex.id(),
+                        img_rect,
+                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    icon_rendered = true;
+                }
+            }
+
+            if !icon_rendered {
+                let icon_glyph = egui_phosphor::regular::APP_WINDOW;
+                let galley = egui::WidgetText::from(
+                    egui::RichText::new(icon_glyph)
+                        .font(egui::FontId::new(16.0, theme::phosphor()))
+                        .color(t.muted),
+                ).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::FontSelection::Default);
+                widgets::paint_centred(ui, p_rect, galley, t.muted);
+            }
+
+            // Clicking the preview box opens the file picker
+            if p_resp
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(loc.settings_btn_browse)
+                .clicked()
+            {
                 if let Some(file) = rfd::FileDialog::new()
                     .add_filter("Icons & Executables", &["ico", "exe", "dll"])
                     .pick_file()
@@ -199,53 +318,50 @@ fn render_system_content(
                 }
             }
 
-            if cfg.tray_icon_path.is_some() && widgets::button(ui, loc.settings_btn_reset, Kind::Secondary, 0.0).clicked() {
+            let has_reset = cfg.tray_icon_path.is_some();
+            let reset_w = if has_reset {
+                widgets::button_width(ui, loc.settings_btn_reset, 0.0) + 8.0
+            } else {
+                0.0
+            };
+            let input_w = (ui.available_width() - reset_w - 8.0).clamp(60.0, 240.0);
+
+            let mut path = cfg.tray_icon_path.clone().unwrap_or_default();
+            if ui.add(
+                egui::TextEdit::singleline(&mut path)
+                    .hint_text(loc.settings_tray_icon_placeholder)
+                    .desired_width(input_w)
+                    .min_size(vec2(input_w, theme::CONTROL_H))
+                    .vertical_align(egui::Align::Center)
+                    .margin(vec2(8.0, 6.0)),
+            ).changed() {
+                cfg.tray_icon_path = if path.trim().is_empty() { None } else { Some(path) };
+                *changed = true;
+            }
+
+            if has_reset && widgets::button(ui, loc.settings_btn_reset, Kind::Secondary, 0.0).clicked() {
                 cfg.tray_icon_path = None;
                 *changed = true;
             }
         });
     });
-}
 
-fn render_kernel_content(
-    ui: &mut Ui,
-    cfg: &mut crate::config::AppConfig,
-    changed: &mut bool,
-    t: &Tokens,
-    loc: &crate::i18n::Strings,
-) {
-    // Mode Switching
-    let mut mode_idx = if cfg.monitoring_mode.to_lowercase() == "wmi" { 1usize } else { 0usize };
-    let mode_options = [
-        (0usize, widgets::Cell::new(loc.settings_mode_polling, loc.settings_mode_polling_tip)),
-        (1usize, widgets::Cell::new(loc.settings_mode_wmi, loc.settings_mode_wmi_tip)),
-    ];
+    widgets::hrule(ui);
 
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
-        widgets::hud(ui, loc.settings_monitoring_mode, t.muted);
-        if widgets::cells(ui, &mut mode_idx, &mode_options) {
-            cfg.monitoring_mode = if mode_idx == 1 { "wmi".to_string() } else { "polling".to_string() };
-            *changed = true;
+    // 3. Open Configuration and Storage Folder
+    render_setting_row(ui, loc.settings_config_folder_title, loc.settings_config_folder_desc, t, |ui| {
+        if widgets::button(ui, loc.settings_btn_open_folder, Kind::Secondary, 0.0).clicked() {
+            let dir = crate::config::AppConfig::config_dir();
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = std::process::Command::new("xdg-open").arg(&dir).spawn();
+            }
         }
     });
-
-    // Scan Interval: only show if periodic polling is selected
-    if cfg.monitoring_mode.to_lowercase() == "polling" {
-        widgets::hrule(ui);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            widgets::hud(ui, loc.settings_scan_interval, t.muted);
-            if ui.add(
-                egui::DragValue::new(&mut cfg.poll_interval_sec)
-                    .speed(0.1)
-                    .range(0.5..=10.0)
-                    .suffix(" s"),
-            ).changed() {
-                *changed = true;
-            }
-        });
-    }
 }
 
 fn render_appearance_content(
@@ -255,19 +371,17 @@ fn render_appearance_content(
     t: &Tokens,
     loc: &crate::i18n::Strings,
 ) {
-    // 1. Language
-    let mut lang_idx = match state.language {
-        crate::i18n::Language::English => 0usize,
-        crate::i18n::Language::Russian => 1usize,
-    };
-    let lang_options = [
-        (0usize, widgets::Cell::new("ENGLISH", "English interface")),
-        (1usize, widgets::Cell::new("РУССКИЙ", "Русский интерфейс")),
-    ];
+    // 1. Interface Language
+    render_setting_row(ui, loc.settings_language_title, loc.settings_language_desc, t, |ui| {
+        let mut lang_idx = match state.language {
+            crate::i18n::Language::English => 0usize,
+            crate::i18n::Language::Russian => 1usize,
+        };
+        let lang_options = [
+            (0usize, widgets::Cell::new("ENGLISH", "English interface")),
+            (1usize, widgets::Cell::new("РУССКИЙ", "Русский интерфейс")),
+        ];
 
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
-        widgets::hud(ui, loc.settings_language_label, t.muted);
         if widgets::cells(ui, &mut lang_idx, &lang_options) {
             let new_lang = if lang_idx == 1 {
                 crate::i18n::Language::Russian
@@ -282,24 +396,106 @@ fn render_appearance_content(
 
     widgets::hrule(ui);
 
-    // 2. Color Theme
-    let mut theme_val = state.theme;
-    let theme_options = [
-        (crate::config::AppTheme::Dark, widgets::Cell::new(loc.settings_theme_dark, loc.settings_theme_dark_tip)),
-        (crate::config::AppTheme::Light, widgets::Cell::new(loc.settings_theme_light, loc.settings_theme_light_tip)),
-        (crate::config::AppTheme::Chocolate, widgets::Cell::new(loc.settings_theme_chocolate, loc.settings_theme_chocolate_tip)),
-    ];
+    // 2. Color Theme with visual palette cards
+    render_setting_row(ui, loc.settings_theme_title, loc.settings_theme_desc, t, |ui| {
+        let themes = [
+            (
+                crate::config::AppTheme::Dark,
+                loc.settings_theme_dark,
+                Color32::from_rgb(0x12, 0x13, 0x16),
+                Color32::from_rgb(0xf2, 0xf1, 0xee),
+                Color32::from_rgb(0x2d, 0x81, 0xff),
+            ),
+            (
+                crate::config::AppTheme::Light,
+                loc.settings_theme_light,
+                Color32::from_rgb(0xf2, 0xf1, 0xee),
+                Color32::from_rgb(0x10, 0x10, 0x14),
+                Color32::from_rgb(0x2d, 0x81, 0xff),
+            ),
+            (
+                crate::config::AppTheme::Chocolate,
+                loc.settings_theme_chocolate,
+                Color32::from_rgb(0x20, 0x17, 0x14),
+                Color32::from_rgb(0xf2, 0xe8, 0xdc),
+                Color32::from_rgb(0xd9, 0x77, 0x36),
+            ),
+        ];
 
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
-        widgets::hud(ui, loc.settings_theme_label, t.muted);
-        if widgets::cells(ui, &mut theme_val, &theme_options) {
-            state.set_theme(theme_val);
-            crate::gui::theme::apply_theme(ui.ctx(), theme_val);
-            cfg.theme = theme_val;
-            let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::SaveConfig(cfg.clone()));
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+
+            for (thm, label, bg_col, ink_col, accent_col) in themes {
+                let is_selected = state.theme == thm;
+                let card_size = vec2(90.0, 40.0);
+                let (rect, resp) = ui.allocate_exact_size(card_size, Sense::click());
+                if resp.clicked() && !is_selected {
+                    state.set_theme(thm);
+                    crate::gui::theme::apply_theme(ui.ctx(), thm);
+                    cfg.theme = thm;
+                    let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::SaveConfig(cfg.clone()));
+                }
+
+                let hovered = resp.hovered();
+                let border_stroke = if is_selected {
+                    Stroke::new(2.0, t.accent)
+                } else if hovered {
+                    Stroke::new(1.0, t.line_strong)
+                } else {
+                    t.hairline()
+                };
+
+                ui.painter().rect(rect, CornerRadius::ZERO, bg_col, border_stroke, egui::StrokeKind::Inside);
+
+                // Accent dot + theme name
+                let dot_center = pos2(rect.left() + 14.0, rect.center().y);
+                ui.painter().circle_filled(dot_center, 4.0, accent_col);
+
+                let text_pos = pos2(rect.left() + 24.0, rect.center().y);
+                let galley = widgets::caps(ui, label, 10.0, theme::mono_bold(), 1.0, ink_col);
+                widgets::paint_left(ui, Rect::from_min_size(pos2(text_pos.x, text_pos.y - galley.size().y / 2.0), galley.size()), galley, ink_col);
+
+                resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+            }
+        });
+    });
+}
+
+fn render_engine_content(
+    ui: &mut Ui,
+    cfg: &mut crate::config::AppConfig,
+    changed: &mut bool,
+    t: &Tokens,
+    loc: &crate::i18n::Strings,
+) {
+    // 1. Process Detection Method
+    render_setting_row(ui, loc.settings_engine_mode_title, loc.settings_engine_mode_desc, t, |ui| {
+        let mut mode_idx = if cfg.monitoring_mode.to_lowercase() == "wmi" { 1usize } else { 0usize };
+        let mode_options = [
+            (0usize, widgets::Cell::new(loc.settings_mode_polling, loc.settings_mode_polling_tip)),
+            (1usize, widgets::Cell::new(loc.settings_mode_wmi, loc.settings_mode_wmi_tip)),
+        ];
+
+        if widgets::cells(ui, &mut mode_idx, &mode_options) {
+            cfg.monitoring_mode = if mode_idx == 1 { "wmi".to_string() } else { "polling".to_string() };
+            *changed = true;
         }
     });
+
+    // 2. Polling Scan Interval (only if polling mode is active)
+    if cfg.monitoring_mode.to_lowercase() == "polling" {
+        widgets::hrule(ui);
+        render_setting_row(ui, loc.settings_poll_interval_title, loc.settings_poll_interval_desc, t, |ui| {
+            if ui.add(
+                egui::DragValue::new(&mut cfg.poll_interval_sec)
+                    .speed(0.1)
+                    .range(0.5..=10.0)
+                    .suffix(" s"),
+            ).changed() {
+                *changed = true;
+            }
+        });
+    }
 }
 
 fn render_updates_content(
@@ -310,17 +506,18 @@ fn render_updates_content(
     t: &Tokens,
     loc: &crate::i18n::Strings,
 ) {
-    // 1. Checkbox: Check on startup
-    if ui.checkbox(&mut cfg.check_updates_on_startup, loc.settings_check_startup_checkbox).changed() {
-        *changed = true;
-    }
+    // 1. Check on Startup Toggle
+    render_setting_row(ui, loc.settings_updates_startup_title, loc.settings_updates_startup_desc, t, |ui| {
+        if widgets::toggle_switch(ui, &mut cfg.check_updates_on_startup).changed() {
+            *changed = true;
+        }
+    });
 
     widgets::hrule(ui);
 
-    // 2. Button & Version Label
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 12.0;
-
+    // 2. Installed Version & Manual Check
+    let version_subtitle = format!("Process Handler v{}", env!("CARGO_PKG_VERSION"));
+    render_setting_row(ui, loc.settings_updates_check_title, &version_subtitle, t, |ui| {
         let btn_label = if state.is_checking_update {
             loc.settings_btn_checking_updates
         } else {
@@ -333,9 +530,6 @@ fn render_updates_content(
                 state.check_for_updates(true);
             }
         });
-
-        let cur_ver = format!("v{}", env!("CARGO_PKG_VERSION"));
-        widgets::hud(ui, &loc.settings_last_checked.replace("{}", &cur_ver), t.faint);
     });
 }
 
@@ -344,7 +538,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_card_heights() {
+    fn test_settings_tabs_rendering() {
         let ctx = egui::Context::default();
         theme::install_fonts(&ctx);
         let mut state = GuiState::new();
@@ -361,49 +555,34 @@ mod tests {
             analytics: Default::default(),
         });
 
-        // Run frame 1
-        let mut out1 = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.set_width(1000.0);
-                render_settings_view(ui, &mut state);
-            });
-        });
-        out1.textures_delta.clear();
+        // Test rendering across all 4 tabs
+        let all_tabs = [
+            SettingsTab::General,
+            SettingsTab::Appearance,
+            SettingsTab::Engine,
+            SettingsTab::Updates,
+        ];
 
-        // Run frame 2
-        let mut out2 = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.set_width(1000.0);
-                render_settings_view(ui, &mut state);
+        for tab in all_tabs {
+            state.settings_tab = tab;
+            let mut out = ctx.run_ui(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.set_width(900.0);
+                    render_settings_view(ui, &mut state);
+                });
             });
-        });
-        out2.textures_delta.clear();
-
-        // Switch to polling mode and test frame 3 & 4
-        if let Some(ds) = &mut state.daemon_state {
-            ds.config.monitoring_mode = "polling".to_string();
+            out.textures_delta.clear();
         }
 
-        let mut out3 = ctx.run_ui(Default::default(), |ctx| {
+        // Test responsive compact layout (< 620px width)
+        let mut out_compact = ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                ui.set_width(1000.0);
+                ui.set_width(500.0);
                 render_settings_view(ui, &mut state);
             });
         });
-        out3.textures_delta.clear();
+        out_compact.textures_delta.clear();
 
-        let mut out4 = ctx.run_ui(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.set_width(1000.0);
-                render_settings_view(ui, &mut state);
-            });
-        });
-        out4.textures_delta.clear();
-
-        let t1: f32 = ctx.data(|d| d.get_temp(egui::Id::new("settings_row1_h"))).unwrap_or(0.0);
-        let t2: f32 = ctx.data(|d| d.get_temp(egui::Id::new("settings_row2_h"))).unwrap_or(0.0);
-        assert!(t1 > 50.0, "row 1 target height should be equalized");
-        assert!(t2 > 50.0, "row 2 target height should be equalized");
+        assert_eq!(state.settings_tab, SettingsTab::Updates);
     }
 }
-

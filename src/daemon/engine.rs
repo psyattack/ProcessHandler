@@ -104,6 +104,7 @@ impl DaemonEngine {
     pub fn is_rule_executing(&self, rule_id: &str) -> bool {
         self.active_executions.values().any(|e| e.rule_id == rule_id)
             || self.execution_abort_handles.values().any(|(r_id, _)| r_id == rule_id)
+            || self.active_bound_processes.iter().any(|bp| bp.rule_id == rule_id)
     }
 
     pub fn stop_rule_execution(&mut self, rule_id: &str) {
@@ -119,6 +120,16 @@ impl DaemonEngine {
                 self.log("INFO", "RULE", &format!("Stopped execution of rule: {}", rule_id));
             }
         }
+
+        let to_remove_active: Vec<u64> = self.active_executions
+            .iter()
+            .filter_map(|(&id, item)| if item.rule_id == rule_id { Some(id) } else { None })
+            .collect();
+        for id in to_remove_active {
+            self.active_executions.remove(&id);
+        }
+
+        crate::daemon::actions::release_all_simulated_inputs();
     }
 
     pub fn drain_action_events(&mut self) {
@@ -731,6 +742,7 @@ impl DaemonEngine {
                 }
                 impl Drop for ExecGuard {
                     fn drop(&mut self) {
+                        crate::daemon::actions::release_all_simulated_inputs();
                         let _ = self.tx.send(ActionCompletionEvent::RuleExecutionFinished {
                             execution_id: self.id,
                             _rule_id: self.r_id.clone(),
@@ -849,6 +861,7 @@ impl DaemonEngine {
                 }
                 impl Drop for ExecGuard {
                     fn drop(&mut self) {
+                        crate::daemon::actions::release_all_simulated_inputs();
                         let _ = self.tx.send(ActionCompletionEvent::RuleExecutionFinished {
                             execution_id: self.id,
                             _rule_id: self.r_id.clone(),
@@ -938,6 +951,7 @@ impl DaemonEngine {
             }
 
             IpcRequest::DeleteRule(id) => {
+                self.stop_rule_execution(&id);
                 self.config.rules.retain(|r| r.id != id);
                 let _ = self.config.save_to_file(AppConfig::config_path());
                 if let Some(h) = &self.hotkey_handle {
@@ -947,6 +961,9 @@ impl DaemonEngine {
             }
 
             IpcRequest::ToggleRule { id, enabled } => {
+                if !enabled {
+                    self.stop_rule_execution(&id);
+                }
                 if let Some(rule) = self.config.rules.iter_mut().find(|r| r.id == id) {
                     rule.is_enabled = enabled;
                     let _ = self.config.save_to_file(AppConfig::config_path());
@@ -1044,7 +1061,9 @@ impl DaemonEngine {
             }
 
             IpcRequest::ShutdownDaemon => {
+                crate::daemon::actions::release_all_simulated_inputs();
                 self.execute_shutdown_rules().await;
+                crate::daemon::actions::release_all_simulated_inputs();
                 std::process::exit(0);
             }
         }
@@ -1094,6 +1113,28 @@ impl DaemonEngine {
                     total_steps: latest.total_steps,
                     is_exit: latest.is_exit,
                 });
+            }
+        }
+
+        // Track active bound satellites waiting for host process exit
+        for bp in &self.active_bound_processes {
+            if !active_rule_executions.contains_key(&bp.rule_id) {
+                if let Some(rule) = self.config.rules.iter().find(|r| r.id == bp.rule_id) {
+                    let step_idx = rule
+                        .actions
+                        .iter()
+                        .position(|a| matches!(a, Action::StartProcess { close_on_exit: true, .. }))
+                        .unwrap_or(0);
+                    active_rule_executions.insert(
+                        bp.rule_id.clone(),
+                        crate::ipc::ActiveRuleExecutionState {
+                            active_count: 1,
+                            current_step: step_idx,
+                            total_steps: rule.actions.len(),
+                            is_exit: false,
+                        },
+                    );
+                }
             }
         }
 
@@ -1807,6 +1848,37 @@ mod tests {
 
         let state_done = engine.get_current_state();
         assert!(!state_done.active_rule_executions.contains_key("tracked_rule"));
+    }
+
+    #[tokio::test]
+    async fn test_stop_rule_execution_aborts_immediately() {
+        let config = AppConfig::default();
+        let rule = Rule {
+            id: "long_running_rule".into(),
+            name: "Long Running Rule".into(),
+            description: "".into(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: None,
+            actions: vec![
+                Action::Delay { seconds: 5.0 },
+            ],
+            ..Default::default()
+        };
+
+        let mut engine = DaemonEngine::new(config);
+        let h = engine.try_execute_rule(&rule, "MANUAL_TEST", 0).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        assert!(engine.is_rule_executing("long_running_rule"));
+
+        // Stop execution
+        engine.stop_rule_execution("long_running_rule");
+        assert!(!engine.is_rule_executing("long_running_rule"));
+
+        // Join handle should return error (cancelled)
+        let res = h.await;
+        assert!(res.is_err(), "Aborted task must return join error");
     }
 }
 

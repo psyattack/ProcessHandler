@@ -28,6 +28,14 @@ fn main() {
         if pending.exists() {
             let _ = std::fs::remove_file(pending);
         }
+        let download = exe_path.with_extension("download");
+        if download.exists() {
+            let _ = std::fs::remove_file(download);
+        }
+        let extracted = exe_path.with_extension("extracted");
+        if extracted.exists() {
+            let _ = std::fs::remove_dir_all(extracted);
+        }
     }
 
     let args: Vec<String> = env::args().collect();

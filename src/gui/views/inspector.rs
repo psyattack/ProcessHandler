@@ -9,7 +9,6 @@ use crate::gui::components::script_highlighter::{create_script_layouter, ScriptL
 use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
-use crate::i18n::Language;
 use crate::models::{
     Action, PowerPlanType, ProcessAudioActionType, ProcessMatchMode,
     ProcessPriorityLevel, ProcessSnapshotItem, Rule, ScheduleType,
@@ -524,11 +523,9 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                 }
                                 ui.add(egui::DragValue::new(limit).range(1..=100000).suffix(" runs"));
                                 let remaining = limit.saturating_sub(rule.execution_count);
-                                let note = if state.language == crate::i18n::Language::Russian {
-                                    format!("(осталось: {}/{})", remaining, limit)
-                                } else {
-                                    format!("({} of {} left)", remaining, limit)
-                                };
+                                let note = loc.inspector_runs_remaining
+                                    .replacen("{}", &remaining.to_string(), 1)
+                                    .replacen("{}", &limit.to_string(), 1);
                                 widgets::hud(ui, &note, t.faint);
                             }
                             ui.checkbox(&mut rule.stop_on_error, loc.inspector_field_stop_on_error)
@@ -843,6 +840,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                         rule.trigger = Some(Trigger::GlobalHotkey {
                                             key_combination: String::new(),
                                             hold_mode: false,
+                                            repeat_while_held: false,
                                         });
                                     }
                                     SystemSubMode::FileWatcher => {
@@ -912,7 +910,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                     }
                                 }
                                 SystemSubMode::Hotkey => {
-                                    if let Some(Trigger::GlobalHotkey { key_combination, hold_mode }) = &mut rule.trigger {
+                                    if let Some(Trigger::GlobalHotkey { key_combination, hold_mode, repeat_while_held }) = &mut rule.trigger {
                                         widgets::hud(ui, "HOTKEY COMBINATION", t.muted);
                                         let rec_id = ui.id().with("rec_global_hotkey");
                                         let mut is_recording: bool = ui.data_mut(|d| d.get_temp(rec_id).unwrap_or(false));
@@ -981,12 +979,14 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                         });
 
                                         ui.add_space(6.0);
-                                        let hold_tip = if state.language == Language::Russian {
-                                            "Действие выполняется пока физически зажата комбинация клавиш или кнопка мыши, и автоматически прерывается при отпускании"
+                                        ui.checkbox(hold_mode, loc.inspector_hotkey_hold_mode).on_hover_text(loc.inspector_hotkey_hold_mode_tip);
+
+                                        if *hold_mode {
+                                            ui.add_space(4.0);
+                                            ui.checkbox(repeat_while_held, loc.inspector_hotkey_repeat_while_held).on_hover_text(loc.inspector_hotkey_repeat_while_held_tip);
                                         } else {
-                                            "Rule executes continuously while hotkey/mouse is held down, and automatically cancels on release"
-                                        };
-                                        ui.checkbox(hold_mode, "Hold mode").on_hover_text(hold_tip);
+                                            *repeat_while_held = false;
+                                        }
                                     }
                                 }
                                 SystemSubMode::FileWatcher => {
@@ -1567,6 +1567,8 @@ fn render_actions_pipeline(
 
     let loc = state.loc();
     let total = actions.len();
+    let mut has_infinite_prior = false;
+
     for (idx, action) in actions.iter_mut().enumerate() {
         // Render drop slot BEFORE card idx
         render_drop_slot(ui, loc, idx, active_dst, active_src, pipeline_id, is_exit_pipeline, t);
@@ -1574,6 +1576,7 @@ fn render_actions_pipeline(
         // Render card idx
         let is_ghost = active_src == Some(idx);
         let is_executing = exec_opt.map_or(false, |e| e.is_exit == is_exit_pipeline && e.current_step == idx);
+        let is_dimmed = has_infinite_prior;
         let resp = render_action_card(
             ui,
             state,
@@ -1583,9 +1586,16 @@ fn render_actions_pipeline(
             is_exit_pipeline,
             is_ghost,
             is_executing,
+            is_dimmed,
         );
 
         current_centers.push(resp.card_rect.center().y);
+
+        let is_infinite_macro = matches!(action, Action::Macro { infinite: true, .. });
+        if is_infinite_macro {
+            has_infinite_prior = true;
+            render_infinite_macro_warning(ui, state, t);
+        }
 
         if resp.remove_clicked {
             remove_idx = Some(idx);
@@ -1716,6 +1726,34 @@ struct ActionCardResponse {
     pub card_rect: Rect,
 }
 
+fn render_infinite_macro_warning(ui: &mut Ui, state: &GuiState, t: &Tokens) {
+    let loc = state.loc();
+    ui.add_space(2.0);
+    egui::Frame::new()
+        .fill(t.warn.gamma_multiply(0.12))
+        .stroke(Stroke::new(1.0, t.warn.gamma_multiply(0.4)))
+        .corner_radius(CornerRadius::ZERO)
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(egui_phosphor::regular::WARNING)
+                        .font(egui::FontId::new(13.0, theme::phosphor()))
+                        .color(t.warn),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(loc.inspector_infinite_macro_warning)
+                        .family(theme::mono())
+                        .size(11.0)
+                        .color(t.warn),
+                );
+            });
+        });
+    ui.add_space(2.0);
+}
+
 fn render_action_card(
     ui: &mut Ui,
     state: &GuiState,
@@ -1725,6 +1763,7 @@ fn render_action_card(
     is_exit_pipeline: bool,
     is_being_dragged: bool,
     is_executing: bool,
+    is_dimmed: bool,
 ) -> ActionCardResponse {
     let loc = state.loc();
     let mut remove_clicked = false;
@@ -1739,7 +1778,9 @@ fn render_action_card(
     let ghost_id = ui.id().with(("card_ghost", is_exit_pipeline, idx));
     let ghost_anim = ui.ctx().animate_bool_with_time_and_easing(ghost_id, is_being_dragged, 0.15, easing::cubic_out);
 
-    let (fill, stroke) = if is_executing {
+    let (fill, stroke) = if is_dimmed {
+        (t.sunken.gamma_multiply(0.4), Stroke::new(1.0, t.muted.gamma_multiply(0.2)))
+    } else if is_executing {
         (t.sunken, Stroke::new(1.5, t.accent_ink))
     } else if ghost_anim > 0.001 {
         (
@@ -1780,10 +1821,10 @@ fn render_action_card(
                             let (ok, msg) = match action {
                                 Action::Macro { events, speed, .. } => {
                                     if events.is_empty() {
-                                        (false, if state.language == Language::Russian { "Макрос пуст" } else { "Macro has no events" }.to_string())
+                                        (false, loc.inspector_macro_test_empty.to_string())
                                     } else {
                                         crate::gui::macro_recorder::run_macro_test_safe(events.clone(), *speed);
-                                        (true, if state.language == Language::Russian { format!("Тест запущен ({} действий)", events.len()) } else { format!("Testing {} actions", events.len()) })
+                                        (true, loc.inspector_macro_testing_actions.replace("{}", &events.len().to_string()))
                                     }
                                 }
                                 _ => {
@@ -1825,10 +1866,13 @@ fn render_action_card(
                             }
 
                             let prefix = if is_exit_pipeline { loc.inspector_exit_prefix } else { loc.inspector_step_prefix };
-                            widgets::hud(ui, &format!("{} {:02}", prefix, idx + 1), t.accent_ink);
+                            widgets::hud(ui, &format!("{} {:02}", prefix, idx + 1), if is_dimmed { t.muted } else { t.accent_ink });
 
                             let type_badge = action_type_badge(action, loc);
-                            if is_executing {
+                            if is_dimmed {
+                                widgets::badge(ui, loc.inspector_badge_unreachable, t.warn.gamma_multiply(0.8))
+                                    .on_hover_text(loc.inspector_badge_unreachable_tip);
+                            } else if is_executing {
                                 widgets::badge(ui, loc.inspector_badge_executing_now, t.accent_ink);
                             } else if is_being_dragged {
                                 widgets::badge(ui, loc.inspector_badge_moving_step, t.accent_ink);
@@ -1854,7 +1898,7 @@ fn render_action_card(
                 widgets::hrule(ui);
 
                 // 2. CARD BODY: Full-width stacked parameter fields
-                ui.add_enabled_ui(!is_being_dragged, |ui| {
+                ui.add_enabled_ui(!is_being_dragged && !is_dimmed, |ui| {
                     match action {
                     Action::StartProcess {
                         file_path,
@@ -1960,7 +2004,7 @@ fn render_action_card(
                         widgets::hud(ui, loc.inspector_field_notif_title, t.muted);
                         ui.add(
                             egui::TextEdit::singleline(title)
-                                .hint_text(if state.language == Language::Russian { "Заголовок уведомления" } else { "Notification Title" })
+                                .hint_text(loc.inspector_field_notif_title_hint)
                                 .desired_width(ui.available_width())
                                 .min_size(vec2(0.0, theme::CONTROL_H))
                                 .vertical_align(egui::Align::Center)
@@ -1970,7 +2014,7 @@ fn render_action_card(
                         widgets::hud(ui, loc.inspector_field_notif_message, t.muted);
                         ui.add(
                             egui::TextEdit::singleline(message)
-                                .hint_text(if state.language == Language::Russian { "Текст оповещения..." } else { "Notification message text..." })
+                                .hint_text(loc.inspector_field_notif_message_hint)
                                 .desired_width(ui.available_width())
                                 .min_size(vec2(0.0, theme::CONTROL_H))
                                 .vertical_align(egui::Align::Center)
@@ -2003,10 +2047,10 @@ fn render_action_card(
 
                         widgets::hud(ui, loc.inspector_field_process_audio_action, t.muted);
                         let pa_options = [
-                            (ProcessAudioActionType::Mute, Cell::new(if state.language == Language::Russian { "ГЛУШИТЬ" } else { "MUTE" }, loc.inspector_audio_mute)),
-                            (ProcessAudioActionType::Unmute, Cell::new(if state.language == Language::Russian { "ВКЛЮЧИТЬ" } else { "UNMUTE" }, loc.inspector_audio_unmute)),
-                            (ProcessAudioActionType::ToggleMute, Cell::new(if state.language == Language::Russian { "ПЕРЕКЛЮЧИТЬ" } else { "TOGGLE" }, loc.inspector_audio_toggle_mute)),
-                            (ProcessAudioActionType::SetVolume, Cell::new(if state.language == Language::Russian { "ГРОМКОСТЬ" } else { "VOLUME" }, loc.inspector_audio_set_volume)),
+                            (ProcessAudioActionType::Mute, Cell::new(loc.inspector_cell_mute, loc.inspector_audio_mute)),
+                            (ProcessAudioActionType::Unmute, Cell::new(loc.inspector_cell_unmute, loc.inspector_audio_unmute)),
+                            (ProcessAudioActionType::ToggleMute, Cell::new(loc.inspector_cell_toggle, loc.inspector_audio_toggle_mute)),
+                            (ProcessAudioActionType::SetVolume, Cell::new(loc.inspector_cell_volume, loc.inspector_audio_set_volume)),
                         ];
                         widgets::cells(ui, action_type, &pa_options);
                         if *action_type == ProcessAudioActionType::SetVolume {
@@ -2021,11 +2065,11 @@ fn render_action_card(
                     Action::SystemPower { power_type } => {
                         widgets::hud(ui, loc.inspector_field_power_action, t.muted);
                         let power_options = [
-                            (SystemPowerType::Lock, Cell::new(if state.language == Language::Russian { "БЛОКИРОВКА" } else { "LOCK" }, loc.inspector_power_lock)),
-                            (SystemPowerType::Sleep, Cell::new(if state.language == Language::Russian { "СОН" } else { "SLEEP" }, loc.inspector_power_sleep)),
-                            (SystemPowerType::TurnScreenOff, Cell::new(if state.language == Language::Russian { "ЭКРАН ВЫКЛ" } else { "SCREEN OFF" }, loc.inspector_power_screen_off)),
-                            (SystemPowerType::Restart, Cell::new(if state.language == Language::Russian { "ПЕРЕЗАГРУЗКА" } else { "RESTART" }, loc.inspector_power_restart)),
-                            (SystemPowerType::Shutdown, Cell::new(if state.language == Language::Russian { "ВЫКЛЮЧИТЬ" } else { "SHUTDOWN" }, loc.inspector_power_shutdown)),
+                            (SystemPowerType::Lock, Cell::new(loc.inspector_cell_lock, loc.inspector_power_lock)),
+                            (SystemPowerType::Sleep, Cell::new(loc.inspector_cell_sleep, loc.inspector_power_sleep)),
+                            (SystemPowerType::TurnScreenOff, Cell::new(loc.inspector_cell_screen_off, loc.inspector_power_screen_off)),
+                            (SystemPowerType::Restart, Cell::new(loc.inspector_cell_restart, loc.inspector_power_restart)),
+                            (SystemPowerType::Shutdown, Cell::new(loc.inspector_cell_shutdown, loc.inspector_power_shutdown)),
                         ];
                         widgets::cells(ui, power_type, &power_options);
                     }
@@ -2066,7 +2110,7 @@ fn render_action_card(
                         let mut p_str = payload.clone().unwrap_or_default();
                         if ui.add(
                             egui::TextEdit::multiline(&mut p_str)
-                                .hint_text(if state.language == Language::Russian { "{\"event\": \"triggered\", \"status\": \"ok\"}" } else { "{\"event\": \"triggered\", \"status\": \"ok\"}" })
+                                .hint_text("{\"event\": \"triggered\", \"status\": \"ok\"}")
                                 .desired_width(ui.available_width())
                                 .desired_rows(2)
                                 .font(egui::FontId::new(12.0, theme::mono()))
@@ -2270,8 +2314,8 @@ fn render_action_card(
 
                         ui.add_space(4.0);
                         let fw_options = [
-                            (true, Cell::new(if state.language == Language::Russian { "БЛОКИРОВАТЬ" } else { "BLOCK TRAFFIC" }, "")),
-                            (false, Cell::new(if state.language == Language::Russian { "РАЗРЕШИТЬ" } else { "ALLOW TRAFFIC" }, "")),
+                            (true, Cell::new(loc.inspector_cell_block_traffic, "")),
+                            (false, Cell::new(loc.inspector_cell_allow_traffic, "")),
                         ];
                         widgets::cells(ui, block, &fw_options);
                     }
@@ -2313,15 +2357,15 @@ fn render_action_card(
                     }
 
                     Action::AudioControl { target, action_type, volume_level } => {
-                        widgets::hud(ui, if state.language == Language::Russian { "ЦЕЛЬ АУДИО" } else { "AUDIO TARGET" }, t.muted);
+                        widgets::hud(ui, loc.inspector_audio_target_label, t.muted);
                         let target_options = [
                             (crate::models::AudioTarget::Playback, Cell::new(
-                                if state.language == Language::Russian { "ДИНАМИКИ" } else { "PLAYBACK" },
-                                if state.language == Language::Russian { "Воспроизведение звука (динамики / наушники)" } else { "Audio playback (speakers / headphones)" },
+                                loc.inspector_audio_target_playback,
+                                loc.inspector_audio_target_playback_tip,
                             )),
                             (crate::models::AudioTarget::Microphone, Cell::new(
-                                if state.language == Language::Russian { "МИКРОФОН" } else { "MICROPHONE" },
-                                if state.language == Language::Russian { "Запись звука (микрофон)" } else { "Audio recording (microphone)" },
+                                loc.inspector_audio_target_mic,
+                                loc.inspector_audio_target_mic_tip,
                             )),
                         ];
                         if widgets::cells(ui, target, &target_options) {
@@ -2335,23 +2379,23 @@ fn render_action_card(
                         if *target == crate::models::AudioTarget::Playback {
                             let audio_options = [
                                 (crate::models::AudioVolumeAction::Mute, Cell::new(
-                                    if state.language == Language::Russian { "ГЛУШИТЬ" } else { "MUTE" },
+                                    loc.inspector_cell_mute,
                                     loc.inspector_audio_mute,
                                 )),
                                 (crate::models::AudioVolumeAction::Unmute, Cell::new(
-                                    if state.language == Language::Russian { "ВКЛЮЧИТЬ" } else { "UNMUTE" },
+                                    loc.inspector_cell_unmute,
                                     loc.inspector_audio_unmute,
                                 )),
                                 (crate::models::AudioVolumeAction::ToggleMute, Cell::new(
-                                    if state.language == Language::Russian { "ПЕРЕКЛЮЧИТЬ" } else { "TOGGLE" },
+                                    loc.inspector_cell_toggle,
                                     loc.inspector_audio_toggle_mute,
                                 )),
                                 (crate::models::AudioVolumeAction::SetVolume, Cell::new(
-                                    if state.language == Language::Russian { "ГРОМКОСТЬ" } else { "VOLUME" },
+                                    loc.inspector_cell_volume,
                                     loc.inspector_audio_set_volume,
                                 )),
                                 (crate::models::AudioVolumeAction::PlayBeep, Cell::new(
-                                    if state.language == Language::Russian { "СИГНАЛ" } else { "BEEP" },
+                                    loc.inspector_cell_beep,
                                     loc.inspector_audio_beep,
                                 )),
                             ];
@@ -2359,19 +2403,19 @@ fn render_action_card(
                         } else {
                             let mic_options = [
                                 (crate::models::AudioVolumeAction::Mute, Cell::new(
-                                    if state.language == Language::Russian { "ГЛУШИТЬ" } else { "MUTE" },
+                                    loc.inspector_cell_mute,
                                     loc.inspector_audio_mute,
                                 )),
                                 (crate::models::AudioVolumeAction::Unmute, Cell::new(
-                                    if state.language == Language::Russian { "ВКЛЮЧИТЬ" } else { "UNMUTE" },
+                                    loc.inspector_cell_unmute,
                                     loc.inspector_audio_unmute,
                                 )),
                                 (crate::models::AudioVolumeAction::ToggleMute, Cell::new(
-                                    if state.language == Language::Russian { "ПЕРЕКЛЮЧИТЬ" } else { "TOGGLE" },
+                                    loc.inspector_cell_toggle,
                                     loc.inspector_audio_toggle_mute,
                                 )),
                                 (crate::models::AudioVolumeAction::SetVolume, Cell::new(
-                                    if state.language == Language::Russian { "ГРОМКОСТЬ" } else { "VOLUME" },
+                                    loc.inspector_cell_volume,
                                     loc.inspector_audio_set_volume,
                                 )),
                             ];
@@ -2388,15 +2432,15 @@ fn render_action_card(
                     }
 
                     Action::DefaultDevice { target, device_name } => {
-                        widgets::hud(ui, if state.language == Language::Russian { "ЦЕЛЬ АУДИО" } else { "AUDIO TARGET" }, t.muted);
+                        widgets::hud(ui, loc.inspector_audio_target_label, t.muted);
                         let dev_target_options = [
                             (crate::models::AudioTarget::Playback, Cell::new(
-                                if state.language == Language::Russian { "ВОСПРОИЗВЕДЕНИЕ" } else { "PLAYBACK" },
-                                if state.language == Language::Russian { "Устройство воспроизведения по умолчанию" } else { "Default audio playback device" },
+                                loc.inspector_audio_dev_playback,
+                                loc.inspector_audio_dev_playback_tip,
                             )),
                             (crate::models::AudioTarget::Microphone, Cell::new(
-                                if state.language == Language::Russian { "МИКРОФОН" } else { "MICROPHONE" },
-                                if state.language == Language::Russian { "Устройство записи звука по умолчанию" } else { "Default audio recording device" },
+                                loc.inspector_audio_dev_mic,
+                                loc.inspector_audio_dev_mic_tip,
                             )),
                         ];
                         widgets::cells(ui, target, &dev_target_options);
@@ -2419,10 +2463,9 @@ fn render_action_card(
 
                     Action::ExecuteScript { interpreter, script, run_in_window } => {
                         ui.horizontal(|ui| {
-                            widgets::hud(ui, if state.language == Language::Russian { "ИНТЕРПРЕТАТОР" } else { "INTERPRETER" }, t.muted);
+                            widgets::hud(ui, loc.inspector_script_interpreter, t.muted);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let exp_tip = if state.language == Language::Russian { "Открыть редактор скрипта" } else { "Expand script in studio canvas" };
-                                if widgets::glyph_button(ui, Glyph::Expand, exp_tip).clicked() {
+                                if widgets::glyph_button(ui, Glyph::Expand, loc.inspector_script_expand_tip).clicked() {
                                     expand_script = Some(match interpreter {
                                         crate::models::ScriptType::PowerShell => ScriptLanguage::PowerShell,
                                         crate::models::ScriptType::Batch => ScriptLanguage::Batch,
@@ -2448,7 +2491,7 @@ fn render_action_card(
                         let mut layouter = create_script_layouter(lang, *t, 12.0);
                         ui.add(
                             egui::TextEdit::multiline(script)
-                                .hint_text(if state.language == Language::Russian { "# Введите команды скрипта..." } else { "# Enter script commands here..." })
+                                .hint_text(loc.inspector_script_placeholder)
                                 .font(egui::FontId::new(12.0, theme::mono()))
                                 .desired_width(ui.available_width())
                                 .desired_rows(4)
@@ -2494,18 +2537,17 @@ fn render_action_card(
                         p.text(
                             title_pos,
                             egui::Align2::LEFT_CENTER,
-                            if state.language == Language::Russian { "СТУДИЯ МАКРОСОВ" } else { "MACRO STUDIO & TIMELINE" },
+                            loc.inspector_macro_studio_title,
                             egui::FontId::new(13.0, theme::semibold()),
                             if hovered { t.accent_ink } else { t.ink_strong },
                         );
 
                         // Action arrow pill on right
-                        let arrow_txt = if state.language == Language::Russian { "ОТКРЫТЬ СТУДИЮ →" } else { "OPEN STUDIO →" };
                         let arrow_pos = pos2(rect.right() - 14.0, rect.center().y);
                         p.text(
                             arrow_pos,
                             egui::Align2::RIGHT_CENTER,
-                            arrow_txt,
+                            loc.inspector_macro_studio_open,
                             egui::FontId::new(11.0, theme::mono_bold()),
                             if hovered { t.accent_ink } else { t.faint },
                         );

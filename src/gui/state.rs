@@ -53,6 +53,15 @@ pub struct ActionCatalogModalState {
     pub search_query: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsTab {
+    #[default]
+    General,
+    Appearance,
+    Engine,
+    Updates,
+}
+
 pub struct GuiState {
     pub active_view: ActiveView,
     pub search_query: String,
@@ -84,6 +93,7 @@ pub struct GuiState {
     pub available_update: Option<crate::updater::ReleaseInfo>,
     pub is_checking_update: bool,
     pub is_downloading_update: bool,
+    pub gui_closed_during_update: bool,
     pub update_download_progress: f32,
     pub show_changelog_modal: bool,
     pub show_guide_modal: bool,
@@ -92,6 +102,7 @@ pub struct GuiState {
     pub group_full_presses: bool,
     pub undo_stack: Vec<Rule>,
     pub redo_stack: Vec<Rule>,
+    pub settings_tab: SettingsTab,
     update_event_tx: std::sync::mpsc::Sender<crate::updater::UpdateEvent>,
     update_event_rx: std::sync::mpsc::Receiver<crate::updater::UpdateEvent>,
 }
@@ -131,6 +142,7 @@ impl GuiState {
             available_update: None,
             is_checking_update: false,
             is_downloading_update: false,
+            gui_closed_during_update: false,
             update_download_progress: 0.0,
             show_changelog_modal: false,
             show_guide_modal: false,
@@ -139,6 +151,7 @@ impl GuiState {
             group_full_presses: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            settings_tab: SettingsTab::General,
             update_event_tx,
             update_event_rx,
         }
@@ -687,6 +700,8 @@ impl GuiState {
             return;
         }
         self.is_downloading_update = true;
+        self.gui_closed_during_update = false;
+        crate::updater::set_gui_closed_during_update(false);
         self.update_download_progress = 0.0;
         self.set_toast(self.loc().toast_update_downloading.replace("{}", &info.version));
 
@@ -746,8 +761,18 @@ impl GuiState {
                 }
                 crate::updater::UpdateEvent::DownloadComplete(result) => {
                     self.is_downloading_update = false;
-                    if let Err(err) = result {
-                        self.set_toast(self.loc().toast_update_failed.replace("{}", &err));
+                    match result {
+                        Ok(()) => {
+                            // The binary was swapped and PowerShell restart helper spawned.
+                            // Exit GUI cleanly so PowerShell continues immediately.
+                            std::process::exit(0);
+                        }
+                        Err(err) => {
+                            self.set_toast(self.loc().toast_update_failed.replace("{}", &err));
+                            if self.gui_closed_during_update {
+                                std::process::exit(1);
+                            }
+                        }
                     }
                 }
             }

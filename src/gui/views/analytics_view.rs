@@ -29,43 +29,6 @@ pub fn render_analytics_view(ui: &mut Ui, state: &mut GuiState) {
         let running_rules = daemon.map(|s| s.active_rule_executions.len()).unwrap_or(0);
         let uptime_secs = daemon.map(|s| s.uptime_secs).unwrap_or(0);
 
-        // 1. TOP METRIC STRIP (3 Minimalist KPI Cards: Total, Active, Uptime)
-        ui.horizontal(|ui| {
-            let spacing = ui.spacing().item_spacing.x;
-            let total_avail = ui.available_width();
-            let card_w = ((total_avail - spacing * 2.0) / 3.0).floor().max(100.0);
-            let card_h = 56.0;
-
-            render_kpi_card(
-                ui,
-                loc.analytics_kpi_total_executions,
-                &total_executions.to_string(),
-                t.accent_ink,
-                card_w,
-                card_h,
-                &t,
-            );
-            render_kpi_card(
-                ui,
-                loc.analytics_kpi_active_rules,
-                &running_rules.to_string(),
-                t.good,
-                card_w,
-                card_h,
-                &t,
-            );
-            let last_card_w = ui.available_width().max(100.0);
-            render_kpi_card(
-                ui,
-                loc.analytics_kpi_uptime,
-                &format_uptime(uptime_secs),
-                t.ink_strong,
-                last_card_w,
-                card_h,
-                &t,
-            );
-        });
-
         let logs = state
             .daemon_state
             .as_ref()
@@ -75,7 +38,7 @@ pub fn render_analytics_view(ui: &mut Ui, state: &mut GuiState) {
         let total = logs.len().min(500);
         let error_count = logs.iter().take(500).filter(|l| l.level == "ERROR").count();
 
-        // 2. Toolbar with Filter Cells, Search Box, & Clear Action
+        // 1. Toolbar with Filter Cells, Search Box, & Clear Action
         ui.horizontal(|ui| {
             let mut filter = match ui.data(|d| d.get_temp::<LogFilter>(egui::Id::new("log_filter"))) {
                 Some(f) => f,
@@ -181,72 +144,124 @@ pub fn render_analytics_view(ui: &mut Ui, state: &mut GuiState) {
             })
             .collect();
 
+        let kpi_h = 56.0;
+        let spacing_y = ui.spacing().item_spacing.y;
+        let frame_margins_y = 22.0; // 10px top + 10px bottom inner_margin + 2px stroke
+        let bottom_padding = 10.0; // clean breathing room above CentralPanel bottom
+        let logs_inner_h = (ui.available_height() - kpi_h - spacing_y - frame_margins_y - bottom_padding).max(80.0);
+
         if filtered.is_empty() {
-            ui.add_space(48.0);
-            ui.vertical_centered(|ui| {
-                widgets::hud(ui, loc.logs_empty_title, t.muted);
-                ui.add_space(6.0);
-                widgets::hud(ui, loc.logs_empty_subtitle, t.faint);
-            });
-            return;
+            egui::Frame::new()
+                .fill(t.sunken)
+                .stroke(t.hairline())
+                .corner_radius(CornerRadius::ZERO)
+                .inner_margin(Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.set_height(logs_inner_h);
+                    ui.vertical_centered(|ui| {
+                        ui.add_space((logs_inner_h / 2.0 - 24.0).max(20.0));
+                        widgets::hud(ui, loc.logs_empty_title, t.muted);
+                        ui.add_space(6.0);
+                        widgets::hud(ui, loc.logs_empty_subtitle, t.faint);
+                    });
+                });
+        } else {
+            // 2. Monospace Terminal Well (Top to Bottom Chronological Stream)
+            egui::Frame::new()
+                .fill(t.sunken)
+                .stroke(t.hairline())
+                .corner_radius(CornerRadius::ZERO)
+                .inner_margin(Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.set_height(logs_inner_h);
+
+                    egui::ScrollArea::vertical()
+                        .max_height(logs_inner_h)
+                        .stick_to_bottom(true)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 4.0;
+
+                            // Display top-to-bottom (chronological)
+                            for log in &filtered {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 8.0;
+
+                                    // Timestamp
+                                    widgets::hud(ui, &log.timestamp, t.faint);
+
+                                    // Level Badge
+                                    let level_color = match log.level.as_str() {
+                                        "ERROR" => t.bad,
+                                        "WARN" => t.warn,
+                                        "TRIGGER" => t.accent_ink,
+                                        _ => t.good,
+                                    };
+                                    widgets::badge(ui, &log.level, level_color);
+
+                                    // Category Badge
+                                    let cat_color = match log.category.as_str() {
+                                        "PROCESS" => t.accent_ink,
+                                        "RULE" => t.warn,
+                                        _ => t.muted,
+                                    };
+                                    widgets::badge(ui, &log.category, cat_color);
+
+                                    // Message
+                                    let msg_color = if log.level == "ERROR" {
+                                        t.bad
+                                    } else {
+                                        t.ink
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(&log.message)
+                                            .family(theme::mono())
+                                            .size(11.5)
+                                            .color(msg_color),
+                                    );
+                                });
+                            }
+                        });
+                });
         }
 
-        // 4. Monospace Terminal Well (Top to Bottom Chronological Stream)
-        egui::Frame::new()
-            .fill(t.sunken)
-            .stroke(t.hairline())
-            .corner_radius(CornerRadius::ZERO)
-            .inner_margin(Margin::symmetric(14, 10))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
+        // 3. BOTTOM METRIC STRIP (3 Minimalist KPI Cards: Total, Active, Uptime)
+        ui.horizontal(|ui| {
+            let spacing = ui.spacing().item_spacing.x;
+            let total_avail = ui.available_width();
+            let card_w = ((total_avail - spacing * 2.0) / 3.0).floor().max(100.0);
 
-                egui::ScrollArea::vertical()
-                    .stick_to_bottom(true)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
-
-                        // Display top-to-bottom (chronological)
-                        for log in &filtered {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 8.0;
-
-                                // Timestamp
-                                widgets::hud(ui, &log.timestamp, t.faint);
-
-                                // Level Badge
-                                let level_color = match log.level.as_str() {
-                                    "ERROR" => t.bad,
-                                    "WARN" => t.warn,
-                                    "TRIGGER" => t.accent_ink,
-                                    _ => t.good,
-                                };
-                                widgets::badge(ui, &log.level, level_color);
-
-                                // Category Badge
-                                let cat_color = match log.category.as_str() {
-                                    "PROCESS" => t.accent_ink,
-                                    "RULE" => t.warn,
-                                    _ => t.muted,
-                                };
-                                widgets::badge(ui, &log.category, cat_color);
-
-                                // Message
-                                let msg_color = if log.level == "ERROR" {
-                                    t.bad
-                                } else {
-                                    t.ink
-                                };
-                                ui.label(
-                                    egui::RichText::new(&log.message)
-                                        .family(theme::mono())
-                                        .size(11.5)
-                                        .color(msg_color),
-                                );
-                            });
-                        }
-                    });
-            });
+            render_kpi_card(
+                ui,
+                loc.analytics_kpi_total_executions,
+                &total_executions.to_string(),
+                t.accent_ink,
+                card_w,
+                kpi_h,
+                &t,
+            );
+            render_kpi_card(
+                ui,
+                loc.analytics_kpi_active_rules,
+                &running_rules.to_string(),
+                t.good,
+                card_w,
+                kpi_h,
+                &t,
+            );
+            let last_card_w = ui.available_width().max(100.0);
+            render_kpi_card(
+                ui,
+                loc.analytics_kpi_uptime,
+                &format_uptime(uptime_secs),
+                t.ink_strong,
+                last_card_w,
+                kpi_h,
+                &t,
+            );
+        });
     });
 }
 

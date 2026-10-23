@@ -4,12 +4,9 @@ use egui::{
 };
 use crate::gui::components::modal::Modal;
 use crate::gui::components::widgets::{self, Cell, Kind};
-use crate::gui::macro_recorder::{run_macro_test_safe, MacroRecorder};
-#[cfg(not(windows))]
-use crate::gui::macro_recorder::egui_key_to_string;
+use crate::gui::macro_recorder::{egui_key_to_string, run_macro_test_safe, MacroRecorder};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
-use crate::i18n::Language;
 use crate::models::{Action, MacroEvent, MouseButton, MouseCoordMode};
 
 #[cfg(windows)]
@@ -124,9 +121,8 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
         }
     }
 
-    #[cfg(not(windows))]
     if is_recording {
-        // Direct capture of keyboard events on non-windows platforms
+        // Direct capture of keyboard events in GUI event loop (ensures immediate capture if modal has focus)
         if recorder.capture_keyboard.load(std::sync::atomic::Ordering::SeqCst) {
             let key_events: Vec<(String, bool)> = ctx.input(|i| {
                 let mut list = Vec::new();
@@ -172,6 +168,7 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
     }
 
     // Target action resolution
+    let loc = state.loc();
     let editor_state = state.macro_editor.clone().or_else(|| state.last_macro_editor.clone());
     let Some(edit_info) = editor_state else { return; };
 
@@ -211,7 +208,6 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
     crate::gui::macro_recorder::update_studio_payload(events.clone(), *speed);
 
     let t = Tokens::get(ctx);
-    let lang = state.language;
     let mut group_full_presses = state.group_full_presses;
 
     let modal_res = Modal::new("macro-modal", is_open)
@@ -241,39 +237,33 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                     widgets::eyebrow(
                         ui,
                         "MACRO STUDIO",
-                        if lang == Language::Russian { "ТАЙМЛАЙН И РЕДАКТОР МАКРОСОВ" } else { "TIMELINE & HARDWARE MACRO STUDIO" },
+                        loc.macro_studio_title,
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(14.0);
-                        let close_tip = if lang == Language::Russian { "Закрыть (Esc)" } else { "Close (Esc)" };
-                        if widgets::glyph_button(ui, widgets::Glyph::Close, close_tip).clicked() {
+                        if widgets::glyph_button(ui, widgets::Glyph::Close, loc.macro_studio_close_tip).clicked() {
                             *close_req = true;
                         }
 
-                        let min_tip = if lang == Language::Russian {
-                            "Свернуть ProcessHandler (Запись: F9, Тест: F10)"
-                        } else {
-                            "Minimize ProcessHandler (Record: F9, Test: F10)"
-                        };
-                        if widgets::glyph_button(ui, widgets::Glyph::Minimize, min_tip).clicked() {
+                        if widgets::glyph_button(ui, widgets::Glyph::Minimize, loc.macro_studio_minimize_tip).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                         }
 
                         // Test run button (F10) - toggle start / stop on safe background runner
                         let is_testing = crate::gui::macro_recorder::is_macro_test_running();
                         let test_lbl = if is_testing {
-                            if lang == Language::Russian { "⏹ СТОП ТЕСТ (F10)" } else { "⏹ STOP TEST (F10)" }
+                            loc.macro_studio_btn_stop_test
                         } else {
-                            if lang == Language::Russian { "▶ ТЕСТ (F10)" } else { "▶ TEST RUN (F10)" }
+                            loc.macro_studio_btn_test_run
                         };
                         let test_kind = if is_testing { Kind::Danger } else { Kind::Secondary };
                         let btn_w = widgets::button_width(ui, test_lbl, 0.0);
                         let test_clicked = widgets::button(ui, test_lbl, test_kind, btn_w)
                             .on_hover_text(if is_testing {
-                                if lang == Language::Russian { "Остановить текущее тестирование макроса (F10)" } else { "Stop current macro test execution (F10)" }
+                                loc.macro_studio_btn_stop_test_tip
                             } else {
-                                if lang == Language::Russian { "Запустить тест макроса на фоновом потоке (F10)" } else { "Execute macro sequence now on a safe background thread (F10)" }
+                                loc.macro_studio_btn_test_run_tip
                             })
                             .clicked();
 
@@ -300,11 +290,7 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
 
                     // ZONE 1: RECORD BUTTON & CAPTURE TOGGLE CHIPS
                     if is_recording {
-                        let rec_label = if lang == Language::Russian {
-                            "■ СТОП (F9 / Esc)"
-                        } else {
-                            "■ STOP (F9 / Esc)"
-                        };
+                        let rec_label = loc.macro_studio_btn_stop_record;
                         let btn_w = widgets::button_width(ui, rec_label, 0.0);
                         if widgets::button(ui, rec_label, Kind::Danger, btn_w).clicked() {
                             recorder.stop_recording();
@@ -322,16 +308,8 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                             }
                         }
                     } else {
-                        let rec_label = if lang == Language::Russian {
-                            "● ЗАПИСЬ (F9)"
-                        } else {
-                            "● RECORD (F9)"
-                        };
-                        let rec_tip = if lang == Language::Russian {
-                            "Начать аппаратную запись. Клавиши, клики, перемещения и паузы будут транслироваться в таймлайн."
-                        } else {
-                            "Start hardware recording. Keystrokes, mouse buttons, cursor moves, and pauses stream live into the timeline."
-                        };
+                        let rec_label = loc.macro_studio_btn_record;
+                        let rec_tip = loc.macro_studio_btn_record_tip;
                         let btn_w = widgets::button_width(ui, rec_label, 0.0);
                         if widgets::button(ui, rec_label, Kind::Primary, btn_w)
                             .on_hover_text(rec_tip)
@@ -344,29 +322,23 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                     ui.add_space(8.0);
 
                     // Filter toggle chips (compact, stylish DAW-like pills)
-                    let chip_keys = if lang == Language::Russian { "⌨ Клавиши" } else { "⌨ Keys" };
-                    let chip_clicks = if lang == Language::Russian { "🖱 Клики" } else { "🖱 Clicks" };
-                    let chip_moves = if lang == Language::Russian { "↗ Движения" } else { "↗ Moves" };
-                    let chip_wheel = if lang == Language::Russian { "⚙ Колесо" } else { "⚙ Wheel" };
-                    let chip_delays = if lang == Language::Russian { "⏱ Паузы" } else { "⏱ Delays" };
-
-                    render_filter_chip(ui, chip_keys, &recorder.capture_keyboard, if lang == Language::Russian { "Захват нажатий клавиатуры" } else { "Capture keyboard strokes" }, &t);
+                    render_filter_chip(ui, loc.macro_studio_chip_keys, &recorder.capture_keyboard, loc.macro_studio_chip_keys_tip, &t);
                     ui.add_space(2.0);
-                    render_filter_chip(ui, chip_clicks, &recorder.capture_mouse_clicks, if lang == Language::Russian { "Захват кликов мыши" } else { "Capture mouse button clicks" }, &t);
+                    render_filter_chip(ui, loc.macro_studio_chip_clicks, &recorder.capture_mouse_clicks, loc.macro_studio_chip_clicks_tip, &t);
                     ui.add_space(2.0);
-                    render_filter_chip(ui, chip_moves, &recorder.capture_mouse_moves, if lang == Language::Russian { "Захват перемещений курсора" } else { "Capture mouse movements" }, &t);
+                    render_filter_chip(ui, loc.macro_studio_chip_moves, &recorder.capture_mouse_moves, loc.macro_studio_chip_moves_tip, &t);
                     ui.add_space(2.0);
-                    render_filter_chip(ui, chip_wheel, &recorder.capture_mouse_wheel, if lang == Language::Russian { "Захват прокрутки колеса" } else { "Capture mouse scroll wheel" }, &t);
+                    render_filter_chip(ui, loc.macro_studio_chip_wheel, &recorder.capture_mouse_wheel, loc.macro_studio_chip_wheel_tip, &t);
                     ui.add_space(2.0);
-                    render_filter_chip(ui, chip_delays, &recorder.capture_delays, if lang == Language::Russian { "Захват пауз между событиями" } else { "Capture pauses between actions" }, &t);
+                    render_filter_chip(ui, loc.macro_studio_chip_delays, &recorder.capture_delays, loc.macro_studio_chip_delays_tip, &t);
 
                     ui.add_space(10.0);
                     widgets::rule(ui, 20.0);
                     ui.add_space(10.0);
 
                     // ZONE 2: ADD STEP ACTIONS
-                    if widgets::compact_button(ui, if lang == Language::Russian { "+ Клавиша" } else { "+ Key" }, Kind::Secondary, 24.0)
-                        .on_hover_text(if lang == Language::Russian { "Добавить нажатие клавиши (Зажатие + Пауза 40мс + Отпускание)" } else { "Insert physical key press, pause, and release" })
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_key, Kind::Secondary, 24.0)
+                        .on_hover_text(loc.macro_studio_btn_add_key_tip)
                         .clicked()
                     {
                         events.push(MacroEvent::KeyDown { key: "Enter".to_string() });
@@ -374,8 +346,8 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                         events.push(MacroEvent::KeyUp { key: "Enter".to_string() });
                     }
 
-                    if widgets::compact_button(ui, if lang == Language::Russian { "+ Мышь" } else { "+ Mouse" }, Kind::Secondary, 24.0)
-                        .on_hover_text(if lang == Language::Russian { "Добавить клик кнопки мыши (Зажатие + Пауза 40мс + Отпускание)" } else { "Insert physical mouse button press, pause, and release" })
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_mouse, Kind::Secondary, 24.0)
+                        .on_hover_text(loc.macro_studio_btn_add_mouse_tip)
                         .clicked()
                     {
                         events.push(MacroEvent::MouseDown { button: MouseButton::Left });
@@ -383,8 +355,8 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                         events.push(MacroEvent::MouseUp { button: MouseButton::Left });
                     }
 
-                    if widgets::compact_button(ui, if lang == Language::Russian { "+ Движение" } else { "+ Move" }, Kind::Secondary, 24.0)
-                        .on_hover_text(if lang == Language::Russian { "Добавить перемещение курсора в координаты" } else { "Insert cursor movement to coordinates" })
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_move, Kind::Secondary, 24.0)
+                        .on_hover_text(loc.macro_studio_btn_add_move_tip)
                         .clicked()
                     {
                         events.push(MacroEvent::MouseMove {
@@ -397,22 +369,22 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                         });
                     }
 
-                    if widgets::compact_button(ui, if lang == Language::Russian { "+ Пауза" } else { "+ Delay" }, Kind::Secondary, 24.0)
-                        .on_hover_text(if lang == Language::Russian { "Добавить паузу (задержку) в миллисекундах" } else { "Insert pause delay in milliseconds" })
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_delay, Kind::Secondary, 24.0)
+                        .on_hover_text(loc.macro_studio_btn_add_delay_tip)
                         .clicked()
                     {
                         events.push(MacroEvent::Delay { ms: 100, organic: false, jitter_percent: 30 });
                     }
 
-                    if widgets::compact_button(ui, if lang == Language::Russian { "+ Текст" } else { "+ Text" }, Kind::Secondary, 24.0)
-                        .on_hover_text(if lang == Language::Russian { "Добавить ввод текстовой строки с задержкой" } else { "Insert plain text typing string with delay and organic jitter" })
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_text, Kind::Secondary, 24.0)
+                        .on_hover_text(loc.macro_studio_btn_add_text_tip)
                         .clicked()
                     {
                         events.push(MacroEvent::Text { text: "Hello".to_string(), delay_ms: 20, organic: false });
                     }
 
-                    if widgets::compact_button(ui, if lang == Language::Russian { "+ Колесо" } else { "+ Wheel" }, Kind::Secondary, 24.0)
-                        .on_hover_text(if lang == Language::Russian { "Добавить прокрутку колесика мыши (скролл)" } else { "Insert mouse wheel scroll" })
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_wheel, Kind::Secondary, 24.0)
+                        .on_hover_text(loc.macro_studio_btn_add_wheel_tip)
                         .clicked()
                     {
                         events.push(MacroEvent::MouseWheel { delta: 120 });
@@ -423,8 +395,8 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                         ui.add_space(14.0);
 
                         if !events.is_empty() {
-                            let clr_lbl = if lang == Language::Russian { "ОЧИСТИТЬ" } else { "CLEAR ALL" };
-                            let clr_tip = if lang == Language::Russian { "Очистить все события макроса" } else { "Clear all macro events" };
+                            let clr_lbl = loc.macro_studio_btn_clear_all;
+                            let clr_tip = loc.macro_studio_btn_clear_all_tip;
                             let btn_w = widgets::button_width(ui, clr_lbl, 0.0);
                             if widgets::button(ui, clr_lbl, Kind::Secondary, btn_w).on_hover_text(clr_tip).clicked() {
                                 events.clear();
@@ -453,11 +425,7 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                 );
                                 ui.add_space(12.0);
                                 ui.label(
-                                    RichText::new(if lang == Language::Russian {
-                                        "Макрос пока пуст. Нажмите «ЗАПИСЬ (F9)» или добавьте действия кнопками сверху."
-                                    } else {
-                                        "Timeline is empty. Click «RECORD (F9)» or add steps with the buttons above."
-                                    })
+                                    RichText::new(loc.macro_studio_empty_text)
                                     .font(egui::FontId::new(13.0, theme::medium()))
                                     .color(t.muted),
                                 );
@@ -559,10 +527,10 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                         ui.spacing_mut().interact_size.y = 19.0;
                                         ui.spacing_mut().item_spacing.y = 0.0;
                                         ui.horizontal_centered(|ui| {
-                                            ui.add_space(8.0);
+                                             ui.add_space(8.0);
 
                                             // Drag handle on far left
-                                            let grip = widgets::drag_handle(ui, if lang == Language::Russian { "Перетащите для изменения порядка" } else { "Drag to reorder" });
+                                            let grip = widgets::drag_handle(ui, loc.macro_studio_drag_handle_tip);
                                             if grip.drag_started() {
                                                 drag_started_idx = Some(item_idx);
                                             }
@@ -574,15 +542,15 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     ui.add_space(4.0);
 
                                                     // Render clear, focused inline row by type
-                                                    render_timeline_row_inline(ui, &mut events[*ev_idx], *ev_idx, lang, &t);
+                                                    render_timeline_row_inline(ui, &mut events[*ev_idx], *ev_idx, loc, &t);
 
                                                     // Action buttons on the right (sleek ghost icon buttons, NO ugly square borders)
                                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                         ui.add_space(8.0);
-                                                        if ghost_icon_button(ui, widgets::Glyph::Close, if lang == Language::Russian { "Удалить действие" } else { "Delete step" }, true).clicked() {
+                                                        if ghost_icon_button(ui, widgets::Glyph::Close, loc.macro_studio_tip_delete_step, true).clicked() {
                                                             to_remove = Some(item.clone());
                                                         }
-                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, if lang == Language::Russian { "Дублировать действие" } else { "Duplicate step" }, false).clicked() {
+                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, loc.macro_studio_tip_duplicate_step, false).clicked() {
                                                             to_duplicate = Some(item.clone());
                                                         }
                                                     });
@@ -600,9 +568,9 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                             .frame(false)
                                                             .min_size(vec2(16.0, 18.0)),
                                                     ).on_hover_text(if is_expanded {
-                                                        if lang == Language::Russian { "Свернуть список перемещений" } else { "Collapse movement list" }
+                                                        loc.macro_studio_tip_collapse_moves
                                                     } else {
-                                                        if lang == Language::Russian { "Развернуть все точки перемещения" } else { "Expand all movement coordinates" }
+                                                        loc.macro_studio_tip_expand_moves
                                                     });
                                                     if toggle_resp.clicked() {
                                                         if is_expanded {
@@ -614,23 +582,23 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     ui.add_space(2.0);
 
                                                     // Stacked Badge
-                                                    let moves_title = format!("{} ({})", if lang == Language::Russian { "ДВИЖЕНИЯ" } else { "MOVES" }, count);
+                                                    let moves_title = format!("{} ({})", loc.macro_studio_badge_moves, count);
                                                     render_chip(ui, &moves_title, t.accent_ink, t.bg);
                                                     ui.add_space(4.0);
 
                                                     // Trajectory summary
                                                     let p_start = match &events[*start_idx] { MacroEvent::MouseMove { x, y, .. } => (*x, *y), _ => (0, 0) };
                                                     let p_end = match &events[*start_idx + *count - 1] { MacroEvent::MouseMove { x, y, .. } => (*x, *y), _ => (0, 0) };
-                                                    let summary = format!("A: ({}, {}) → B: ({}, {}) • {} {}", p_start.0, p_start.1, p_end.0, p_end.1, count, if lang == Language::Russian { "точек" } else { "pts" });
+                                                    let summary = format!("A: ({}, {}) → B: ({}, {}) • {} {}", p_start.0, p_start.1, p_end.0, p_end.1, count, loc.macro_studio_pts_suffix);
                                                     widgets::hud(ui, &summary, t.ink_strong);
 
                                                     // Action buttons on the right
                                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                         ui.add_space(8.0);
-                                                        if ghost_icon_button(ui, widgets::Glyph::Close, if lang == Language::Russian { "Удалить группу" } else { "Delete group" }, true).clicked() {
+                                                        if ghost_icon_button(ui, widgets::Glyph::Close, loc.macro_studio_tip_delete_group, true).clicked() {
                                                             to_remove = Some(item.clone());
                                                         }
-                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, if lang == Language::Russian { "Дублировать группу" } else { "Duplicate group" }, false).clicked() {
+                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, loc.macro_studio_tip_duplicate_group, false).clicked() {
                                                             to_duplicate = Some(item.clone());
                                                         }
                                                     });
@@ -640,15 +608,14 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     widgets::hud(ui, &format!("{:02}-{:02}", start_idx + 1, start_idx + count), t.faint);
                                                     ui.add_space(4.0);
 
-                                                    let key_title = if lang == Language::Russian { "КЛАВИША ↵" } else { "KEY ↵" };
-                                                    render_chip(ui, key_title, t.accent_ink, t.bg);
+                                                    render_chip(ui, loc.macro_studio_badge_key_press, t.accent_ink, t.bg);
                                                     ui.add_space(4.0);
 
                                                     let mut key_val = match &events[*start_idx] {
                                                         MacroEvent::KeyDown { key } => key.clone(),
                                                         _ => String::new(),
                                                     };
-                                                    widgets::hud(ui, if lang == Language::Russian { "КЛАВИША:" } else { "KEY:" }, t.muted);
+                                                    widgets::hud(ui, loc.macro_studio_label_key, t.muted);
                                                     let edit_resp = ui.add(
                                                         egui::TextEdit::singleline(&mut key_val)
                                                             .desired_width(110.0)
@@ -668,19 +635,19 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     if *count == 3 {
                                                         if let MacroEvent::Delay { ms, organic, .. } = &mut events[start_idx + 1] {
                                                             ui.add_space(4.0);
-                                                            widgets::hud(ui, if lang == Language::Russian { "ПАУЗА:" } else { "DELAY:" }, t.muted);
-                                                            ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms"));
-                                                            ui.checkbox(organic, if lang == Language::Russian { "Органика" } else { "Organic" });
+                                                            widgets::hud(ui, loc.macro_studio_label_delay, t.muted);
+                                                            ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms").prefix("⏱ "));
+                                                            ui.checkbox(organic, loc.macro_studio_label_organic);
                                                         }
                                                     }
 
                                                     // Action buttons on the right
                                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                         ui.add_space(8.0);
-                                                        if ghost_icon_button(ui, widgets::Glyph::Close, if lang == Language::Russian { "Удалить нажатие" } else { "Delete press" }, true).clicked() {
+                                                        if ghost_icon_button(ui, widgets::Glyph::Close, loc.macro_studio_tip_delete_press, true).clicked() {
                                                             to_remove = Some(item.clone());
                                                         }
-                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, if lang == Language::Russian { "Дублировать нажатие" } else { "Duplicate press" }, false).clicked() {
+                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, loc.macro_studio_tip_duplicate_press, false).clicked() {
                                                             to_duplicate = Some(item.clone());
                                                         }
                                                     });
@@ -690,17 +657,16 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     widgets::hud(ui, &format!("{:02}-{:02}", start_idx + 1, start_idx + count), t.faint);
                                                     ui.add_space(4.0);
 
-                                                    let chip_title = if lang == Language::Russian { "КЛИК" } else { "CLICK" };
-                                                    render_chip(ui, chip_title, t.accent_ink, t.bg);
+                                                    render_chip(ui, loc.macro_studio_badge_click, t.accent_ink, t.bg);
                                                     ui.add_space(4.0);
 
                                                     let mut btn_val = match events[*start_idx] {
                                                         MacroEvent::MouseDown { button } => button,
                                                         _ => MouseButton::Left,
                                                     };
-                                                    widgets::hud(ui, if lang == Language::Russian { "КНОПКА:" } else { "BUTTON:" }, t.muted);
+                                                    widgets::hud(ui, loc.macro_studio_label_button, t.muted);
                                                     let prev_btn = btn_val;
-                                                    render_button_cells(ui, &mut btn_val, lang);
+                                                    render_button_cells(ui, &mut btn_val, loc);
                                                     if btn_val != prev_btn {
                                                         if let MacroEvent::MouseDown { button } = &mut events[*start_idx] {
                                                             *button = btn_val;
@@ -714,19 +680,19 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     if *count == 3 {
                                                         if let MacroEvent::Delay { ms, organic, .. } = &mut events[start_idx + 1] {
                                                             ui.add_space(4.0);
-                                                            widgets::hud(ui, if lang == Language::Russian { "ПАУЗА:" } else { "DELAY:" }, t.muted);
-                                                            ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms"));
-                                                            ui.checkbox(organic, if lang == Language::Russian { "Органика" } else { "Organic" });
+                                                            widgets::hud(ui, loc.macro_studio_label_delay, t.muted);
+                                                            ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms").prefix("⏱ "));
+                                                            ui.checkbox(organic, loc.macro_studio_label_organic);
                                                         }
                                                     }
 
                                                     // Action buttons on the right
                                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                         ui.add_space(8.0);
-                                                        if ghost_icon_button(ui, widgets::Glyph::Close, if lang == Language::Russian { "Удалить клик" } else { "Delete click" }, true).clicked() {
+                                                        if ghost_icon_button(ui, widgets::Glyph::Close, loc.macro_studio_tip_delete_click, true).clicked() {
                                                             to_remove = Some(item.clone());
                                                         }
-                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, if lang == Language::Russian { "Дублировать клик" } else { "Duplicate click" }, false).clicked() {
+                                                        if ghost_icon_button(ui, widgets::Glyph::Clone, loc.macro_studio_tip_duplicate_click, false).clicked() {
                                                             to_duplicate = Some(item.clone());
                                                         }
                                                     });
@@ -749,19 +715,25 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     ui.spacing_mut().item_spacing.y = 2.0;
                                                     for sub_i in 0..*count {
                                                         let sub_ev_idx = start_idx + sub_i;
-                                                        if let MacroEvent::MouseMove { x, y, .. } = &mut events[sub_ev_idx] {
+                                                        if let MacroEvent::MouseMove { x, y, coord_mode, .. } = &mut events[sub_ev_idx] {
                                                             ui.horizontal(|ui| {
                                                                 widgets::hud(ui, &format!("#{:02}", sub_i + 1), t.faint);
                                                                 ui.add_space(4.0);
-                                                                ui.add(egui::DragValue::new(x).prefix("X: "));
-                                                                ui.add(egui::DragValue::new(y).prefix("Y: "));
-                                                                let mut ox = Some(*x);
-                                                                let mut oy = Some(*y);
-                                                                let p_id = ui.id().with(sub_ev_idx).with("group_sub_picker");
-                                                                render_compact_coord_picker(ui, p_id, &mut ox, &mut oy, lang);
-                                                                if let (Some(nx), Some(ny)) = (ox, oy) {
-                                                                    *x = nx;
-                                                                    *y = ny;
+                                                                let is_rel = *coord_mode == MouseCoordMode::Relative;
+                                                                if is_rel {
+                                                                    ui.add(egui::DragValue::new(x).prefix("ΔX: ").speed(2.0));
+                                                                    ui.add(egui::DragValue::new(y).prefix("ΔY: ").speed(2.0));
+                                                                } else {
+                                                                    ui.add(egui::DragValue::new(x).prefix("X: "));
+                                                                    ui.add(egui::DragValue::new(y).prefix("Y: "));
+                                                                    let mut ox = Some(*x);
+                                                                    let mut oy = Some(*y);
+                                                                    let p_id = ui.id().with(sub_ev_idx).with("group_sub_picker");
+                                                                    render_compact_coord_picker(ui, p_id, &mut ox, &mut oy, loc);
+                                                                    if let (Some(nx), Some(ny)) = (ox, oy) {
+                                                                        *x = nx;
+                                                                        *y = ny;
+                                                                    }
                                                                 }
                                                             });
                                                         }
@@ -897,25 +869,33 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
 
                     // Repeat count (hidden when infinite mode is enabled)
                     if !*infinite {
-                        widgets::hud(ui, if lang == Language::Russian { "ПОВТОР МАКРОСА:" } else { "REPEAT:" }, t.muted);
+                        widgets::hud(ui, loc.macro_studio_repeat_label, t.muted);
                         ui.add(egui::DragValue::new(repeat).range(1..=10000).suffix("x"));
                         ui.add_space(20.0);
                     }
 
-                    widgets::hud(ui, if lang == Language::Russian { "СКОРОСТЬ:" } else { "SPEED:" }, t.muted);
+                    widgets::hud(ui, loc.macro_studio_speed_label, t.muted);
                     ui.add(egui::DragValue::new(speed).range(0.1..=10.0).speed(0.1).suffix("x"));
 
                     ui.add_space(20.0);
 
+                    let can_toggle_infinite = matches!(rule.trigger, Some(crate::models::Trigger::GlobalHotkey { .. }));
+                    if !can_toggle_infinite {
+                        *infinite = false;
+                    }
+
                     // Checkboxes group
-                    ui.checkbox(
+                    let inf_cb = egui::Checkbox::new(
                         infinite,
-                        if lang == Language::Russian { "Бесконечно" } else { "Infinite" },
-                    ).on_hover_text(if lang == Language::Russian {
-                        "Повторять макрос бесконечно (останавливается повторным нажатием хоткея или отпусканием при режиме удержания)"
+                        loc.macro_studio_checkbox_infinite,
+                    );
+                    let inf_tip = if !can_toggle_infinite {
+                        loc.macro_studio_infinite_disabled_tip
                     } else {
-                        "Repeat macro indefinitely (stop via hotkey toggle or release in hold mode)"
-                    });
+                        loc.macro_studio_infinite_tip
+                    };
+
+                    ui.add_enabled(can_toggle_infinite, inf_cb).on_hover_text(inf_tip);
 
                     ui.add_space(16.0);
 
@@ -932,19 +912,11 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                     let mut org_toggle = all_organic;
                     let org_resp = ui.add_enabled(
                         has_organic_targets,
-                        egui::Checkbox::new(&mut org_toggle, if lang == Language::Russian { "Вся органика" } else { "Global organic" }),
+                        egui::Checkbox::new(&mut org_toggle, loc.macro_studio_checkbox_global_organic),
                     ).on_hover_text(if has_organic_targets {
-                        if lang == Language::Russian {
-                            "Применить случайный человеческий разброс (±30%) ко всем паузам и набору текста в макросе"
-                        } else {
-                            "Apply random humanized jitter (±30%) across all delays and text typing in the macro"
-                        }
+                        loc.macro_studio_global_organic_active_tip
                     } else {
-                        if lang == Language::Russian {
-                            "В макросе пока нет пауз или текста для применения органики"
-                        } else {
-                            "No delays or text typing steps in macro to apply organic jitter"
-                        }
+                        loc.macro_studio_global_organic_disabled_tip
                     });
 
                     if org_resp.changed() {
@@ -960,18 +932,12 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                     ui.add_space(16.0);
                     ui.checkbox(
                         &mut group_full_presses,
-                        if lang == Language::Russian { "Объединять нажатия" } else { "Group presses" },
-                    ).on_hover_text(
-                        if lang == Language::Russian {
-                            "Визуально объединять зажатие, паузу и отпускание клавиш и кликов мыши в единые карточки"
-                        } else {
-                            "Visually group key and mouse down, pause, and up events into single cards"
-                        }
-                    );
+                        loc.macro_studio_checkbox_group_presses,
+                    ).on_hover_text(loc.macro_studio_group_presses_tip);
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(16.0);
-                        let done_lbl = if lang == Language::Russian { "СОХРАНИТЬ И ЗАКРЫТЬ" } else { "SAVE & CLOSE" };
+                        let done_lbl = loc.macro_studio_btn_save_close;
                         let btn_w = widgets::button_width(ui, done_lbl, 0.0);
                         if widgets::button(ui, done_lbl, Kind::Primary, btn_w).clicked() {
                             *close_req = true;
@@ -1097,7 +1063,7 @@ fn render_timeline_row_inline(
     ui: &mut Ui,
     event: &mut MacroEvent,
     idx: usize,
-    lang: Language,
+    loc: &crate::i18n::Strings,
     t: &Tokens,
 ) {
     // Seamlessly normalize legacy TAP / Click events to clean physical down events
@@ -1117,46 +1083,46 @@ fn render_timeline_row_inline(
     match event {
         // --- KEY DOWN ---
         MacroEvent::KeyDown { key } => {
-            let tip = if lang == Language::Russian { "Нажмите для переключения на Отпускание (KEY ↑)" } else { "Click to toggle to Release (KEY ↑)" };
-            let chip_txt = if lang == Language::Russian { "КЛАВ ↓" } else { "KEY ↓" };
+            let tip = loc.macro_studio_tip_toggle_to_release;
+            let chip_txt = loc.macro_studio_chip_key_down;
             if render_clickable_chip(ui, chip_txt, t.accent_ink, t.bg, tip) {
                 toggle_to = Some(MacroEvent::KeyUp { key: key.clone() });
             }
-            widgets::hud(ui, if lang == Language::Russian { "ЗАЖАТЬ:" } else { "DOWN:" }, t.muted);
+            widgets::hud(ui, loc.macro_studio_label_down, t.muted);
             ui.add(egui::TextEdit::singleline(key).desired_width(110.0).min_size(vec2(0.0, 20.0)).font(egui::FontId::new(11.0, theme::mono())));
         }
 
         // --- KEY UP ---
         MacroEvent::KeyUp { key } => {
-            let tip = if lang == Language::Russian { "Нажмите для переключения на Зажатие (KEY ↓)" } else { "Click to toggle to Press (KEY ↓)" };
-            let chip_txt = if lang == Language::Russian { "КЛАВ ↑" } else { "KEY ↑" };
+            let tip = loc.macro_studio_tip_toggle_to_press;
+            let chip_txt = loc.macro_studio_chip_key_up;
             if render_clickable_chip(ui, chip_txt, t.muted, t.bg, tip) {
                 toggle_to = Some(MacroEvent::KeyDown { key: key.clone() });
             }
-            widgets::hud(ui, if lang == Language::Russian { "ОТПУСТИТЬ:" } else { "UP:" }, t.muted);
+            widgets::hud(ui, loc.macro_studio_label_up, t.muted);
             ui.add(egui::TextEdit::singleline(key).desired_width(110.0).min_size(vec2(0.0, 20.0)).font(egui::FontId::new(11.0, theme::mono())));
         }
 
         // --- MOUSE DOWN ---
         MacroEvent::MouseDown { button } => {
-            let tip = if lang == Language::Russian { "Нажмите для переключения на Отпускание (MOUSE ↑)" } else { "Click to toggle to Release (MOUSE ↑)" };
-            let chip_txt = if lang == Language::Russian { "МЫШЬ ↓" } else { "MOUSE ↓" };
+            let tip = loc.macro_studio_tip_toggle_to_mouse_release;
+            let chip_txt = loc.macro_studio_chip_mouse_down;
             if render_clickable_chip(ui, chip_txt, t.accent_ink, t.bg, tip) {
                 toggle_to = Some(MacroEvent::MouseUp { button: *button });
             }
-            widgets::hud(ui, if lang == Language::Russian { "ЗАЖАТЬ:" } else { "DOWN:" }, t.muted);
-            render_button_cells(ui, button, lang);
+            widgets::hud(ui, loc.macro_studio_label_down, t.muted);
+            render_button_cells(ui, button, loc);
         }
 
         // --- MOUSE UP ---
         MacroEvent::MouseUp { button } => {
-            let tip = if lang == Language::Russian { "Нажмите для переключения на Зажатие (MOUSE ↓)" } else { "Click to toggle to Press (MOUSE ↓)" };
-            let chip_txt = if lang == Language::Russian { "МЫШЬ ↑" } else { "MOUSE ↑" };
+            let tip = loc.macro_studio_tip_toggle_to_mouse_press;
+            let chip_txt = loc.macro_studio_chip_mouse_up;
             if render_clickable_chip(ui, chip_txt, t.muted, t.bg, tip) {
                 toggle_to = Some(MacroEvent::MouseDown { button: *button });
             }
-            widgets::hud(ui, if lang == Language::Russian { "ОТПУСТИТЬ:" } else { "UP:" }, t.muted);
-            render_button_cells(ui, button, lang);
+            widgets::hud(ui, loc.macro_studio_label_up, t.muted);
+            render_button_cells(ui, button, loc);
         }
 
         // Fallbacks for any other click/press variants
@@ -1167,21 +1133,45 @@ fn render_timeline_row_inline(
             toggle_to = Some(MacroEvent::MouseDown { button: *button });
         }
 
-        // --- MOUSE MOVE ---
-        MacroEvent::MouseMove { x, y, smooth, duration_ms, .. } => {
-            render_chip(ui, if lang == Language::Russian { "ДВИЖЕНИЕ" } else { "MOVE" }, t.accent_ink, t.bg);
-            ui.add(egui::DragValue::new(x).prefix("X: "));
-            ui.add(egui::DragValue::new(y).prefix("Y: "));
+        // --- MOUSE MOVE & GAME CAMERA TURN ---
+        MacroEvent::MouseMove { x, y, coord_mode, smooth, duration_ms, .. } => {
+            let is_rel = *coord_mode == MouseCoordMode::Relative;
+            let chip_title = if is_rel {
+                loc.macro_studio_chip_turn
+            } else {
+                loc.macro_studio_chip_move
+            };
+            let chip_tip = if is_rel {
+                loc.macro_studio_tip_rel_turn
+            } else {
+                loc.macro_studio_tip_abs_move
+            };
 
-            let mut opt_x = Some(*x);
-            let mut opt_y = Some(*y);
-            render_compact_coord_picker(ui, picker_id, &mut opt_x, &mut opt_y, lang);
-            if let (Some(nx), Some(ny)) = (opt_x, opt_y) {
-                *x = nx;
-                *y = ny;
+            if render_clickable_chip(ui, chip_title, t.accent_ink, t.bg, chip_tip) {
+                *coord_mode = if is_rel {
+                    MouseCoordMode::Absolute
+                } else {
+                    MouseCoordMode::Relative
+                };
             }
 
-            ui.checkbox(smooth, if lang == Language::Russian { "Плавное" } else { "Smooth" });
+            if is_rel {
+                ui.add(egui::DragValue::new(x).prefix("ΔX: ").speed(2.0));
+                ui.add(egui::DragValue::new(y).prefix("ΔY: ").speed(2.0));
+            } else {
+                ui.add(egui::DragValue::new(x).prefix("X: "));
+                ui.add(egui::DragValue::new(y).prefix("Y: "));
+
+                let mut opt_x = Some(*x);
+                let mut opt_y = Some(*y);
+                render_compact_coord_picker(ui, picker_id, &mut opt_x, &mut opt_y, loc);
+                if let (Some(nx), Some(ny)) = (opt_x, opt_y) {
+                    *x = nx;
+                    *y = ny;
+                }
+            }
+
+            ui.checkbox(smooth, loc.macro_studio_checkbox_smooth);
 
             if *smooth {
                 let mut dur = duration_ms.unwrap_or(200);
@@ -1193,27 +1183,27 @@ fn render_timeline_row_inline(
 
         // --- PAUSE / DELAY (clean input without redundant preset buttons) ---
         MacroEvent::Delay { ms, organic, .. } => {
-            render_chip(ui, if lang == Language::Russian { "ПАУЗА" } else { "PAUSE" }, t.faint, t.bg);
-            widgets::hud(ui, if lang == Language::Russian { "ПАУЗА:" } else { "DELAY:" }, t.muted);
-            ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms"));
-            ui.checkbox(organic, if lang == Language::Russian { "Органика" } else { "Organic" });
+            render_chip(ui, loc.macro_studio_chip_delay, t.faint, t.bg);
+            widgets::hud(ui, loc.macro_studio_label_delay, t.muted);
+            ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms").prefix("⏱ "));
+            ui.checkbox(organic, loc.macro_studio_label_organic);
         }
 
         // --- TEXT TYPING (with built-in char delay and organic jitter) ---
         MacroEvent::Text { text, delay_ms, organic } => {
-            render_chip(ui, if lang == Language::Russian { "ТЕКСТ" } else { "TEXT" }, t.accent_ink, t.bg);
-            widgets::hud(ui, if lang == Language::Russian { "ТЕКСТ:" } else { "TEXT:" }, t.muted);
+            render_chip(ui, loc.macro_studio_chip_text, t.accent_ink, t.bg);
+            widgets::hud(ui, loc.macro_studio_label_text, t.muted);
             ui.add(egui::TextEdit::singleline(text).desired_width(170.0).min_size(vec2(0.0, 20.0)).font(egui::FontId::new(11.0, theme::mono())));
             ui.add_space(4.0);
-            widgets::hud(ui, if lang == Language::Russian { "ПАУЗА:" } else { "DELAY:" }, t.muted);
-            ui.add(egui::DragValue::new(delay_ms).range(0..=5000).suffix(" ms"));
-            ui.checkbox(organic, if lang == Language::Russian { "Органика" } else { "Organic" });
+            widgets::hud(ui, loc.macro_studio_label_delay, t.muted);
+            ui.add(egui::DragValue::new(delay_ms).range(0..=5000).suffix(" ms").prefix("⏱ "));
+            ui.checkbox(organic, loc.macro_studio_label_organic);
         }
 
         // --- SCROLL WHEEL ---
         MacroEvent::MouseWheel { delta } => {
-            render_chip(ui, if lang == Language::Russian { "КОЛЕСО" } else { "SCROLL" }, t.muted, t.bg);
-            widgets::hud(ui, if lang == Language::Russian { "КОЛЕСО:" } else { "WHEEL:" }, t.muted);
+            render_chip(ui, loc.macro_studio_chip_wheel_badge, t.muted, t.bg);
+            widgets::hud(ui, loc.macro_studio_label_wheel, t.muted);
             ui.add(egui::DragValue::new(delta).range(-5000..=5000));
         }
     }
@@ -1309,24 +1299,14 @@ fn render_clickable_chip(ui: &mut Ui, label: &str, fg: Color32, bg: Color32, too
     resp.clicked()
 }
 
-fn render_button_cells(ui: &mut Ui, button: &mut MouseButton, lang: Language) {
-    let btn_options = if lang == Language::Russian {
-        [
-            (MouseButton::Left, Cell::new("ЛКМ", "Левая кнопка мыши")),
-            (MouseButton::Right, Cell::new("ПКМ", "Правая кнопка мыши")),
-            (MouseButton::Middle, Cell::new("СКМ", "Средняя кнопка мыши")),
-            (MouseButton::XButton1, Cell::new("M4", "Боковая кнопка 1")),
-            (MouseButton::XButton2, Cell::new("M5", "Боковая кнопка 2")),
-        ]
-    } else {
-        [
-            (MouseButton::Left, Cell::new("LMB", "Left mouse button")),
-            (MouseButton::Right, Cell::new("RMB", "Right mouse button")),
-            (MouseButton::Middle, Cell::new("MMB", "Middle mouse button")),
-            (MouseButton::XButton1, Cell::new("M4", "Mouse side button 1")),
-            (MouseButton::XButton2, Cell::new("M5", "Mouse side button 2")),
-        ]
-    };
+fn render_button_cells(ui: &mut Ui, button: &mut MouseButton, loc: &crate::i18n::Strings) {
+    let btn_options = [
+        (MouseButton::Left, Cell::new(loc.macro_studio_btn_lmb, loc.macro_studio_btn_lmb_tip)),
+        (MouseButton::Right, Cell::new(loc.macro_studio_btn_rmb, loc.macro_studio_btn_rmb_tip)),
+        (MouseButton::Middle, Cell::new(loc.macro_studio_btn_mmb, loc.macro_studio_btn_mmb_tip)),
+        (MouseButton::XButton1, Cell::new(loc.macro_studio_btn_m4, loc.macro_studio_btn_m4_tip)),
+        (MouseButton::XButton2, Cell::new(loc.macro_studio_btn_m5, loc.macro_studio_btn_m5_tip)),
+    ];
     render_compact_cells(ui, button, &btn_options);
 }
 
@@ -1335,7 +1315,7 @@ fn render_compact_coord_picker(
     picker_id: Id,
     x: &mut Option<i32>,
     y: &mut Option<i32>,
-    lang: Language,
+    loc: &crate::i18n::Strings,
 ) {
     #[cfg(windows)]
     {
@@ -1362,17 +1342,9 @@ fn render_compact_coord_picker(
                     let _ = MessageBeep(MESSAGEBOX_STYLE(0));
                 }
             } else {
-                let label = if lang == Language::Russian {
-                    format!("Пробел: ({}, {})", pt.x, pt.y)
-                } else {
-                    format!("Space: ({}, {})", pt.x, pt.y)
-                };
+                let label = loc.macro_studio_space_capture_prefix.replacen("{}", &pt.x.to_string(), 1).replacen("{}", &pt.y.to_string(), 1);
                 if widgets::compact_button(ui, &label, Kind::Primary, 18.0)
-                    .on_hover_text(if lang == Language::Russian {
-                        "Нажмите Пробел/Enter для фиксации или Esc для отмены"
-                    } else {
-                        "Press Space/Enter to capture or Esc to cancel"
-                    })
+                    .on_hover_text(loc.macro_studio_space_capture_tip)
                     .clicked()
                 {
                     *x = Some(pt.x);
@@ -1381,13 +1353,8 @@ fn render_compact_coord_picker(
                 }
             }
         } else {
-            let label = if lang == Language::Russian { "Захват" } else { "Pick" };
-            if widgets::compact_button(ui, label, Kind::Secondary, 18.0)
-                .on_hover_text(if lang == Language::Russian {
-                    "Захват позиции: наведите мышь на экран и нажмите Пробел или Enter (Esc — отмена)"
-                } else {
-                    "Pick position: move mouse to target and press Space or Enter (Esc to cancel)"
-                })
+            if widgets::compact_button(ui, loc.macro_studio_pick_btn, Kind::Secondary, 18.0)
+                .on_hover_text(loc.macro_studio_pick_btn_tip)
                 .clicked()
             {
                 ui.data_mut(|d| d.insert_temp(picker_id, true));
@@ -1396,7 +1363,7 @@ fn render_compact_coord_picker(
     }
     #[cfg(not(windows))]
     {
-        let _ = (ui, picker_id, x, y, lang);
+        let _ = (ui, picker_id, x, y, loc);
     }
 }
 

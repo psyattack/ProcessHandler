@@ -69,6 +69,7 @@ pub fn render_guide_modal(ctx: &egui::Context, state: &mut GuiState) {
     let is_open = state.show_guide_modal;
     let t = Tokens::get(ctx);
     let lang = state.language;
+    let loc = state.loc();
 
     let modal_res = Modal::new("guide-modal", is_open)
         .width_fraction(0.86)
@@ -89,11 +90,11 @@ pub fn render_guide_modal(ctx: &egui::Context, state: &mut GuiState) {
                             .color(t.accent_ink),
                     );
                     ui.add_space(8.0);
-                    widgets::eyebrow(ui, "GUIDE", if lang == Language::Russian { "СПРАВОЧНИК РЕДАКТОРА" } else { "EDITOR REFERENCE" });
+                    widgets::eyebrow(ui, "GUIDE", loc.guide_eyebrow_sub);
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(16.0);
-                        if widgets::glyph_button(ui, Glyph::Close, "Close (Esc)").clicked() {
+                        if widgets::glyph_button(ui, Glyph::Close, loc.macro_studio_close_tip).clicked() {
                             *close_req = true;
                         }
                     });
@@ -122,7 +123,7 @@ pub fn render_guide_modal(ctx: &egui::Context, state: &mut GuiState) {
                             ui.set_width(ui.available_width());
                             ui.spacing_mut().item_spacing.y = 3.0;
 
-                            widgets::hud(ui, if lang == Language::Russian { "РАЗДЕЛЫ РУКОВОДСТВА" } else { "GUIDE CHAPTERS" }, t.muted);
+                            widgets::hud(ui, loc.guide_chapters_hud, t.muted);
                             ui.add_space(4.0);
 
                             let topics = GuideTopic::all();
@@ -448,6 +449,9 @@ fn render_shortcuts_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Прокрутка Колеса", "Возможность записи и ручной вставки шагов прокрутки колесика мыши (+ Колесо)", t);
         doc_table_row(ui, "Дублирование и Удаление", "Быстрое клонирование шагов и удаление ненужных событий аккуратными значками без лишних рамок", t);
         doc_table_row(ui, "Повтор и Скорость", "Множитель скорости воспроизведения (0.1x – 10x) и цикл повторов макроса", t);
+        doc_table_row(ui, "Повороты в 3D-Играх", "Запись и воспроизведение поворотов камеры в играх через Raw Input; переключение [КУРСОР] ↔ [ПОВОРОТ] кликом по бейджику", t);
+        doc_table_row(ui, "Защита от Залипания", "При отмене макроса или отпускании хоткея движок мгновенно сбрасывает все физически зажатые клавиши и кнопки мыши", t);
+        doc_table_row(ui, "DirectInput и ScanCodes", "Аппаратная симуляция скан-кодов с выдержкой нажатия (35+ мс), совместимая с играми и полноэкранными приложениями", t);
         doc_table_row(ui, "Безопасный Тест (F10)", "Запуск и остановка тестового прогона макроса на изолированном фоновом потоке без вылетов и зависаний", t);
     } else {
         doc_header(ui, "Keyboard Shortcuts & Recording", t);
@@ -482,6 +486,9 @@ fn render_shortcuts_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Scroll Wheel", "Full support for capturing and manually adding mouse wheel scrolling steps (+ Wheel)", t);
         doc_table_row(ui, "Clone & Delete", "Clean ghost actions for fast duplication and deletion without clunky button outlines", t);
         doc_table_row(ui, "Repeat & Speed", "Playback speed multiplier (0.1x – 10x) and loop iteration repeat counts", t);
+        doc_table_row(ui, "In-Game 3D Camera Turns", "Live capture and playback of camera rotation via Raw Input relative deltas; toggle [MOVE] ↔ [TURN] on the badge", t);
+        doc_table_row(ui, "Anti-Stuck Key Safety", "Cancelling a macro or releasing a Hold hotkey immediately releases all simulated down keys and mouse buttons", t);
+        doc_table_row(ui, "DirectInput ScanCodes", "Hardware scan-code simulation with frame-safe press durations (35+ ms) for compatibility with games and full-screen engines", t);
         doc_table_row(ui, "Safe Test Run (F10)", "Toggle test execution on an isolated background thread without freezing or crashes", t);
     }
 }
@@ -530,6 +537,7 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             "Глобальные Хоткеи и Режим Удержания (Hold mode)",
             "• Поддержка клавиш и мыши: в качестве хоткея можно задавать любые клавиатурные сочетания, а также кнопки мыши: M4, M5, ПКМ, СКМ, ЛКМ.\n\
              • Режим Hold mode: правило непрерывно выполняется пока физически зажата клавиша или кнопка мыши, и мгновенно прерывается при ее отпускании.\n\
+             • Повтор при удержании (repeat_while_held): циклический повтор пайплайна пока удерживается хоткей, со строгой синхронизацией квоты (max_executions). При отпускании все зажатые макросом кнопки сбрасываются мгновенно.\n\
              • Обычный режим: повторное нажатие хоткея переключает состояние и останавливает текущее выполнение правила или бесконечного макроса.",
             t,
             false,
@@ -574,6 +582,7 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             "Global Hotkeys & Hold Mode",
             "• Keyboard & Mouse Buttons: hotkey combinations support keyboard keys as well as mouse buttons: M4, M5, RMB, MMB, LMB.\n\
              • Hold Mode: execution continues while the hotkey or mouse button is physically held down, and automatically terminates on release.\n\
+             • Loop While Held: when Hold Mode is active, repeat pipeline execution continuously in a loop while held (respects execution quota).\n\
              • Toggle Off: in standard trigger mode, pressing the hotkey again toggles execution off, cleanly stopping running rules or infinite macros.",
             t,
             false,
@@ -607,6 +616,7 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             "Единая Студия Макросов и Управление Мышью",
             "• Объединенный конвейер: любые комбинации физических нажатий клавиш, кнопок мыши, прокрутки колеса, набора текста, пауз и перемещений курсора.\n\
              • Интерактивная Студия: модальное окно с визуальным таймлайном, Drag & Drop сортировкой со скроллом колесиком и безопасным тестом (F10).\n\
+             • Повороты Камеры в Играх (Relative Mode): воспроизведение импульсов смещения ΔX, ΔY с линейной угловой скоростью и частотой 200–300 Гц для плавного движения камеры в 3D-играх.\n\
              • Запись по F9: глобальный аппаратный перехват в реальном времени с настраиваемыми фильтрами и звуковым подтверждением.\n\
              • Бесконечный Режим: циклическое воспроизведение макроса с возможностью прерывания по хоткею или при отпускании в Hold mode.\n\
              • Группировка Движений: последовательные перемещения курсора без задержек автоматически объединяются в раскрываемый блок «A → B» без потери координат.\n\
@@ -637,6 +647,7 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             "Unified Macro Studio & Smart Mouse Control",
             "• Unified Workflow: seamlessly combine physical key presses, mouse buttons, wheel scroll, text typing, delays, and cursor motion.\n\
              • Interactive Studio: full-featured modal canvas with visual event rows, smooth Drag & Drop reordering with wheel scroll, and test run (F10).\n\
+             • In-Game 3D Camera Turns: relative displacement pulses ΔX, ΔY paced at 200–300 Hz with linear angular velocity for smooth camera rotations in 3D games.\n\
              • F9 Global Recording: real-time low-level hardware capture with customizable action filters and audio chime confirmation.\n\
              • Infinite Mode: continuous macro cycling with on-demand cancellation via hotkey toggle or release in Hold mode.\n\
              • Stacked Move Sequences: sequential mouse movements without delays automatically group into an expandable «A → B» block without losing precision.\n\

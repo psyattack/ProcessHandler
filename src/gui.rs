@@ -172,6 +172,20 @@ impl App for ProcessHandlerApp {
         if self.state.is_any_rule_executing() {
             ctx.request_repaint();
         }
+
+        // Handle GUI window close while update is downloading:
+        // Cancel process termination, hide window, and allow download to finish in background.
+        if ctx.input(|i| i.viewport().close_requested()) && self.state.is_downloading_update {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.state.gui_closed_during_update = true;
+            crate::updater::set_gui_closed_during_update(true);
+        }
+
+        if self.state.is_downloading_update {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+
         let tokens = Tokens::get(&ctx);
 
         // 1. Top Header Bar (Title Bar & Navigation)

@@ -49,6 +49,28 @@ impl ProcessIconCache {
         }
         self.cache.get(&key).and_then(|opt| opt.as_ref())
     }
+
+    pub fn get_app_icon(&mut self, ctx: &Context) -> Option<&TextureHandle> {
+        let key = "__app_logo_icon__".to_string();
+        if !self.cache.contains_key(&key) {
+            let loaded = load_embedded_app_icon(ctx);
+            self.cache.insert(key.clone(), loaded);
+        }
+        self.cache.get(&key).and_then(|opt| opt.as_ref())
+    }
+}
+
+fn load_embedded_app_icon(ctx: &Context) -> Option<TextureHandle> {
+    const APP_PNG: &[u8] = include_bytes!("../../../assets/app.png");
+    if let Ok(img) = image::load_from_memory(APP_PNG) {
+        let rgba = img.to_rgba8();
+        let size = [rgba.width() as usize, rgba.height() as usize];
+        let pixels = rgba.into_raw();
+        let color_image = ColorImage::from_rgba_unmultiplied(size, &pixels);
+        Some(ctx.load_texture("app_logo_icon", color_image, TextureOptions::LINEAR))
+    } else {
+        None
+    }
 }
 
 fn load_process_texture(ctx: &Context, pid: u32, name: &str) -> Option<TextureHandle> {

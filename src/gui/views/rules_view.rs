@@ -516,8 +516,12 @@ fn render_pipeline_summary(
                 if let Some(m) = ram_mb { parts.push(format!("RAM > {}MB", m)); }
                 format!("{}THRESHOLD {} ({})", prefix, process_name, parts.join(", "))
             }
-            Some(Trigger::GlobalHotkey { key_combination, hold_mode }) => {
-                let hold_str = if *hold_mode { " [HOLD]" } else { "" };
+            Some(Trigger::GlobalHotkey { key_combination, hold_mode, repeat_while_held }) => {
+                let hold_str = if *hold_mode {
+                    if *repeat_while_held { " [HOLD LOOP]" } else { " [HOLD]" }
+                } else {
+                    ""
+                };
                 format!("{}HOTKEY {}{}", prefix, key_combination, hold_str)
             }
             Some(Trigger::FileWatcher { folder_path, .. }) => {

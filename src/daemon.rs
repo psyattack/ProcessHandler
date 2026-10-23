@@ -54,13 +54,23 @@ pub fn run_daemon() {
 
     // Spawn Global Hotkey Event Loop (supports Normal toggle, Hold mode, and Infinite macro cancellation)
     let engine_hotkey = Arc::clone(&engine);
+    let hold_tasks: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>> =
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
+    let hold_tasks_loop = Arc::clone(&hold_tasks);
     rt.spawn(async move {
         while let Some(ev) = hotkey_rx.recv().await {
             let mut eng = engine_hotkey.lock().await;
             match ev {
                 hotkeys::HotkeyEvent::Trigger(rule_id) => {
+                    if let Some(h) = hold_tasks_loop.lock().await.remove(&rule_id) {
+                        h.abort();
+                    }
+
                     if eng.is_rule_executing(&rule_id) {
                         eng.stop_rule_execution(&rule_id);
+                        crate::daemon::actions::release_all_simulated_inputs();
+                        eng.rule_last_triggered.insert(rule_id.clone(), std::time::Instant::now());
                     } else if let Some(rule) = eng.config.rules.iter().find(|r| r.id == rule_id).cloned() {
                         if rule.is_enabled {
                             let _ = eng.try_execute_rule(&rule, "Global Hotkey", 0).await;
@@ -68,16 +78,74 @@ pub fn run_daemon() {
                     }
                 }
                 hotkeys::HotkeyEvent::HoldStart(rule_id) => {
+                    if let Some(h) = hold_tasks_loop.lock().await.remove(&rule_id) {
+                        h.abort();
+                    }
+
                     if !eng.is_rule_executing(&rule_id) {
                         if let Some(rule) = eng.config.rules.iter().find(|r| r.id == rule_id).cloned() {
                             if rule.is_enabled {
-                                let _ = eng.try_execute_rule(&rule, "Global Hotkey (Hold)", 0).await;
+                                let engine_for_hold = Arc::clone(&engine_hotkey);
+                                let rule_id_clone = rule_id.clone();
+                                let hold_tasks_inner = Arc::clone(&hold_tasks_loop);
+
+                                let task = tokio::spawn(async move {
+                                    loop {
+                                        if !crate::daemon::hotkeys::is_hotkey_held(&rule_id_clone) {
+                                            break;
+                                        }
+
+                                        let handle_opt = {
+                                            let mut eng = engine_for_hold.lock().await;
+                                            if let Some(r) = eng.config.rules.iter().find(|r| r.id == rule_id_clone).cloned() {
+                                                if !r.is_enabled {
+                                                    break;
+                                                }
+                                                eng.try_execute_rule(&r, "Global Hotkey (Hold)", 0).await
+                                            } else {
+                                                break;
+                                            }
+                                        };
+
+                                        if let Some(handle) = handle_opt {
+                                            match handle.await {
+                                                Ok(()) => {},
+                                                Err(_) => {
+                                                    // Rule execution task was cancelled / aborted; stop loop immediately!
+                                                    break;
+                                                }
+                                            }
+                                        } else {
+                                            break;
+                                        }
+
+                                        if !crate::daemon::hotkeys::is_hotkey_repeat_held(&rule_id_clone) {
+                                            break;
+                                        }
+
+                                        if !crate::daemon::hotkeys::is_hotkey_held(&rule_id_clone) {
+                                            break;
+                                        }
+
+                                        // Yield brief pause between loop cycles so input queue & events can breathe
+                                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                                    }
+
+                                    let mut tasks = hold_tasks_inner.lock().await;
+                                    tasks.remove(&rule_id_clone);
+                                });
+
+                                hold_tasks_loop.lock().await.insert(rule_id.clone(), task.abort_handle());
                             }
                         }
                     }
                 }
                 hotkeys::HotkeyEvent::HoldStop(rule_id) => {
+                    if let Some(h) = hold_tasks_loop.lock().await.remove(&rule_id) {
+                        h.abort();
+                    }
                     eng.stop_rule_execution(&rule_id);
+                    crate::daemon::actions::release_all_simulated_inputs();
                 }
             }
         }

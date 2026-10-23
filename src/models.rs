@@ -34,6 +34,8 @@ pub enum Trigger {
         key_combination: String,
         #[serde(default)]
         hold_mode: bool,
+        #[serde(default)]
+        repeat_while_held: bool,
     },
     #[serde(rename = "system")]
     SystemEvent {
@@ -81,7 +83,7 @@ fn default_threshold_duration() -> u64 {
 }
 
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessMatchMode {
     #[default]
@@ -109,7 +111,7 @@ pub enum SystemEventType {
     NetworkDisconnected,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ScheduleType {
     #[default]
@@ -299,7 +301,7 @@ pub enum Action {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioTarget {
     #[default]
@@ -307,7 +309,7 @@ pub enum AudioTarget {
     Microphone,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AudioVolumeAction {
     #[default]
@@ -318,7 +320,7 @@ pub enum AudioVolumeAction {
     PlayBeep,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ScriptType {
     #[default]
@@ -405,7 +407,7 @@ pub fn default_text_delay() -> u32 {
     20
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MouseActionType {
     #[default]
@@ -417,7 +419,7 @@ pub enum MouseActionType {
     Scroll,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MouseButton {
     #[default]
@@ -428,7 +430,7 @@ pub enum MouseButton {
     XButton2,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MouseCoordMode {
     #[default]
@@ -445,7 +447,7 @@ fn default_http_method() -> String {
     "POST".to_string()
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowActionType {
     #[default]
@@ -462,7 +464,7 @@ pub enum WindowActionType {
     SnapToPosition,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessPriorityLevel {
     #[default]
@@ -474,7 +476,7 @@ pub enum ProcessPriorityLevel {
     Idle,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PowerPlanType {
     #[default]
@@ -483,7 +485,7 @@ pub enum PowerPlanType {
     PowerSaver,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MicrophoneActionType {
     #[default]
@@ -493,7 +495,7 @@ pub enum MicrophoneActionType {
     SetVolume,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProcessAudioActionType {
     #[default]
@@ -1103,5 +1105,30 @@ mod tests {
                 run_in_window: false,
             }
         );
+    }
+
+    #[test]
+    fn test_global_hotkey_hold_mode_and_repeat_serde() {
+        // Test backwards compatibility: json without repeat_while_held defaults to false
+        let json = r#"{"$trigger_type":"hotkey","key_combination":"Ctrl+Shift+H","hold_mode":true}"#;
+        let trigger: Trigger = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            trigger,
+            Trigger::GlobalHotkey {
+                key_combination: "Ctrl+Shift+H".to_string(),
+                hold_mode: true,
+                repeat_while_held: false,
+            }
+        );
+
+        // Test roundtrip with repeat_while_held: true
+        let trigger_loop = Trigger::GlobalHotkey {
+            key_combination: "M4".to_string(),
+            hold_mode: true,
+            repeat_while_held: true,
+        };
+        let serialized = serde_json::to_string(&trigger_loop).unwrap();
+        let deserialized: Trigger = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(trigger_loop, deserialized);
     }
 }

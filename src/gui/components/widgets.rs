@@ -169,6 +169,65 @@ pub fn button(ui: &mut Ui, text: &str, kind: Kind, width: f32) -> Response {
     }
 }
 
+/// Precision toggle switch with smooth animated track and thumb, and hover feedback.
+pub fn toggle_switch(ui: &mut Ui, on: &mut bool) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let width = 38.0;
+    let height = 20.0;
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let enabled = ui.is_enabled();
+    let hovered = resp.hovered() && enabled;
+
+    // Smooth ease-out animation for on/off transition
+    let how_on = ui.ctx().animate_bool_responsive(resp.id, *on);
+
+    let bg_color = {
+        let off_bg = if hovered { t.line_strong } else { t.sunken };
+        let on_bg = if hovered { t.accent.gamma_multiply(0.85) } else { t.accent };
+        let r = egui::lerp((off_bg.r() as f32)..=(on_bg.r() as f32), how_on) as u8;
+        let g = egui::lerp((off_bg.g() as f32)..=(on_bg.g() as f32), how_on) as u8;
+        let b = egui::lerp((off_bg.b() as f32)..=(on_bg.b() as f32), how_on) as u8;
+        let a = egui::lerp((off_bg.a() as f32)..=(on_bg.a() as f32), how_on) as u8;
+        Color32::from_rgba_unmultiplied(r, g, b, a)
+    };
+
+    let border_stroke = if how_on >= 0.98 {
+        Stroke::NONE
+    } else {
+        let border_color = if hovered { t.line_strong } else { t.line };
+        Stroke::new(1.0, border_color.gamma_multiply(1.0 - how_on))
+    };
+
+    let corner_radius = CornerRadius::same(height as u8 / 2);
+    ui.painter().rect(rect, corner_radius, bg_color, border_stroke, egui::StrokeKind::Inside);
+
+    let thumb_radius = (height - 6.0) / 2.0;
+    let min_x = rect.left() + 3.0 + thumb_radius;
+    let max_x = rect.right() - 3.0 - thumb_radius;
+    let x_pos = egui::lerp(min_x..=max_x, how_on);
+    let center = pos2(x_pos, rect.center().y);
+
+    let thumb_color = if how_on > 0.5 {
+        Color32::WHITE
+    } else if hovered {
+        t.ink
+    } else {
+        t.muted
+    };
+
+    ui.painter().circle_filled(center, thumb_radius, thumb_color);
+
+    if enabled {
+        resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, *on, enabled, ""));
+    resp
+}
+
 /// A compact button with specified height (e.g. for status/footer bars).
 pub fn compact_button(ui: &mut Ui, text: &str, kind: Kind, height: f32) -> Response {
     let t = Tokens::get(ui.ctx());

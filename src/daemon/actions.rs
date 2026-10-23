@@ -37,7 +37,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
     MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP,
-    MOUSEEVENTF_WHEEL,
+    MOUSEEVENTF_WHEEL, MOUSEEVENTF_MOVE,
     VIRTUAL_KEY, VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RETURN, VK_ESCAPE, VK_TAB, VK_SPACE,
     VK_F1, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_F10, VK_F11, VK_F12,
     VK_BACK, VK_DELETE, VK_INSERT, VK_HOME, VK_END, VK_PRIOR, VK_NEXT, VK_UP, VK_DOWN, VK_LEFT,
@@ -1143,6 +1143,104 @@ fn smooth_mouse_move(
 }
 
 #[cfg(windows)]
+fn send_mouse_relative_step(dx: i32, dy: i32) {
+    if dx == 0 && dy == 0 {
+        return;
+    }
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+            mi: MOUSEINPUT {
+                dx,
+                dy,
+                mouseData: 0,
+                dwFlags: MOUSEEVENTF_MOVE,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    unsafe {
+        let _ = SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+#[cfg(windows)]
+fn smooth_relative_mouse_move(
+    total_dx: i32,
+    total_dy: i32,
+    duration_ms: u32,
+    organic: bool,
+) {
+    if total_dx == 0 && total_dy == 0 {
+        return;
+    }
+
+    let dur_ms = duration_ms.max(10);
+    // For very brief or tiny movements, send immediately without slicing
+    if dur_ms < 18 || (total_dx.abs() < 3 && total_dy.abs() < 3) {
+        send_mouse_relative_step(total_dx, total_dy);
+        return;
+    }
+
+    let base_dur = dur_ms as f64;
+    let total_duration_ms = if organic {
+        let factor = 1.0 + (random_range(0, 20) as f64 - 10.0) / 100.0;
+        base_dur * factor
+    } else {
+        base_dur
+    };
+    let total_secs = total_duration_ms / 1000.0;
+
+    let start = std::time::Instant::now();
+    let mut sent_x = 0i32;
+    let mut sent_y = 0i32;
+
+    loop {
+        let elapsed = start.elapsed().as_secs_f64();
+        let t = (elapsed / total_secs).min(1.0);
+
+        let progress = if organic {
+            // Smoothstep curve for human-like organic motion
+            t * t * (3.0 - 2.0 * t)
+        } else {
+            // Linear velocity curve - exactly matches in-game mouse sensor dynamics
+            t
+        };
+
+        let target_x = (total_dx as f64 * progress).round() as i32;
+        let target_y = (total_dy as f64 * progress).round() as i32;
+
+        let step_dx = target_x - sent_x;
+        let step_dy = target_y - sent_y;
+
+        if step_dx != 0 || step_dy != 0 {
+            send_mouse_relative_step(step_dx, step_dy);
+            sent_x += step_dx;
+            sent_y += step_dy;
+        }
+
+        if t >= 1.0 {
+            break;
+        }
+
+        let remaining_ms = (total_secs - elapsed) * 1000.0;
+        if remaining_ms > 5.0 {
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        } else {
+            std::thread::yield_now();
+        }
+    }
+
+    // Deliver any remaining integer ticks to guarantee 0 cumulative drift
+    let rem_x = total_dx - sent_x;
+    let rem_y = total_dy - sent_y;
+    if rem_x != 0 || rem_y != 0 {
+        send_mouse_relative_step(rem_x, rem_y);
+    }
+}
+
+#[cfg(windows)]
 fn mouse_control(
     action_type: crate::models::MouseActionType,
     button: crate::models::MouseButton,
@@ -1173,14 +1271,12 @@ fn mouse_control(
                 }
             }
             crate::models::MouseCoordMode::Relative => {
-                let mut pt = POINT::default();
-                let _ = GetCursorPos(&mut pt);
-                let target_x = pt.x + x.unwrap_or(0);
-                let target_y = pt.y + y.unwrap_or(0);
+                let dx = x.unwrap_or(0);
+                let dy = y.unwrap_or(0);
                 if smooth_move {
-                    smooth_mouse_move(target_x, target_y, move_duration_ms.unwrap_or(250), organic_move);
+                    smooth_relative_mouse_move(dx, dy, move_duration_ms.unwrap_or(200), organic_move);
                 } else {
-                    let _ = SetCursorPos(target_x, target_y);
+                    send_mouse_relative_step(dx, dy);
                     let sleep_d = move_duration_ms.unwrap_or(16);
                     if sleep_d > 0 {
                         std::thread::sleep(std::time::Duration::from_millis(sleep_d as u64));
@@ -1207,10 +1303,16 @@ fn mouse_control(
             crate::models::MouseActionType::Click => {
                 let count = clicks.unwrap_or(1).clamp(1, 100);
                 for i in 0..count {
+                    if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                        lock.insert(button);
+                    }
                     send_mouse_input(down_flag, mouse_data);
                     let hold_ms = calculate_sleep_ms(base_delay.clamp(10, 500), organic_click_delay, 30, None);
                     std::thread::sleep(std::time::Duration::from_millis(hold_ms));
                     send_mouse_input(up_flag, mouse_data);
+                    if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                        lock.remove(&button);
+                    }
 
                     if i + 1 < count {
                         let interval_ms = calculate_sleep_ms((base_delay * 2).clamp(20, 2000), organic_click_delay, 35, None);
@@ -1219,23 +1321,41 @@ fn mouse_control(
                 }
             }
             crate::models::MouseActionType::DoubleClick => {
+                if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                    lock.insert(button);
+                }
                 send_mouse_input(down_flag, mouse_data);
                 let hold1 = calculate_sleep_ms(base_delay.clamp(10, 300), organic_click_delay, 30, None);
                 std::thread::sleep(std::time::Duration::from_millis(hold1));
                 send_mouse_input(up_flag, mouse_data);
+                if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                    lock.remove(&button);
+                }
 
                 let pause = calculate_sleep_ms((base_delay * 2).clamp(30, 400), organic_click_delay, 30, None);
                 std::thread::sleep(std::time::Duration::from_millis(pause));
 
+                if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                    lock.insert(button);
+                }
                 send_mouse_input(down_flag, mouse_data);
                 let hold2 = calculate_sleep_ms(base_delay.clamp(10, 300), organic_click_delay, 30, None);
                 std::thread::sleep(std::time::Duration::from_millis(hold2));
                 send_mouse_input(up_flag, mouse_data);
+                if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                    lock.remove(&button);
+                }
             }
             crate::models::MouseActionType::Down => {
+                if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                    lock.insert(button);
+                }
                 send_mouse_input(down_flag, mouse_data);
             }
             crate::models::MouseActionType::Up => {
+                if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                    lock.remove(&button);
+                }
                 send_mouse_input(up_flag, mouse_data);
             }
             crate::models::MouseActionType::Scroll => {
@@ -1275,7 +1395,7 @@ fn simulate_text_typing(text: &str, delay_ms: u32, organic: bool, jitter_percent
         }
         if ch == '\n' {
             send_key_event(VK_RETURN, false);
-            std::thread::sleep(std::time::Duration::from_millis(15));
+            std::thread::sleep(std::time::Duration::from_millis(35));
             send_key_event(VK_RETURN, true);
         } else {
             send_char_event(ch);
@@ -1384,22 +1504,34 @@ fn parse_virtual_key(s: &str) -> Option<VIRTUAL_KEY> {
 }
 
 #[cfg(windows)]
-fn send_key_event(vk: VIRTUAL_KEY, is_up: bool) {
+static ACTIVE_HELD_KEYS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<u16>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+#[cfg(windows)]
+static ACTIVE_HELD_MOUSE_BUTTONS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<crate::models::MouseButton>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+#[cfg(windows)]
+fn send_key_event_raw(vk: VIRTUAL_KEY, is_up: bool) {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        MapVirtualKeyW, MAPVK_VK_TO_VSC, KEYEVENTF_EXTENDEDKEY,
+        MapVirtualKeyW, MAPVK_VK_TO_VSC, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE,
+        VK_DIVIDE, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RWIN,
     };
+    let scan = unsafe { MapVirtualKeyW(vk.0 as u32, MAPVK_VK_TO_VSC) } as u16;
     let mut flags = windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0);
     if is_up {
         flags |= KEYEVENTF_KEYUP;
     }
+    if scan != 0 {
+        flags |= KEYEVENTF_SCANCODE;
+    }
     match vk {
         VK_UP | VK_DOWN | VK_LEFT | VK_RIGHT | VK_INSERT | VK_DELETE | VK_HOME | VK_END
-        | VK_PRIOR | VK_NEXT | VK_SNAPSHOT => {
+        | VK_PRIOR | VK_NEXT | VK_SNAPSHOT | VK_DIVIDE | VK_RCONTROL | VK_RMENU | VK_LWIN | VK_RWIN => {
             flags |= KEYEVENTF_EXTENDEDKEY;
         }
         _ => {}
     }
-    let scan = unsafe { MapVirtualKeyW(vk.0 as u32, MAPVK_VK_TO_VSC) } as u16;
     let input = INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
@@ -1416,6 +1548,63 @@ fn send_key_event(vk: VIRTUAL_KEY, is_up: bool) {
         let _ = SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
     }
 }
+
+#[cfg(windows)]
+fn send_key_event(vk: VIRTUAL_KEY, is_up: bool) {
+    if let Ok(mut lock) = ACTIVE_HELD_KEYS.lock() {
+        if is_up {
+            lock.remove(&vk.0);
+        } else {
+            lock.insert(vk.0);
+        }
+    }
+    send_key_event_raw(vk, is_up);
+}
+
+/// Immediately and physically releases all keyboard keys and mouse buttons that were simulated
+/// in the down state by macros, ensuring game characters and inputs stop immediately upon cancel.
+pub fn release_all_simulated_inputs() {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            VIRTUAL_KEY, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_XUP,
+        };
+
+        let keys_to_release: Vec<u16> = {
+            if let Ok(mut lock) = ACTIVE_HELD_KEYS.lock() {
+                lock.drain().collect()
+            } else {
+                Vec::new()
+            }
+        };
+
+        for vk_code in keys_to_release {
+            send_key_event_raw(VIRTUAL_KEY(vk_code), true);
+        }
+
+        let buttons_to_release: Vec<crate::models::MouseButton> = {
+            if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                lock.drain().collect()
+            } else {
+                Vec::new()
+            }
+        };
+
+        for btn in buttons_to_release {
+            let (up_flag, mouse_data) = match btn {
+                crate::models::MouseButton::Left => (MOUSEEVENTF_LEFTUP, 0),
+                crate::models::MouseButton::Right => (MOUSEEVENTF_RIGHTUP, 0),
+                crate::models::MouseButton::Middle => (MOUSEEVENTF_MIDDLEUP, 0),
+                crate::models::MouseButton::XButton1 => (MOUSEEVENTF_XUP, 1),
+                crate::models::MouseButton::XButton2 => (MOUSEEVENTF_XUP, 2),
+            };
+            send_mouse_input(up_flag, mouse_data);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn release_all_simulated_inputs() {}
 
 #[cfg(windows)]
 fn send_char_event(ch: char) {
@@ -1473,7 +1662,7 @@ pub async fn execute_macro_event(
             crate::models::MacroEvent::KeyPress { key } => {
                 if let Some(vk) = parse_virtual_key(key) {
                     send_key_event(vk, false);
-                    tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(35)).await;
                     send_key_event(vk, true);
                 }
             }
@@ -1825,5 +2014,56 @@ fn set_process_audio(
         }
 
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_active_held_inputs_and_release() {
+        #[cfg(windows)]
+        {
+            use windows::Win32::UI::Input::KeyboardAndMouse::VK_W;
+            // Simulate key down tracking
+            send_key_event(VK_W, false);
+            assert!(ACTIVE_HELD_KEYS.lock().unwrap().contains(&VK_W.0));
+
+            // Track mouse button
+            if let Ok(mut lock) = ACTIVE_HELD_MOUSE_BUTTONS.lock() {
+                lock.insert(crate::models::MouseButton::Left);
+            }
+            assert!(ACTIVE_HELD_MOUSE_BUTTONS.lock().unwrap().contains(&crate::models::MouseButton::Left));
+
+            // Release all simulated inputs immediately
+            release_all_simulated_inputs();
+
+            // Verify both sets are completely cleared
+            assert!(ACTIVE_HELD_KEYS.lock().unwrap().is_empty());
+            assert!(ACTIVE_HELD_MOUSE_BUTTONS.lock().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_relative_mouse_control_no_panic() {
+        #[cfg(windows)]
+        {
+            let res = mouse_control(
+                crate::models::MouseActionType::Move,
+                crate::models::MouseButton::Left,
+                crate::models::MouseCoordMode::Relative,
+                Some(50),
+                Some(-30),
+                true,
+                Some(50),
+                false,
+                None,
+                None,
+                None,
+                false,
+            );
+            assert!(res.is_ok());
+        }
     }
 }

@@ -34,7 +34,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 * **Versatile trigger engine** spanning process lifecycles, window focus, CPU/RAM thresholds, global hotkeys, file watcher, webhooks, and schedules
 * **Flexible action pipeline** covering process control, window management, CPU/memory tuning, scripts, macros, audio devices, and webhooks
 * **Embedded Lua 5.4 runtime** (`mlua`) with dedicated `ph` API alongside PowerShell and Batch scripting
-* **Macro Studio** with low-level keyboard/mouse recording, timeline editing, loop control, and organic jitter
+* **Macro Studio** with hardware keyboard/mouse recording, in-game 3D camera rotation support, timeline editing, loop control, and organic jitter
 * **Deep Windows audio & device control** covering per-process volume/mute, master sound, and default playback/mic devices (WASAPI)
 * **Companion process mode** with automated lifecycle coupling and graceful exit cleanup
 * **Ultra-lightweight daemon architecture** with background tray operation (<0.1% CPU, ~2MB RAM) and named-pipe IPC
@@ -58,7 +58,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Process Lifecycle*: Target application launch, termination, or duration (exact match, wildcard, regex).
   - *Window Focus*: Gain or loss of active foreground window focus.
   - *Resource Thresholds*: Sustained high CPU (%) or RAM (MB) usage limits.
-  - *Global Hotkeys*: System-wide shortcut listener with toggle or hold mode.
+  - *Global Hotkeys*: System-wide shortcut listener with toggle mode, hold mode, and repeat-while-held execution.
   - *File Watcher*: File and folder creation, modification, or deletion with extension filters.
   - *Local Webhooks*: Inbound HTTP REST requests (`http://127.0.0.1:48123/api/v1/trigger/{endpoint}`).
   - *Schedules & Alarms*: Fixed intervals, daily recurring schedules, and one-shot date/time alarms.
@@ -68,7 +68,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Window Management*: Minimize, maximize, restore, hide, show, close, transparency, always-on-top, and screen positioning.
   - *Process Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and trim memory working sets.
   - *Scripting & Automation*: Embedded Lua 5.4 (`ph` API), PowerShell, and Batch scripts with token interpolation (`{pid}`, `{process}`, `{window_title}`, `{file_path}`).
-  - *Macro Playback*: Recorded keyboard and mouse sequences with speed multipliers, loop counts, and organic jitter.
+  - *Macro Playback*: Recorded keyboard and mouse sequences (with in-game 3D camera turns, DirectInput scancodes, and instant stuck-key release on cancellation), speed multipliers, loop counts, and organic jitter.
   - *Audio & Device Control*: System and per-app volume/mute, microphone levels, and default playback/recording device switching.
   - *Alerts & Webhooks*: Windows toast notifications and outbound HTTP REST calls (POST/GET/PUT).
   - *System Power & Delays*: System lock, sleep, display off, shutdown, and configurable pause intervals between steps.
@@ -102,7 +102,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 - **Visual Studio**: Hardware-accelerated interface with Dark, Light, and Chocolate palettes, plus full English and Russian localization.
 - **Interactive Rule Builder**: Drag-and-drop step reordering, real-time step execution tracking, target process icon detection, and multi-step Undo/Redo.
-- **Macro Studio & Editor**: Built-in input recorder with timeline editing, speed/loop settings, and organic motion controls.
+- **Macro Studio & Editor**: Built-in input recorder with desktop cursor & in-game camera capture, one-click coordinate mode toggling, timeline editing, speed/loop settings, and organic motion controls.
 - **Action Catalog & Process Picker**: Fast in-context modal dialogs to browse actions and pick active processes without losing editor draft.
 - **Analytics & Telemetry**: Monospace event stream with live KPI metrics (Total Executions, Active Rules, System Uptime) and category filters.
 - **Built-in Documentation**: In-app GitBook-style guide with architecture overview, shortcut cheat sheets, and practical recipes.

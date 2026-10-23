@@ -4,15 +4,23 @@ use std::time::Instant;
 use crate::models::{MacroEvent, MouseButton, MouseCoordMode};
 
 #[cfg(windows)]
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::core::w;
+#[cfg(windows)]
+use windows::Win32::Foundation::{HWND, HINSTANCE, HMODULE, LPARAM, LRESULT, WPARAM};
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageW, PeekMessageW, PostThreadMessageW, SetTimer, SetWindowsHookExW, UnhookWindowsHookEx,
-    HHOOK, KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
-    WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP,
-    WM_MBUTTONDOWN, WM_MBUTTONUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, PM_NOREMOVE, MESSAGEBOX_STYLE,
+    CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetCursorInfo,
+    GetMessageW, KillTimer, PeekMessageW, PostThreadMessageW, RegisterClassExW,
+    SetTimer, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, UnregisterClassW, CURSORINFO, HHOOK,
+    KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_STYLE,
+    WNDCLASSEXW, WM_INPUT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, PM_NOREMOVE, MESSAGEBOX_STYLE,
+};
+#[cfg(windows)]
+use windows::Win32::UI::Input::{
+    GetRawInputData, RegisterRawInputDevices, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER,
+    RID_INPUT, RIDEV_INPUTSINK, RIDEV_REMOVE, RIM_TYPEMOUSE,
 };
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -37,7 +45,7 @@ pub struct MacroRecorder {
     pub last_event_time: Arc<Mutex<Option<Instant>>>,
     pub record_start_time: Arc<Mutex<Option<Instant>>>,
     pub last_mouse_pos: Arc<Mutex<Option<(i32, i32, Instant)>>>,
-    pub last_key_event: Arc<Mutex<Option<(String, bool, Instant)>>>,
+    pub last_key_events: Arc<Mutex<std::collections::HashMap<String, (bool, Instant)>>>,
 }
 
 static RECORDER_INSTANCE: OnceLock<MacroRecorder> = OnceLock::new();
@@ -48,6 +56,15 @@ static KBD_HOOK: AtomicIsize = AtomicIsize::new(0);
 static MOUSE_HOOK: AtomicIsize = AtomicIsize::new(0);
 #[cfg(windows)]
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+
+struct RawTurnAccumulator {
+    accum_dx: i32,
+    accum_dy: i32,
+    start_time: Instant,
+    last_update: Instant,
+}
+
+static RAW_TURN_ACCUMULATOR: Mutex<Option<RawTurnAccumulator>> = Mutex::new(None);
 
 static LAST_RECORD_TOGGLE: Mutex<Option<Instant>> = Mutex::new(None);
 static LAST_TEST_TOGGLE: Mutex<Option<Instant>> = Mutex::new(None);
@@ -67,7 +84,7 @@ impl MacroRecorder {
             last_event_time: Arc::new(Mutex::new(None)),
             record_start_time: Arc::new(Mutex::new(None)),
             last_mouse_pos: Arc::new(Mutex::new(None)),
-            last_key_event: Arc::new(Mutex::new(None)),
+            last_key_events: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -99,11 +116,15 @@ impl MacroRecorder {
         if let Ok(mut mp) = self.last_mouse_pos.lock() {
             *mp = None;
         }
-        if let Ok(mut k) = self.last_key_event.lock() {
-            *k = None;
+        if let Ok(mut k) = self.last_key_events.lock() {
+            k.clear();
         }
         if let Ok(mut lock) = LAST_RECORD_TOGGLE.lock() {
             *lock = Some(now);
+        }
+
+        if let Ok(mut lock) = RAW_TURN_ACCUMULATOR.lock() {
+            *lock = None;
         }
 
         #[cfg(windows)]
@@ -115,6 +136,14 @@ impl MacroRecorder {
                     run_recorder_hook_loop(rec);
                 })
                 .expect("Failed to spawn macro recorder hook thread");
+
+            let rec_poller = self.clone();
+            std::thread::Builder::new()
+                .name("macro-recorder-poller".into())
+                .spawn(move || {
+                    run_recorder_polling_loop(rec_poller);
+                })
+                .expect("Failed to spawn macro recorder polling thread");
         }
     }
 
@@ -127,6 +156,8 @@ impl MacroRecorder {
         if let Ok(mut lock) = LAST_RECORD_TOGGLE.lock() {
             *lock = Some(Instant::now());
         }
+
+        flush_raw_turn_accumulator(self);
 
         #[cfg(windows)]
         {
@@ -160,21 +191,23 @@ impl MacroRecorder {
         }
     }
 
-    /// Record key event safely with deduplication window (prevents double-firing if both hook and GUI event loop report it)
+    /// Record key event safely with per-key deduplication window across hook, background poller, and GUI input
     pub fn record_key(&self, key_name: &str, is_down: bool) {
         let clean = key_name.trim();
         if clean.is_empty() {
             return;
         }
         let now = Instant::now();
-        if let Ok(mut last) = self.last_key_event.lock() {
-            if let Some((last_k, last_down, last_t)) = last.as_ref() {
-                if last_k == clean && *last_down == is_down && now.duration_since(*last_t).as_millis() < 70 {
-                    return; // Deduplicate
+        if let Ok(mut last_map) = self.last_key_events.lock() {
+            if let Some((last_down, last_t)) = last_map.get(clean) {
+                if *last_down == is_down && now.duration_since(*last_t).as_millis() < 70 {
+                    return; // Deduplicate across hook, polling loop, and GUI event loop
                 }
             }
-            *last = Some((clean.to_string(), is_down, now));
+            last_map.insert(clean.to_string(), (is_down, now));
         }
+
+        flush_raw_turn_accumulator(self);
 
         record_delay_and_event(
             self,
@@ -188,6 +221,205 @@ impl MacroRecorder {
     }
 }
 
+pub fn flush_raw_turn_accumulator(rec: &MacroRecorder) {
+    let acc = if let Ok(mut lock) = RAW_TURN_ACCUMULATOR.lock() {
+        lock.take()
+    } else {
+        None
+    };
+
+    if let Some(acc) = acc {
+        let abs_dx = acc.accum_dx.abs();
+        let abs_dy = acc.accum_dy.abs();
+        // Ignore resting hand micro-noise (< 3 counts)
+        if abs_dx < 3 && abs_dy < 3 {
+            return;
+        }
+
+        // Exact physical duration from first hardware packet to last hardware packet
+        let stroke_ms = acc.last_update.duration_since(acc.start_time).as_millis() as u32;
+        let move_duration = stroke_ms.max(16);
+
+        // Calculate pause before this turn started relative to last recorded event
+        let mut pause_delay = None;
+        if rec.capture_delays.load(Ordering::SeqCst) {
+            if let Ok(mut time_lock) = rec.last_event_time.lock() {
+                if let Some(last_ev_t) = *time_lock {
+                    if acc.start_time > last_ev_t {
+                        let pause = acc.start_time.duration_since(last_ev_t).as_millis() as u32;
+                        if pause >= 12 {
+                            pause_delay = Some(pause);
+                        }
+                    }
+                }
+                *time_lock = Some(acc.last_update);
+            }
+        } else if let Ok(mut time_lock) = rec.last_event_time.lock() {
+            *time_lock = Some(acc.last_update);
+        }
+
+        rec.last_was_mouse_move.store(true, Ordering::SeqCst);
+
+        if let Ok(mut events) = rec.events.lock() {
+            if let Some(ms) = pause_delay {
+                events.push(MacroEvent::Delay { ms, organic: false, jitter_percent: 30 });
+            }
+            events.push(MacroEvent::MouseMove {
+                x: acc.accum_dx,
+                y: acc.accum_dy,
+                coord_mode: MouseCoordMode::Relative,
+                smooth: true,
+                duration_ms: Some(move_duration),
+                organic: false,
+            });
+        }
+    }
+}
+
+#[cfg(windows)]
+fn check_raw_turn_idle_flush(rec: &MacroRecorder) {
+    let mut should_flush = false;
+    if let Ok(lock) = RAW_TURN_ACCUMULATOR.lock() {
+        if let Some(acc) = lock.as_ref() {
+            if acc.last_update.elapsed().as_millis() >= 60 {
+                should_flush = true;
+            }
+        }
+    }
+    if should_flush {
+        flush_raw_turn_accumulator(rec);
+    }
+}
+
+#[cfg(windows)]
+unsafe fn process_raw_input_event(hraw: HRAWINPUT, rec: &MacroRecorder) {
+    if !rec.is_recording.load(Ordering::SeqCst) || !rec.capture_mouse_moves.load(Ordering::SeqCst) {
+        return;
+    }
+
+    let mut size = 0u32;
+    let res = GetRawInputData(
+        hraw,
+        RID_INPUT,
+        None,
+        &mut size,
+        std::mem::size_of::<RAWINPUTHEADER>() as u32,
+    );
+    if res == u32::MAX || size == 0 {
+        return;
+    }
+
+    let mut buffer = vec![0u8; size as usize];
+    let res2 = GetRawInputData(
+        hraw,
+        RID_INPUT,
+        Some(buffer.as_mut_ptr() as *mut _),
+        &mut size,
+        std::mem::size_of::<RAWINPUTHEADER>() as u32,
+    );
+    if res2 == u32::MAX {
+        return;
+    }
+
+    let raw = &*(buffer.as_ptr() as *const RAWINPUT);
+    if raw.header.dwType != RIM_TYPEMOUSE.0 {
+        return;
+    }
+
+    let mouse = &raw.data.mouse;
+    // Relative displacement only (ignore absolute pen/tablet coordinates)
+    if (mouse.usFlags.0 & 1) != 0 {
+        return;
+    }
+
+    let dx = mouse.lLastX;
+    let dy = mouse.lLastY;
+    if dx == 0 && dy == 0 {
+        return;
+    }
+
+    // Arbitration with desktop mouse moves:
+    // If desktop cursor movements (Absolute) are also enabled, check if cursor is visibly moving on screen.
+    if rec.capture_mouse_moves.load(Ordering::SeqCst) {
+        let mut ci = CURSORINFO {
+            cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+            ..Default::default()
+        };
+        let is_cursor_showing = GetCursorInfo(&mut ci).is_ok() && (ci.flags.0 & 1) != 0;
+        if is_cursor_showing {
+            if let Ok(pos_lock) = rec.last_mouse_pos.lock() {
+                if let Some((_, _, last_t)) = *pos_lock {
+                    if last_t.elapsed().as_millis() < 60 {
+                        // Desktop mouse movement is actively being captured by WH_MOUSE_LL
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    let now = Instant::now();
+    let mut should_flush = false;
+
+    if let Ok(mut lock) = RAW_TURN_ACCUMULATOR.lock() {
+        if let Some(acc) = lock.as_mut() {
+            let x_flipped = (acc.accum_dx > 60 && dx < -30) || (acc.accum_dx < -60 && dx > 30);
+            let y_flipped = (acc.accum_dy > 60 && dy < -30) || (acc.accum_dy < -60 && dy > 30);
+            let duration = now.duration_since(acc.start_time).as_millis();
+
+            // Only flush on true direction reversal or extreme duration (1.5s), NOT at 120ms!
+            if duration >= 1500 || x_flipped || y_flipped {
+                should_flush = true;
+            } else {
+                acc.accum_dx += dx;
+                acc.accum_dy += dy;
+                acc.last_update = now;
+            }
+        } else {
+            *lock = Some(RawTurnAccumulator {
+                accum_dx: dx,
+                accum_dy: dy,
+                start_time: now,
+                last_update: now,
+            });
+        }
+    }
+
+    if should_flush {
+        flush_raw_turn_accumulator(rec);
+        if let Ok(mut lock) = RAW_TURN_ACCUMULATOR.lock() {
+            *lock = Some(RawTurnAccumulator {
+                accum_dx: dx,
+                accum_dy: dy,
+                start_time: now,
+                last_update: now,
+            });
+        }
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn raw_input_sink_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_INPUT => {
+            let rec = MacroRecorder::global();
+            process_raw_input_event(HRAWINPUT(lparam.0 as *mut _), &rec);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_TIMER => {
+            let rec = MacroRecorder::global();
+            check_raw_turn_idle_flush(&rec);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
 #[cfg(windows)]
 fn run_recorder_hook_loop(recorder: MacroRecorder) {
     unsafe {
@@ -198,23 +430,57 @@ fn run_recorder_hook_loop(recorder: MacroRecorder) {
         let mut dummy_msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
         let _ = PeekMessageW(&mut dummy_msg, None, 0, 0, PM_NOREMOVE);
 
-        let hmod = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)
-            .ok()
-            .map(|h| windows::Win32::Foundation::HINSTANCE(h.0));
+        let hinstance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)
+            .unwrap_or(HMODULE(std::ptr::null_mut()));
+
+        let class_name = w!("ProcessHandler_RawInput_Sink");
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(raw_input_sink_wnd_proc),
+            hInstance: HINSTANCE(hinstance.0),
+            lpszClassName: class_name,
+            ..Default::default()
+        };
+        let _ = RegisterClassExW(&wc);
+
+        let sink_hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            class_name,
+            w!("ProcessHandlerRawInputSink"),
+            WINDOW_STYLE(0),
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            Some(HINSTANCE(hinstance.0)),
+            None,
+        ).unwrap_or(HWND(std::ptr::null_mut()));
+
+        if !sink_hwnd.0.is_null() {
+            let rid = RAWINPUTDEVICE {
+                usUsagePage: 0x01, // Generic Desktop Controls
+                usUsage: 0x02,     // Mouse
+                dwFlags: RIDEV_INPUTSINK,
+                hwndTarget: sink_hwnd,
+            };
+            let _ = RegisterRawInputDevices(&[rid], std::mem::size_of::<RAWINPUTDEVICE>() as u32);
+            let _ = SetTimer(Some(sink_hwnd), 1, 20, None);
+        }
 
         let kbd_hook = SetWindowsHookExW(
             WH_KEYBOARD_LL,
             Some(low_level_keyboard_proc),
-            hmod,
+            Some(HINSTANCE(hinstance.0)),
             0,
         );
         let mouse_hook = SetWindowsHookExW(
             WH_MOUSE_LL,
             Some(low_level_mouse_proc),
-            hmod,
+            Some(HINSTANCE(hinstance.0)),
             0,
         );
-
         if let Ok(h) = kbd_hook {
             KBD_HOOK.store(h.0 as isize, Ordering::SeqCst);
         }
@@ -222,15 +488,25 @@ fn run_recorder_hook_loop(recorder: MacroRecorder) {
             MOUSE_HOOK.store(h.0 as isize, Ordering::SeqCst);
         }
 
-        // Periodic timer ensures GetMessageW regularly processes input even without an HWND
-        let _ = SetTimer(None, 0, 15, None);
-
         let mut msg = windows::Win32::UI::WindowsAndMessaging::MSG::default();
         while recorder.is_recording.load(Ordering::SeqCst)
             && GetMessageW(&mut msg, None, 0, 0).as_bool()
         {
-            let _ = windows::Win32::UI::WindowsAndMessaging::TranslateMessage(&msg);
-            windows::Win32::UI::WindowsAndMessaging::DispatchMessageW(&msg);
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+
+        if !sink_hwnd.0.is_null() {
+            let unreg_rid = RAWINPUTDEVICE {
+                usUsagePage: 0x01,
+                usUsage: 0x02,
+                dwFlags: RIDEV_REMOVE,
+                hwndTarget: HWND(std::ptr::null_mut()),
+            };
+            let _ = RegisterRawInputDevices(&[unreg_rid], std::mem::size_of::<RAWINPUTDEVICE>() as u32);
+            let _ = KillTimer(Some(sink_hwnd), 1);
+            let _ = DestroyWindow(sink_hwnd);
+            let _ = UnregisterClassW(class_name, Some(HINSTANCE(hinstance.0)));
         }
 
         let kh = KBD_HOOK.swap(0, Ordering::SeqCst);
@@ -242,6 +518,83 @@ fn run_recorder_hook_loop(recorder: MacroRecorder) {
             let _ = UnhookWindowsHookEx(HHOOK(mh as *mut _));
         }
         HOOK_THREAD_ID.store(0, Ordering::SeqCst);
+    }
+}
+
+/// Dedicated high-precision physical polling loop for games, DirectInput, exclusive fullscreen, and elevated windows
+/// where low-level hooks may be bypassed or suppressed.
+#[cfg(windows)]
+fn run_recorder_polling_loop(recorder: MacroRecorder) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
+    use windows::Win32::System::Diagnostics::Debug::MessageBeep;
+    use windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE;
+
+    // Full set of physical virtual keyboard keys to poll
+    const POLLABLE_KEYS: &[u32] = &[
+        0x08, 0x09, 0x0C, 0x0D, // Backspace, Tab, Clear, Enter
+        0x10, 0x11, 0x12, 0x13, 0x14, // Shift, Ctrl, Alt, Pause, CapsLock
+        0x20, 0x21, 0x22, 0x23, 0x24, // Space, PageUp, PageDown, End, Home
+        0x25, 0x26, 0x27, 0x28, // Left, Up, Right, Down
+        0x2C, 0x2D, 0x2E, // PrintScreen, Insert, Delete
+        // '0'..='9'
+        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+        // 'A'..='Z'
+        0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A,
+        0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54,
+        0x55, 0x56, 0x57, 0x58, 0x59, 0x5A,
+        0x5B, 0x5C, // Win keys
+        // NumPad keys
+        0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69,
+        0x6A, 0x6B, 0x6D, 0x6E, 0x6F,
+        // Function keys (F1..F8, F11..F24)
+        0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77,
+        0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+        0x90, 0x91, // NumLock, ScrollLock
+        // OEM punctuation keys
+        0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE, 0xE2,
+    ];
+
+    let mut key_states = [false; 256];
+
+    // Seed initial hardware key state to prevent phantom down events
+    for &vk in POLLABLE_KEYS {
+        let is_down = unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 };
+        key_states[vk as usize] = is_down;
+    }
+
+    while recorder.is_recording.load(Ordering::SeqCst) {
+        let elapsed_start = recorder.record_start_time.lock().ok()
+            .and_then(|t| *t)
+            .map(|st| st.elapsed().as_millis())
+            .unwrap_or(1000);
+
+        // Escape cancellation check (fallback if hook was bypassed)
+        if elapsed_start > 250 {
+            let is_esc = unsafe { (GetAsyncKeyState(VK_ESCAPE.0 as i32) as u16 & 0x8000) != 0 };
+            if is_esc {
+                recorder.stop_recording();
+                unsafe {
+                    let _ = MessageBeep(MESSAGEBOX_STYLE(0));
+                }
+                break;
+            }
+        }
+
+        if recorder.capture_keyboard.load(Ordering::SeqCst) {
+            for &vk in POLLABLE_KEYS {
+                let is_down = unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 };
+                let was_down = key_states[vk as usize];
+
+                if is_down != was_down {
+                    key_states[vk as usize] = is_down;
+                    let key_name = vk_to_key_name(vk);
+                    recorder.record_key(&key_name, is_down);
+                }
+            }
+        }
+
+        check_raw_turn_idle_flush(&recorder);
+        std::thread::sleep(std::time::Duration::from_millis(8));
     }
 }
 
@@ -333,6 +686,7 @@ unsafe extern "system" fn low_level_mouse_proc(
                 );
 
                 if clicks_enabled && is_mouse_btn {
+                    flush_raw_turn_accumulator(&rec);
                     // Sync cursor position right before click event if moves are enabled
                     if rec.capture_mouse_moves.load(Ordering::SeqCst) {
                         let mut needs_pos_sync = false;
@@ -397,6 +751,7 @@ unsafe extern "system" fn low_level_mouse_proc(
                 }
 
                 if wheel_enabled && msg == WM_MOUSEWHEEL {
+                    flush_raw_turn_accumulator(&rec);
                     let delta = (((ms.mouseData >> 16) & 0xffff) as i16) as i32;
                     record_delay_and_event(&rec, MacroEvent::MouseWheel { delta }, true);
                 }
@@ -404,6 +759,16 @@ unsafe extern "system" fn low_level_mouse_proc(
 
             // Direct, accurate mouse movement capture (smooth human sampling with physical timing)
             if msg == WM_MOUSEMOVE && rec.capture_mouse_moves.load(Ordering::SeqCst) {
+                // In 3D games with hidden cursor, skip screen move capture in favor of Raw Input camera turns
+                let mut ci = CURSORINFO {
+                    cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+                    ..Default::default()
+                };
+                let is_cursor_hidden = GetCursorInfo(&mut ci).is_ok() && (ci.flags.0 & 1) == 0;
+                if is_cursor_hidden {
+                    return CallNextHookEx(None, code, wparam, lparam);
+                }
+
                 let min_dist = rec.min_move_dist.load(Ordering::SeqCst).clamp(2, 6) as f32;
                 let mut should_record = false;
                 let mut move_duration = None;
@@ -505,22 +870,34 @@ pub fn coalesce_mouse_moves(events: &mut Vec<MacroEvent>) {
 
     while i < events.len() {
         if let MacroEvent::MouseMove { x: start_x, y: start_y, coord_mode, organic, .. } = events[i] {
+            let is_rel = coord_mode == MouseCoordMode::Relative;
             let mut final_x = start_x;
             let mut final_y = start_y;
             let final_cm = coord_mode;
             let final_org = organic;
             let mut moves_count = 1;
+            let mut total_duration = match events[i] {
+                MacroEvent::MouseMove { duration_ms, .. } => duration_ms.unwrap_or(25),
+                _ => 25,
+            };
             let mut j = i + 1;
 
             while j < events.len() {
                 match &events[j] {
-                    MacroEvent::MouseMove { x, y, .. } => {
-                        final_x = *x;
-                        final_y = *y;
+                    MacroEvent::MouseMove { x, y, coord_mode: cm, duration_ms, .. } if *cm == final_cm => {
+                        if is_rel {
+                            final_x += *x;
+                            final_y += *y;
+                        } else {
+                            final_x = *x;
+                            final_y = *y;
+                        }
+                        total_duration += duration_ms.unwrap_or(25);
                         moves_count += 1;
                         j += 1;
                     }
-                    MacroEvent::Delay { ms, .. } if *ms <= 80 && j + 1 < events.len() && matches!(events[j + 1], MacroEvent::MouseMove { .. }) => {
+                    MacroEvent::Delay { ms, .. } if *ms <= 50 && j + 1 < events.len() && matches!(events[j + 1], MacroEvent::MouseMove { coord_mode: cm, .. } if cm == final_cm) => {
+                        total_duration += *ms;
                         j += 1;
                     }
                     _ => break,
@@ -528,7 +905,7 @@ pub fn coalesce_mouse_moves(events: &mut Vec<MacroEvent>) {
             }
 
             if moves_count > 1 {
-                let duration_estimate = (moves_count as u32 * 25).clamp(40, 3000);
+                let duration_estimate = total_duration.clamp(40, 3000);
                 result.push(MacroEvent::MouseMove {
                     x: final_x,
                     y: final_y,
@@ -707,6 +1084,7 @@ pub fn stop_macro_test() {
     if let Ok(mut lock) = LAST_TEST_TOGGLE.lock() {
         *lock = Some(Instant::now());
     }
+    crate::daemon::actions::release_all_simulated_inputs();
 }
 
 /// Safely execute macro events on a dedicated worker thread with current-thread tokio runtime.
@@ -787,6 +1165,7 @@ pub fn run_macro_test_safe(events: Vec<MacroEvent>, speed: f32) {
                     }
                 }
             });
+            crate::daemon::actions::release_all_simulated_inputs();
             TEST_RUNNING.store(false, Ordering::SeqCst);
             if let Ok(mut lock) = LAST_TEST_TOGGLE.lock() {
                 *lock = Some(std::time::Instant::now());
@@ -958,6 +1337,62 @@ mod tests {
         assert!(matches!(events[1], MacroEvent::Delay { ms: 500, .. }));
         assert!(matches!(events[2], MacroEvent::MouseDown { .. }));
     }
+
+    #[test]
+    fn test_coalesce_relative_mouse_moves() {
+        let mut events = vec![
+            MacroEvent::MouseMove { x: 50, y: 10, coord_mode: MouseCoordMode::Relative, smooth: true, duration_ms: Some(50), organic: false },
+            MacroEvent::MouseMove { x: 30, y: -5, coord_mode: MouseCoordMode::Relative, smooth: true, duration_ms: Some(40), organic: false },
+            MacroEvent::Delay { ms: 300, organic: false, jitter_percent: 30 },
+            MacroEvent::KeyDown { key: "Space".to_string() },
+        ];
+
+        coalesce_mouse_moves(&mut events);
+        assert_eq!(events.len(), 3);
+        match &events[0] {
+            MacroEvent::MouseMove { x, y, coord_mode, smooth, duration_ms, .. } => {
+                assert_eq!(*x, 80);
+                assert_eq!(*y, 5);
+                assert_eq!(*coord_mode, MouseCoordMode::Relative);
+                assert!(*smooth);
+                assert_eq!(duration_ms.unwrap(), 90);
+            }
+            _ => panic!("Expected coalesced relative MouseMove"),
+        }
+        assert!(matches!(events[1], MacroEvent::Delay { ms: 300, .. }));
+        assert!(matches!(events[2], MacroEvent::KeyDown { .. }));
+    }
+
+    #[test]
+    fn test_record_key_deduplication() {
+        let rec = MacroRecorder::new();
+        rec.is_recording.store(true, Ordering::SeqCst);
+
+        // Immediate duplicate "A" down should be deduplicated
+        rec.record_key("A", true);
+        rec.record_key("A", true);
+        // Different key "B" down should be recorded
+        rec.record_key("B", true);
+        // Releasing "A" should be recorded
+        rec.record_key("A", false);
+        // Immediate duplicate "A" up should be deduplicated
+        rec.record_key("A", false);
+
+        let events = rec.drain_events();
+        let keys: Vec<_> = events.into_iter().filter_map(|e| match e {
+            MacroEvent::KeyDown { key } => Some((key, true)),
+            MacroEvent::KeyUp { key } => Some((key, false)),
+            _ => None,
+        }).collect();
+
+        assert_eq!(keys, vec![
+            ("A".to_string(), true),
+            ("B".to_string(), true),
+            ("A".to_string(), false),
+        ]);
+    }
+
+
 
     #[test]
     #[cfg(windows)]
@@ -1173,5 +1608,39 @@ mod tests {
         assert!(matches!(events_step3[5], MacroEvent::MouseMove { x: 51, y: 50, .. }));
         // No redundant delay before MouseDown (0ms elapsed)
         assert!(matches!(events_step3[6], MacroEvent::MouseDown { button: MouseButton::Left }));
+    }
+
+    #[test]
+    fn test_raw_turn_accumulator_flushes_relative_smooth_mouse_move() {
+        let rec = MacroRecorder::new();
+        rec.is_recording.store(true, Ordering::SeqCst);
+        rec.capture_mouse_moves.store(true, Ordering::SeqCst);
+
+        // Put a simulated raw turn in the accumulator
+        let now = Instant::now();
+        if let Ok(mut lock) = RAW_TURN_ACCUMULATOR.lock() {
+            *lock = Some(RawTurnAccumulator {
+                accum_dx: 150,
+                accum_dy: -45,
+                start_time: now - std::time::Duration::from_millis(100),
+                last_update: now,
+            });
+        }
+
+        // Flush accumulator
+        flush_raw_turn_accumulator(&rec);
+
+        let events = rec.events.lock().unwrap().clone();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            MacroEvent::MouseMove { x, y, coord_mode, smooth, duration_ms, .. } => {
+                assert_eq!(*x, 150);
+                assert_eq!(*y, -45);
+                assert_eq!(*coord_mode, MouseCoordMode::Relative);
+                assert!(*smooth);
+                assert!(duration_ms.unwrap() >= 16);
+            }
+            _ => panic!("Expected MacroEvent::MouseMove with Relative coord mode"),
+        }
     }
 }

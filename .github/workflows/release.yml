@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Prepare Artifacts & Zip Portable
+        id: prepare_artifacts
+        shell: powershell
+        run: |
+          $cargoToml = Get-Content Cargo.toml -Raw
+          if ($cargoToml -match 'version\s*=\s*"([^"]+)"') {
+              $ver = $matches[1]
+          } else {
+              $ver = "${{ github.ref_name }}".TrimStart('v')
+          }
+          $distDir = "dist_artifacts"
+          New-Item -ItemType Directory -Force -Path $distDir
+
+          $exePath = "target/release/ProcessHandler.exe"
+          if (Test-Path $exePath) {
+              # Portable Zip archive (only release artifact)
+              $zipTarget = "$distDir/ProcessHandler-v$ver-Windows-x64.zip"
+              Compress-Archive -Path $exePath -DestinationPath $zipTarget -Force
+              Write-Host "Created $zipTarget"
+          } else {
+              Write-Error "Release executable not found at $exePath"
+              exit 1
+          }
+
+      - name: Extract Release Notes from CHANGELOG.md
+        id: extract_notes
+        shell: powershell
+        run: |
+          if (Test-Path CHANGELOG.md) {
+              $changelog = Get-Content CHANGELOG.md -Raw
+              # Match notes from the first `## [` heading until the next `## [` heading or end of file
+              if ($changelog -match "(?ms)^##\s+\[.*?\]\s*.*?\r?\n(.*?)(?=^##\s+\[|\z)") {
+                  $notes = $matches[1].Trim()
+                  Set-Content -Path "release_notes.md" -Value $notes -Encoding utf8
+                  Write-Host "Extracted release notes successfully from CHANGELOG.md."
+              } else {
+                  Set-Content -Path "release_notes.md" -Value "ProcessHandler Release ${{ github.ref_name }}" -Encoding utf8
+                  Write-Host "Fallback release notes used."
+              }
+          } else {
+              Set-Content -Path "release_notes.md" -Value "ProcessHandler Release ${{ github.ref_name }}" -Encoding utf8
+              Write-Host "Default release notes used."
+          }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ProcessHandler ${{ github.ref_name }}
+          body_path: release_notes.md
+          files: dist_artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

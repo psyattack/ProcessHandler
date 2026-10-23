@@ -14,11 +14,30 @@ pub struct MonitoredHotkey {
     pub rule_id: String,
     pub vkeys: Vec<i32>,
     pub hold_mode: bool,
+    pub repeat_while_held: bool,
     pub was_pressed: bool,
 }
 
 static MONITORED_HOTKEYS: Mutex<Vec<MonitoredHotkey>> = Mutex::new(Vec::new());
 static LISTENER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+pub fn is_hotkey_held(rule_id: &str) -> bool {
+    if let Ok(lock) = MONITORED_HOTKEYS.lock() {
+        if let Some(hk) = lock.iter().find(|h| h.rule_id == rule_id) {
+            return hk.was_pressed;
+        }
+    }
+    false
+}
+
+pub fn is_hotkey_repeat_held(rule_id: &str) -> bool {
+    if let Ok(lock) = MONITORED_HOTKEYS.lock() {
+        if let Some(hk) = lock.iter().find(|h| h.rule_id == rule_id) {
+            return hk.was_pressed && hk.repeat_while_held;
+        }
+    }
+    false
+}
 
 #[derive(Clone)]
 pub struct HotkeyHandle {
@@ -30,12 +49,13 @@ impl HotkeyHandle {
         let mut list = Vec::new();
         for r in rules {
             if r.is_enabled {
-                if let Some(Trigger::GlobalHotkey { key_combination, hold_mode }) = &r.trigger {
+                if let Some(Trigger::GlobalHotkey { key_combination, hold_mode, repeat_while_held }) = &r.trigger {
                     if let Some(vkeys) = parse_hotkey_vkeys(key_combination) {
                         list.push(MonitoredHotkey {
                             rule_id: r.id.clone(),
                             vkeys,
                             hold_mode: *hold_mode,
+                            repeat_while_held: *repeat_while_held,
                             was_pressed: false,
                         });
                     }
@@ -99,7 +119,7 @@ fn run_hotkey_poll_loop(event_tx: tokio::sync::mpsc::UnboundedSender<HotkeyEvent
                 }
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(12));
+        std::thread::sleep(std::time::Duration::from_millis(8));
     }
 }
 
@@ -196,5 +216,33 @@ mod tests {
 
         let vkeys_alt_rmb = parse_hotkey_vkeys("Alt+RMB").expect("Valid combo");
         assert_eq!(vkeys_alt_rmb, vec![0x12, 0x02]);
+    }
+
+    #[test]
+    fn test_monitored_hotkey_hold_loop_and_is_held() {
+        let handle = HotkeyHandle { _private: () };
+        let mut rule = Rule::default();
+        rule.id = "test_loop_rule".to_string();
+        rule.is_enabled = true;
+        rule.trigger = Some(Trigger::GlobalHotkey {
+            key_combination: "M4".to_string(),
+            hold_mode: true,
+            repeat_while_held: true,
+        });
+
+        handle.reload(&[rule]);
+
+        assert!(!is_hotkey_held("test_loop_rule"));
+
+        // Simulate press in monitored list
+        if let Ok(mut lock) = MONITORED_HOTKEYS.lock() {
+            if let Some(hk) = lock.iter_mut().find(|h| h.rule_id == "test_loop_rule") {
+                assert!(hk.hold_mode);
+                assert!(hk.repeat_while_held);
+                hk.was_pressed = true;
+            }
+        }
+
+        assert!(is_hotkey_held("test_loop_rule"));
     }
 }
