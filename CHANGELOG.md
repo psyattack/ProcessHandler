@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.3.0](https://github.com/psyattack/ProcessHandler/compare/v2.2.0...v2.3.0) - 2026-10-24
+
+### Added
+- Extended Rule Pre-conditions: Added system event checks (user idle duration, session lock/unlock, AC/battery power) and resource thresholds (monitoring sustained process CPU % and RAM MB) to rule prerequisites and conditional branches.
+- File Watcher Extension Filtering: File pre-conditions now support directory monitoring with specific file extension filters (such as *.log or *.txt).
+- Audio Format Switching: Added an audio format action allowing dynamic switching of sample rates (Hz), bit depths, and channel configurations on audio playback and recording devices.
+- Independent Channel Balance: Added separate Left and Right channel volume controls for fine-grained audio balance adjustment.
+- Unified Application Audio: Per-process volume adjustments and mute toggling are now integrated directly into the unified Audio Control action.
+- Customizable Beep Tone Action: Added tone generator actions with configurable frequency (Hz) and duration (ms) alongside standard audio file playback.
+- Macro Studio Anti-Bot Humanization: Added a one-click Humanize mode in Macro Studio that injects natural Gaussian delays, key hold variance, and mouse tremor across recorded sequences.
+- Global Hotkey Continuous Loops: Hotkey triggers now support toggling continuous execution loops in addition to hold-and-repeat mode.
+- Contextual Empty State Hints: Added helpful guidance messages when rule search or filter queries yield no results.
+
+### Changed
+- Unified action models across audio controls, default device switching, and script execution to streamline rule creation.
+- Updated in-app user guide and documentation with guidance on Windows UIPI privilege elevation for global game hotkeys.
+- Expanded English and Russian localization catalogs across all new pre-conditions, audio formats, and macro settings.
+
+<details><summary>Detailed Changelog</summary>
+
+### Added
+- **rules:** expand pre-conditions, advance audio controls, and add macro humanization (by @psyattack in d68978b)
+
+</details>
+
+
 ## [2.2.0](https://github.com/psyattack/ProcessHandler/compare/v2.1.0...v2.2.0) - 2026-10-23
 
 ### Added
