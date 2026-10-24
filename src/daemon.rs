@@ -63,17 +63,56 @@ pub fn run_daemon() {
             let mut eng = engine_hotkey.lock().await;
             match ev {
                 hotkeys::HotkeyEvent::Trigger(rule_id) => {
-                    if let Some(h) = hold_tasks_loop.lock().await.remove(&rule_id) {
+                    let was_looping = if let Some(h) = hold_tasks_loop.lock().await.remove(&rule_id) {
                         h.abort();
-                    }
+                        true
+                    } else {
+                        false
+                    };
 
-                    if eng.is_rule_executing(&rule_id) {
+                    if eng.is_rule_executing(&rule_id) || was_looping {
                         eng.stop_rule_execution(&rule_id);
                         crate::daemon::actions::release_all_simulated_inputs();
                         eng.rule_last_triggered.insert(rule_id.clone(), std::time::Instant::now());
                     } else if let Some(rule) = eng.config.rules.iter().find(|r| r.id == rule_id).cloned() {
                         if rule.is_enabled {
-                            let _ = eng.try_execute_rule(&rule, "Global Hotkey", 0).await;
+                            let is_repeat = matches!(rule.trigger, Some(crate::models::Trigger::GlobalHotkey { repeat_while_held: true, .. }));
+                            if is_repeat {
+                                let engine_for_loop = Arc::clone(&engine_hotkey);
+                                let rule_id_clone = rule_id.clone();
+                                let hold_tasks_inner = Arc::clone(&hold_tasks_loop);
+
+                                let task = tokio::spawn(async move {
+                                    loop {
+                                        let handle_opt = {
+                                            let mut eng = engine_for_loop.lock().await;
+                                            if let Some(r) = eng.config.rules.iter().find(|r| r.id == rule_id_clone).cloned() {
+                                                if !r.is_enabled {
+                                                    break;
+                                                }
+                                                eng.try_execute_rule(&r, "Global Hotkey (Loop)", 0).await
+                                            } else {
+                                                break;
+                                            }
+                                        };
+
+                                        if let Some(handle) = handle_opt {
+                                            match handle.await {
+                                                Ok(()) => {},
+                                                Err(_) => {
+                                                    break;
+                                                }
+                                            }
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    hold_tasks_inner.lock().await.remove(&rule_id_clone);
+                                });
+                                hold_tasks_loop.lock().await.insert(rule_id, task.abort_handle());
+                            } else {
+                                let _ = eng.try_execute_rule(&rule, "Global Hotkey", 0).await;
+                            }
                         }
                     }
                 }

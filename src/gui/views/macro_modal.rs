@@ -197,7 +197,6 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
     };
 
     let Some(action) = action_list.get_mut(edit_info.step_idx) else { return; };
-    action.migrate_to_unified();
 
     if !matches!(action, Action::Macro { .. }) {
         *action = Action::Macro {
@@ -249,10 +248,10 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                             .color(t.accent_ink),
                     );
                     ui.add_space(8.0);
-                    widgets::eyebrow(
-                        ui,
-                        "MACRO STUDIO",
-                        loc.macro_studio_title,
+                    ui.label(
+                        RichText::new("MACRO STUDIO")
+                            .font(egui::FontId::new(14.0, theme::semibold()))
+                            .color(t.ink_strong),
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -635,19 +634,7 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                             }
                                                         }
 
-                                                        let all_organic = events[*start_idx..*start_idx + *count].iter().all(|e| match e {
-                                                            MacroEvent::MouseMove { organic, .. } => *organic,
-                                                            _ => false,
-                                                        });
-                                                        let mut group_organic = all_organic;
-                                                        let org_resp = ui.checkbox(&mut group_organic, loc.macro_studio_label_organic);
-                                                        if org_resp.changed() {
-                                                            for ev in &mut events[*start_idx..*start_idx + *count] {
-                                                                if let MacroEvent::MouseMove { organic, .. } = ev {
-                                                                    *organic = group_organic;
-                                                                }
-                                                            }
-                                                        }
+
                                                     }
 
                                                     // Action buttons on the right
@@ -721,11 +708,10 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     }
 
                                                     if *count == 3 {
-                                                        if let MacroEvent::Delay { ms, organic, .. } = &mut events[start_idx + 1] {
+                                                        if let MacroEvent::Delay { ms, .. } = &mut events[start_idx + 1] {
                                                             ui.add_space(4.0);
                                                             widgets::hud(ui, loc.macro_studio_label_delay, t.muted);
                                                             ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms").prefix("⏱ "));
-                                                            ui.checkbox(organic, loc.macro_studio_label_organic);
                                                         }
                                                     }
 
@@ -766,11 +752,10 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                     }
 
                                                     if *count == 3 {
-                                                        if let MacroEvent::Delay { ms, organic, .. } = &mut events[start_idx + 1] {
+                                                        if let MacroEvent::Delay { ms, .. } = &mut events[start_idx + 1] {
                                                             ui.add_space(4.0);
                                                             widgets::hud(ui, loc.macro_studio_label_delay, t.muted);
                                                             ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms").prefix("⏱ "));
-                                                            ui.checkbox(organic, loc.macro_studio_label_organic);
                                                         }
                                                     }
 
@@ -976,7 +961,7 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
             });
 
             // --- FOOTER ---
-            frame.footer(|ui, close_req| {
+            frame.footer(|ui, _close_req| {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(16.0);
 
@@ -1012,48 +997,45 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
 
                     ui.add_space(16.0);
 
-                    // Global organic delays toggle across entire macro (delays + text typing)
-                    let has_organic_targets = events.iter().any(|e| matches!(
-                        e,
-                        MacroEvent::Delay { .. } | MacroEvent::Text { .. }
-                    ));
-                    let all_organic = has_organic_targets && events.iter().all(|e| match e {
-                        MacroEvent::Delay { organic, .. } => *organic,
-                        MacroEvent::Text { organic, .. } => *organic,
-                        _ => true,
-                    });
-                    let mut org_toggle = all_organic;
-                    let org_resp = ui.add_enabled(
-                        has_organic_targets,
-                        egui::Checkbox::new(&mut org_toggle, loc.macro_studio_checkbox_global_organic),
-                    ).on_hover_text(if has_organic_targets {
-                        loc.macro_studio_global_organic_active_tip
-                    } else {
-                        loc.macro_studio_global_organic_disabled_tip
-                    });
-
-                    if org_resp.changed() {
-                        for ev in events.iter_mut() {
-                            match ev {
-                                MacroEvent::Delay { organic, .. } => *organic = org_toggle,
-                                MacroEvent::Text { organic, .. } => *organic = org_toggle,
-                                _ => {}
-                            }
-                        }
-                    }
-
                     ui.add_space(16.0);
                     ui.checkbox(
                         &mut group_full_presses,
                         loc.macro_studio_checkbox_group_presses,
                     ).on_hover_text(loc.macro_studio_group_presses_tip);
 
+                    // Right side of footer: Holistic Humanize (Anti-Bot) toggle button (replacing Save & Close)
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(16.0);
-                        let done_lbl = loc.macro_studio_btn_save_close;
-                        let btn_w = widgets::button_width(ui, done_lbl, 0.0);
-                        if widgets::button(ui, done_lbl, Kind::Primary, btn_w).clicked() {
-                            *close_req = true;
+                        let has_humanize_targets = events.iter().any(|e| matches!(
+                            e,
+                            MacroEvent::Delay { .. } | MacroEvent::Text { .. } | MacroEvent::MouseMove { .. }
+                        ));
+                        let all_humanized = has_humanize_targets && events.iter().all(|e| match e {
+                            MacroEvent::Delay { organic, .. } => *organic,
+                            MacroEvent::Text { organic, .. } => *organic,
+                            MacroEvent::MouseMove { organic, .. } => *organic,
+                            _ => true,
+                        });
+                        let btn_kind = if all_humanized { Kind::Primary } else { Kind::Secondary };
+                        let btn_lbl = loc.macro_studio_checkbox_global_organic;
+                        let btn_w = widgets::button_width(ui, btn_lbl, 0.0);
+                        let btn_resp = widgets::button(ui, btn_lbl, btn_kind, btn_w)
+                            .on_hover_text(if all_humanized {
+                                loc.macro_studio_global_organic_active_tip
+                            } else {
+                                loc.macro_studio_global_organic_disabled_tip
+                            });
+
+                        if btn_resp.clicked() {
+                            let new_state = !all_humanized;
+                            for ev in events.iter_mut() {
+                                match ev {
+                                    MacroEvent::Delay { organic, .. } => *organic = new_state,
+                                    MacroEvent::Text { organic, .. } => *organic = new_state,
+                                    MacroEvent::MouseMove { organic, .. } => *organic = new_state,
+                                    _ => {}
+                                }
+                            }
                         }
                     });
                 });
@@ -1179,7 +1161,7 @@ fn render_timeline_row_inline(
     loc: &crate::i18n::Strings,
     t: &Tokens,
 ) {
-    // Seamlessly normalize legacy TAP / Click events to clean physical down events
+    // Normalize KeyPress and MouseClick events to physical down events
     if let MacroEvent::KeyPress { key } = event {
         *event = MacroEvent::KeyDown { key: key.clone() };
     }
@@ -1247,7 +1229,7 @@ fn render_timeline_row_inline(
         }
 
         // --- MOUSE MOVE & GAME CAMERA TURN ---
-        MacroEvent::MouseMove { x, y, coord_mode, smooth, duration_ms, organic } => {
+        MacroEvent::MouseMove { x, y, coord_mode, smooth, duration_ms, organic: _ } => {
             let is_rel = *coord_mode == MouseCoordMode::Relative;
             let chip_title = if is_rel {
                 loc.macro_studio_chip_turn
@@ -1291,27 +1273,24 @@ fn render_timeline_row_inline(
                 if ui.add(egui::DragValue::new(&mut dur).range(10..=5000).suffix(" ms").prefix("⏱ ")).changed() {
                     *duration_ms = Some(dur);
                 }
-                ui.checkbox(organic, loc.macro_studio_label_organic);
             }
         }
 
         // --- PAUSE / DELAY (clean input without redundant preset buttons) ---
-        MacroEvent::Delay { ms, organic, .. } => {
+        MacroEvent::Delay { ms, .. } => {
             render_chip(ui, loc.macro_studio_chip_delay, t.faint, t.bg);
             widgets::hud(ui, loc.macro_studio_label_delay, t.muted);
             ui.add(egui::DragValue::new(ms).range(0..=60000).suffix(" ms").prefix("⏱ "));
-            ui.checkbox(organic, loc.macro_studio_label_organic);
         }
 
         // --- TEXT TYPING (with built-in char delay and organic jitter) ---
-        MacroEvent::Text { text, delay_ms, organic } => {
+        MacroEvent::Text { text, delay_ms, .. } => {
             render_chip(ui, loc.macro_studio_chip_text, t.accent_ink, t.bg);
             widgets::hud(ui, loc.macro_studio_label_text, t.muted);
             ui.add(egui::TextEdit::singleline(text).desired_width(170.0).min_size(vec2(0.0, 20.0)).font(egui::FontId::new(11.0, theme::mono())));
             ui.add_space(4.0);
             widgets::hud(ui, loc.macro_studio_label_delay, t.muted);
             ui.add(egui::DragValue::new(delay_ms).range(0..=5000).suffix(" ms").prefix("⏱ "));
-            ui.checkbox(organic, loc.macro_studio_label_organic);
         }
 
         // --- SCROLL WHEEL ---

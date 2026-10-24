@@ -30,26 +30,9 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
         } else {
             &rule.actions
         };
-        if let Some(action) = actions.get(modal.step_idx) {
-            match action {
-                Action::ExecuteScript { script, .. } => {
-                    script_buffer = script.clone();
-                    found = true;
-                }
-                Action::PowerShell { script, .. } => {
-                    script_buffer = script.clone();
-                    found = true;
-                }
-                Action::Cmd { command, .. } => {
-                    script_buffer = command.clone();
-                    found = true;
-                }
-                Action::LuaScript { script } => {
-                    script_buffer = script.clone();
-                    found = true;
-                }
-                _ => {}
-            }
+        if let Some(Action::ExecuteScript { script, .. }) = actions.get(modal.step_idx) {
+            script_buffer = script.clone();
+            found = true;
         }
     }
 
@@ -151,14 +134,8 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
             } else {
                 &mut rule.actions
             };
-            if let Some(action) = actions.get_mut(modal.step_idx) {
-                match action {
-                    Action::ExecuteScript { ref mut script, .. } => *script = script_buffer,
-                    Action::PowerShell { ref mut script, .. } => *script = script_buffer,
-                    Action::Cmd { ref mut command, .. } => *command = script_buffer,
-                    Action::LuaScript { ref mut script } => *script = script_buffer,
-                    _ => {}
-                }
+            if let Some(Action::ExecuteScript { ref mut script, .. }) = actions.get_mut(modal.step_idx) {
+                *script = script_buffer;
             }
         }
     }

@@ -80,3 +80,43 @@ impl SystemEventsWatcher {
         events
     }
 }
+
+pub fn get_user_idle_seconds() -> Option<u64> {
+    #[cfg(windows)]
+    unsafe {
+        let mut lii = LASTINPUTINFO {
+            cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+            dwTime: 0,
+        };
+        if GetLastInputInfo(&mut lii).as_bool() {
+            let current_tick = GetTickCount();
+            let idle_ms = current_tick.saturating_sub(lii.dwTime);
+            return Some((idle_ms / 1000) as u64);
+        }
+    }
+    None
+}
+
+pub fn is_ac_power() -> Option<bool> {
+    #[cfg(windows)]
+    unsafe {
+        let mut sps: SYSTEM_POWER_STATUS = std::mem::zeroed();
+        if GetSystemPowerStatus(&mut sps).is_ok() {
+            return Some(sps.ACLineStatus == 1);
+        }
+    }
+    None
+}
+
+pub fn is_session_locked() -> bool {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        let hwnd = GetForegroundWindow();
+        hwnd.0.is_null()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}

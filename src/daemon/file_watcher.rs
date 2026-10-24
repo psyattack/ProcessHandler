@@ -115,13 +115,19 @@ impl FileWatcherService {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_file() {
-                    if let Some(ext) = filter_ext {
+                    if let Some(pattern) = filter_ext {
+                        let clean = pattern.trim().trim_start_matches('*');
                         let matches_ext = path
                             .extension()
                             .and_then(|e| e.to_str())
-                            .map(|e| e.eq_ignore_ascii_case(ext.trim_start_matches('.')))
+                            .map(|e| e.eq_ignore_ascii_case(clean.trim_start_matches('.')))
                             .unwrap_or(false);
-                        if !matches_ext {
+                        let matches_name = path
+                            .file_name()
+                            .and_then(|f| f.to_str())
+                            .map(|f| f.eq_ignore_ascii_case(clean) || f.to_lowercase().contains(&clean.to_lowercase()))
+                            .unwrap_or(false);
+                        if !matches_ext && !matches_name {
                             continue;
                         }
                     }

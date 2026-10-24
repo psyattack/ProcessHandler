@@ -640,11 +640,12 @@ unsafe extern "system" fn low_level_keyboard_proc(
             return LRESULT(1);
         }
 
-        if rec.is_recording.load(Ordering::SeqCst) && rec.capture_keyboard.load(Ordering::SeqCst) {
-            if is_down || is_up {
-                let key_name = vk_to_key_name(vk);
-                rec.record_key(&key_name, is_down);
-            }
+        if rec.is_recording.load(Ordering::SeqCst)
+            && rec.capture_keyboard.load(Ordering::SeqCst)
+            && (is_down || is_up)
+        {
+            let key_name = vk_to_key_name(vk);
+            rec.record_key(&key_name, is_down);
         }
     }
 
@@ -1136,7 +1137,7 @@ pub fn run_macro_test_safe(events: Vec<MacroEvent>, speed: f32) {
                         MacroEvent::Delay { ms, organic, jitter_percent } => {
                             let eff_ms = (*ms as f32 / speed.max(0.01)).round() as u32;
                             let sleep_ms = crate::daemon::actions::calculate_sleep_ms(eff_ms, *organic, *jitter_percent, None);
-                            let sleep_target = std::time::Instant::now() + std::time::Duration::from_millis(sleep_ms as u64);
+                            let sleep_target = std::time::Instant::now() + std::time::Duration::from_millis(sleep_ms);
                             while std::time::Instant::now() < sleep_target {
                                 if TEST_CANCEL.load(Ordering::SeqCst) {
                                     break;

@@ -211,14 +211,27 @@ pub enum RuleCondition {
         #[serde(default)]
         days_of_week: Vec<u8>, // 1 = Monday .. 7 = Sunday
     },
-    #[serde(rename = "power_source")]
-    PowerSource {
-        #[serde(default = "default_true")]
-        require_ac: bool,
+    #[serde(rename = "event")]
+    Event {
+        event_type: SystemEventType,
+        #[serde(default = "default_idle_sec")]
+        idle_duration_sec: u32,
     },
-    #[serde(rename = "file_exists")]
-    FileExists {
+    #[serde(rename = "resource")]
+    ResourceThreshold {
+        process_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cpu_percent: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ram_mb: Option<u64>,
+        #[serde(default = "default_threshold_duration")]
+        duration_sec: u64,
+    },
+    #[serde(rename = "file_watcher")]
+    FileWatcher {
         path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter_extension: Option<String>,
         #[serde(default = "default_true")]
         must_exist: bool,
     },
@@ -249,15 +262,26 @@ impl RuleCondition {
         }
     }
 
-    pub fn default_power() -> Self {
-        Self::PowerSource {
-            require_ac: true,
+    pub fn default_event() -> Self {
+        Self::Event {
+            event_type: SystemEventType::SessionLock,
+            idle_duration_sec: 300,
+        }
+    }
+
+    pub fn default_resource() -> Self {
+        Self::ResourceThreshold {
+            process_name: String::new(),
+            cpu_percent: Some(80.0),
+            ram_mb: None,
+            duration_sec: 5,
         }
     }
 
     pub fn default_file() -> Self {
-        Self::FileExists {
+        Self::FileWatcher {
             path: String::new(),
+            filter_extension: None,
             must_exist: true,
         }
     }
@@ -267,8 +291,9 @@ impl RuleCondition {
             Self::ProcessRunning { .. } => egui_phosphor::regular::CPU,
             Self::WindowFocused { .. } => egui_phosphor::regular::APP_WINDOW,
             Self::TimeRange { .. } => egui_phosphor::regular::CLOCK,
-            Self::PowerSource { .. } => egui_phosphor::regular::PLUG,
-            Self::FileExists { .. } => egui_phosphor::regular::FILE,
+            Self::Event { .. } => egui_phosphor::regular::BELL,
+            Self::ResourceThreshold { .. } => egui_phosphor::regular::CHART_LINE,
+            Self::FileWatcher { .. } => egui_phosphor::regular::FILE,
         }
     }
 }
@@ -333,28 +358,19 @@ pub enum Action {
     },
     #[serde(rename = "play_sound")]
     PlaySound {
+        #[serde(default)]
         file_path: String,
-    },
-    #[serde(rename = "lua")]
-    LuaScript {
-        script: String,
+        #[serde(default)]
+        play_beep: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        beep_frequency: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        beep_duration_ms: Option<u32>,
     },
     #[serde(rename = "firewall")]
     Firewall {
         process_name: String,
         block: bool,
-    },
-    #[serde(rename = "powershell")]
-    PowerShell {
-        script: String,
-        #[serde(default)]
-        run_in_window: bool,
-    },
-    #[serde(rename = "cmd")]
-    Cmd {
-        command: String,
-        #[serde(default)]
-        run_in_window: bool,
     },
     #[serde(rename = "notification")]
     Notification {
@@ -375,9 +391,28 @@ pub enum Action {
     AudioControl {
         #[serde(default)]
         target: AudioTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        process_name: Option<String>,
         action_type: AudioVolumeAction,
         #[serde(default)]
         volume_level: u8, // 0..100
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        left_volume: Option<u8>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        right_volume: Option<u8>,
+    },
+    #[serde(rename = "audio_format")]
+    AudioFormat {
+        #[serde(default)]
+        target: AudioTarget,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_name: Option<String>,
+        #[serde(default = "default_sample_rate")]
+        sample_rate: u32,
+        #[serde(default = "default_bit_depth")]
+        bit_depth: u32,
+        #[serde(default = "default_channels_two")]
+        channels: u32,
     },
     #[serde(rename = "default_device")]
     DefaultDevice {
@@ -404,25 +439,6 @@ pub enum Action {
         #[serde(default)]
         infinite: bool,
     },
-    #[serde(rename = "sound")]
-    Sound {
-        sound_type: SoundActionType,
-        #[serde(default)]
-        volume_level: u8, // 0..100
-    },
-    #[serde(rename = "microphone")]
-    Microphone {
-        action_type: MicrophoneActionType,
-        #[serde(default)]
-        volume_level: u8, // 0..100
-    },
-    #[serde(rename = "process_audio")]
-    ProcessAudio {
-        process_name: String,
-        action_type: ProcessAudioActionType,
-        #[serde(default)]
-        volume_level: u8, // 0..100
-    },
     #[serde(rename = "system_power")]
     SystemPower {
         power_type: SystemPowerType,
@@ -442,18 +458,8 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         monitor_index: Option<u32>,
     },
-    #[serde(rename = "audio_device")]
-    AudioDevice {
-        device_name: String,
-    },
-    #[serde(rename = "microphone_device")]
-    MicrophoneDevice {
-        device_name: String,
-    },
     #[serde(rename = "if_else")]
     IfElse {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        condition: Option<RuleCondition>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         conditions: Vec<RuleConditionItem>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -488,6 +494,23 @@ pub enum AudioTarget {
     #[default]
     Playback,
     Microphone,
+    Process,
+}
+
+pub fn default_sample_rate() -> u32 {
+    48000
+}
+
+pub fn default_bit_depth() -> u32 {
+    24
+}
+
+pub fn default_channels_two() -> u32 {
+    2
+}
+
+pub fn default_idle_sec() -> u32 {
+    300
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -666,36 +689,6 @@ pub enum PowerPlanType {
     PowerSaver,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum MicrophoneActionType {
-    #[default]
-    Mute,
-    Unmute,
-    ToggleMute,
-    SetVolume,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessAudioActionType {
-    #[default]
-    Mute,
-    Unmute,
-    ToggleMute,
-    SetVolume,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SoundActionType {
-    Mute,
-    Unmute,
-    ToggleMute,
-    SetVolume,
-    PlayBeep,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SystemPowerType {
@@ -757,79 +750,6 @@ impl Default for Rule {
     }
 }
 
-impl Action {
-    pub fn migrate_to_unified(&mut self) {
-        match self {
-            Action::Sound { sound_type, volume_level } => {
-                let act = match sound_type {
-                    SoundActionType::Mute => AudioVolumeAction::Mute,
-                    SoundActionType::Unmute => AudioVolumeAction::Unmute,
-                    SoundActionType::ToggleMute => AudioVolumeAction::ToggleMute,
-                    SoundActionType::SetVolume => AudioVolumeAction::SetVolume,
-                    SoundActionType::PlayBeep => AudioVolumeAction::PlayBeep,
-                };
-                *self = Action::AudioControl {
-                    target: AudioTarget::Playback,
-                    action_type: act,
-                    volume_level: *volume_level,
-                };
-            }
-            Action::Microphone { action_type, volume_level } => {
-                let act = match action_type {
-                    MicrophoneActionType::Mute => AudioVolumeAction::Mute,
-                    MicrophoneActionType::Unmute => AudioVolumeAction::Unmute,
-                    MicrophoneActionType::ToggleMute => AudioVolumeAction::ToggleMute,
-                    MicrophoneActionType::SetVolume => AudioVolumeAction::SetVolume,
-                };
-                *self = Action::AudioControl {
-                    target: AudioTarget::Microphone,
-                    action_type: act,
-                    volume_level: *volume_level,
-                };
-            }
-            Action::AudioDevice { device_name } => {
-                *self = Action::DefaultDevice {
-                    target: AudioTarget::Playback,
-                    device_name: device_name.clone(),
-                };
-            }
-            Action::MicrophoneDevice { device_name } => {
-                *self = Action::DefaultDevice {
-                    target: AudioTarget::Microphone,
-                    device_name: device_name.clone(),
-                };
-            }
-            Action::PowerShell { script, run_in_window } => {
-                *self = Action::ExecuteScript {
-                    interpreter: ScriptType::PowerShell,
-                    script: script.clone(),
-                    run_in_window: *run_in_window,
-                };
-            }
-            Action::Cmd { command, run_in_window } => {
-                *self = Action::ExecuteScript {
-                    interpreter: ScriptType::Batch,
-                    script: command.clone(),
-                    run_in_window: *run_in_window,
-                };
-            }
-            Action::LuaScript { script } => {
-                *self = Action::ExecuteScript {
-                    interpreter: ScriptType::Lua,
-                    script: script.clone(),
-                    run_in_window: false,
-                };
-            }
-            Action::IfElse { condition, conditions, .. } if conditions.is_empty() => {
-                if let Some(c) = condition.take() {
-                    conditions.push(RuleConditionItem::new(c));
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 impl Rule {
     pub fn clone_with_new_id(&self) -> Self {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -858,10 +778,13 @@ impl Rule {
                 Action::AudioControl { target, .. } => match target {
                     AudioTarget::Playback => egui_phosphor::regular::SPEAKER_HIGH,
                     AudioTarget::Microphone => egui_phosphor::regular::MICROPHONE,
+                    AudioTarget::Process => egui_phosphor::regular::FADERS,
                 },
+                Action::AudioFormat { .. } => egui_phosphor::regular::EQUALIZER,
                 Action::DefaultDevice { target, .. } => match target {
                     AudioTarget::Playback => egui_phosphor::regular::HEADPHONES,
                     AudioTarget::Microphone => egui_phosphor::regular::MICROPHONE,
+                    AudioTarget::Process => egui_phosphor::regular::FADERS,
                 },
                 Action::ExecuteScript { interpreter, .. } => match interpreter {
                     ScriptType::PowerShell | ScriptType::Lua => egui_phosphor::regular::CODE,
@@ -874,20 +797,12 @@ impl Rule {
                 Action::ProcessTuning { .. } => egui_phosphor::regular::GAUGE,
                 Action::PowerPlan { .. } => egui_phosphor::regular::PLUG,
                 Action::PlaySound { .. } => egui_phosphor::regular::MUSIC_NOTES,
-                Action::LuaScript { .. } => egui_phosphor::regular::CODE,
                 Action::Firewall { .. } => egui_phosphor::regular::SHIELD,
-                Action::PowerShell { .. } => egui_phosphor::regular::CODE,
-                Action::Cmd { .. } => egui_phosphor::regular::TERMINAL_WINDOW,
                 Action::Notification { .. } => egui_phosphor::regular::BELL,
-                Action::Sound { .. } => egui_phosphor::regular::SPEAKER_HIGH,
-                Action::Microphone { .. } => egui_phosphor::regular::MICROPHONE,
-                Action::ProcessAudio { .. } => egui_phosphor::regular::FADERS,
                 Action::SystemPower { .. } => egui_phosphor::regular::POWER,
                 Action::Delay { .. } => egui_phosphor::regular::HOURGLASS,
                 Action::HttpWebhook { .. } => egui_phosphor::regular::GLOBE,
                 Action::Display { .. } => egui_phosphor::regular::MONITOR,
-                Action::AudioDevice { .. } => egui_phosphor::regular::HEADPHONES,
-                Action::MicrophoneDevice { .. } => egui_phosphor::regular::MICROPHONE,
                 Action::IfElse { .. } => egui_phosphor::regular::GIT_FORK,
             }
         } else if let Some(trigger) = &self.trigger {
@@ -1050,7 +965,8 @@ mod tests {
         }];
         assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::STOP);
 
-        rule.actions = vec![Action::PowerShell {
+        rule.actions = vec![Action::ExecuteScript {
+            interpreter: ScriptType::PowerShell,
             script: "echo 1".into(),
             run_in_window: false,
         }];
@@ -1059,9 +975,13 @@ mod tests {
         rule.actions = vec![Action::Delay { seconds: 5.0 }];
         assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::HOURGLASS);
 
-        rule.actions = vec![Action::Microphone {
-            action_type: MicrophoneActionType::Mute,
+        rule.actions = vec![Action::AudioControl {
+            target: AudioTarget::Microphone,
+            process_name: None,
+            action_type: AudioVolumeAction::Mute,
             volume_level: 100,
+            left_volume: None,
+            right_volume: None,
         }];
         assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::MICROPHONE);
 
@@ -1127,9 +1047,14 @@ mod tests {
                 },
                 Action::PlaySound {
                     file_path: "C:\\Windows\\Media\\chimes.wav".into(),
+                    play_beep: false,
+                    beep_frequency: None,
+                    beep_duration_ms: None,
                 },
-                Action::LuaScript {
+                Action::ExecuteScript {
+                    interpreter: ScriptType::Lua,
                     script: "ph.log('info', 'Workstation setup complete!')".into(),
+                    run_in_window: false,
                 },
                 Action::Firewall {
                     process_name: "telemetry.exe".into(),
@@ -1141,14 +1066,15 @@ mod tests {
                     refresh_rate: Some(144),
                     monitor_index: Some(1),
                 },
-                Action::AudioDevice {
+                Action::DefaultDevice {
+                    target: AudioTarget::Playback,
                     device_name: "Headphones".into(),
                 },
-                Action::MicrophoneDevice {
+                Action::DefaultDevice {
+                    target: AudioTarget::Microphone,
                     device_name: "Microphone".into(),
                 },
                 Action::IfElse {
-                    condition: None,
                     conditions: vec![RuleConditionItem::new(RuleCondition::ProcessRunning {
                         process_name: "game.exe".into(),
                         match_mode: ProcessMatchMode::Exact,
@@ -1156,8 +1082,9 @@ mod tests {
                     })],
                     then_actions: vec![Action::Delay { seconds: 1.0 }],
                     else_if_branches: vec![ElseIfBranch {
-                        conditions: vec![RuleConditionItem::new(RuleCondition::PowerSource {
-                            require_ac: true,
+                        conditions: vec![RuleConditionItem::new(RuleCondition::Event {
+                            event_type: SystemEventType::PowerSourceAc,
+                            idle_duration_sec: 300,
                         })],
                         actions: vec![Action::Delay { seconds: 2.0 }],
                     }],
@@ -1175,8 +1102,10 @@ mod tests {
                 }),
                 RuleConditionItem::with_operator(
                     ConditionOperator::Or,
-                    RuleCondition::PowerSource {
-                        require_ac: true,
+                    RuleCondition::FileWatcher {
+                        path: "C:\\log.txt".into(),
+                        filter_extension: None,
+                        must_exist: true,
                     },
                 ),
             ],
@@ -1195,13 +1124,22 @@ mod tests {
     }
 
     #[test]
-    fn test_unified_actions_and_migration() {
-        // 1. Test serde roundtrip of all 4 unified actions
+    fn test_unified_actions_serde() {
         let unified_actions = vec![
             Action::AudioControl {
                 target: AudioTarget::Playback,
+                process_name: None,
                 action_type: AudioVolumeAction::SetVolume,
                 volume_level: 75,
+                left_volume: Some(70),
+                right_volume: Some(80),
+            },
+            Action::AudioFormat {
+                target: AudioTarget::Playback,
+                device_name: None,
+                sample_rate: 48000,
+                bit_depth: 24,
+                channels: 2,
             },
             Action::DefaultDevice {
                 target: AudioTarget::Microphone,
@@ -1249,89 +1187,11 @@ mod tests {
         let json = serde_json::to_string(&unified_actions).expect("Must serialize");
         let decoded: Vec<Action> = serde_json::from_str(&json).expect("Must deserialize");
         assert_eq!(decoded, unified_actions);
-
-        // 2. Test migration of legacy Sound & Mic
-        let mut sound = Action::Sound {
-            sound_type: SoundActionType::SetVolume,
-            volume_level: 80,
-        };
-        sound.migrate_to_unified();
-        assert_eq!(
-            sound,
-            Action::AudioControl {
-                target: AudioTarget::Playback,
-                action_type: AudioVolumeAction::SetVolume,
-                volume_level: 80,
-            }
-        );
-
-        let mut mic = Action::Microphone {
-            action_type: MicrophoneActionType::Mute,
-            volume_level: 0,
-        };
-        mic.migrate_to_unified();
-        assert_eq!(
-            mic,
-            Action::AudioControl {
-                target: AudioTarget::Microphone,
-                action_type: AudioVolumeAction::Mute,
-                volume_level: 0,
-            }
-        );
-
-        // 3. Test migration of legacy Default devices
-        let mut dev = Action::AudioDevice { device_name: "Speakers".into() };
-        dev.migrate_to_unified();
-        assert_eq!(
-            dev,
-            Action::DefaultDevice { target: AudioTarget::Playback, device_name: "Speakers".into() }
-        );
-
-        let mut mic_dev = Action::MicrophoneDevice { device_name: "Headset".into() };
-        mic_dev.migrate_to_unified();
-        assert_eq!(
-            mic_dev,
-            Action::DefaultDevice { target: AudioTarget::Microphone, device_name: "Headset".into() }
-        );
-
-        // 4. Test migration of scripts
-        let mut ps = Action::PowerShell { script: "dir".into(), run_in_window: false };
-        ps.migrate_to_unified();
-        assert_eq!(
-            ps,
-            Action::ExecuteScript {
-                interpreter: ScriptType::PowerShell,
-                script: "dir".into(),
-                run_in_window: false,
-            }
-        );
-
-        let mut cmd = Action::Cmd { command: "echo 1".into(), run_in_window: true };
-        cmd.migrate_to_unified();
-        assert_eq!(
-            cmd,
-            Action::ExecuteScript {
-                interpreter: ScriptType::Batch,
-                script: "echo 1".into(),
-                run_in_window: true,
-            }
-        );
-
-        let mut lua = Action::LuaScript { script: "print(1)".into() };
-        lua.migrate_to_unified();
-        assert_eq!(
-            lua,
-            Action::ExecuteScript {
-                interpreter: ScriptType::Lua,
-                script: "print(1)".into(),
-                run_in_window: false,
-            }
-        );
     }
 
     #[test]
     fn test_global_hotkey_hold_mode_and_repeat_serde() {
-        // Test backwards compatibility: json without repeat_while_held defaults to false
+        // Test optional field default: json without repeat_while_held defaults to false
         let json = r#"{"$trigger_type":"hotkey","key_combination":"Ctrl+Shift+H","hold_mode":true}"#;
         let trigger: Trigger = serde_json::from_str(json).unwrap();
         assert_eq!(
@@ -1352,5 +1212,38 @@ mod tests {
         let serialized = serde_json::to_string(&trigger_loop).unwrap();
         let deserialized: Trigger = serde_json::from_str(&serialized).unwrap();
         assert_eq!(trigger_loop, deserialized);
+    }
+
+    #[test]
+    fn test_precondition_resource_and_event_serde() {
+        // 1. ResourceThreshold roundtrip
+        let res_cond = RuleCondition::ResourceThreshold {
+            process_name: "game.exe".to_string(),
+            cpu_percent: Some(75.5),
+            ram_mb: Some(2048),
+            duration_sec: 10,
+        };
+        let serialized = serde_json::to_string(&res_cond).unwrap();
+        let deserialized: RuleCondition = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(res_cond, deserialized);
+
+        // 2. Event condition roundtrip
+        let event_cond = RuleCondition::Event {
+            event_type: SystemEventType::SessionLock,
+            idle_duration_sec: 300,
+        };
+        let serialized = serde_json::to_string(&event_cond).unwrap();
+        let deserialized: RuleCondition = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(event_cond, deserialized);
+
+        // 3. FileWatcher condition roundtrip
+        let file_cond = RuleCondition::FileWatcher {
+            path: "C:\\test.log".to_string(),
+            filter_extension: Some("log".to_string()),
+            must_exist: true,
+        };
+        let serialized = serde_json::to_string(&file_cond).unwrap();
+        let deserialized: RuleCondition = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(file_cond, deserialized);
     }
 }

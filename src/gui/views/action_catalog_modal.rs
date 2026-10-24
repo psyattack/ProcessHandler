@@ -11,7 +11,7 @@ use crate::gui::components::widgets::{self, Glyph};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
 use crate::models::{
-    Action, PowerPlanType, ProcessAudioActionType,
+    Action, PowerPlanType,
     SystemPowerType, WindowActionType,
 };
 
@@ -109,36 +109,41 @@ const CATALOG_ITEMS: [CatalogItem; 18] = [
     // 2. Audio & Media
     CatalogItem {
         category_idx: 2,
-        badge: "AUDIO / MIC",
+        badge: "AUDIO",
         title: |loc| loc.action_audio_control_title,
         description: |loc| loc.action_audio_control_desc,
         glyph: egui_phosphor::regular::SPEAKER_HIGH,
         tint: |t| t.warn,
         keywords: &[
-            "sound", "audio", "volume", "mute", "unmute", "beep", "master", "speaker", "microphone", "mic",
-            "звук", "громкость", "мутить", "замутить", "динамик", "сигнал", "аудио", "бип", "микрофон",
+            "sound", "audio", "volume", "mute", "unmute", "process", "master", "speaker", "microphone", "mic",
+            "звук", "громкость", "мутить", "замутить", "динамик", "процесс", "аудио", "микрофон",
         ],
         constructor: || Action::AudioControl {
             target: crate::models::AudioTarget::Playback,
-            action_type: crate::models::AudioVolumeAction::SetVolume,
+            process_name: None,
+            action_type: crate::models::AudioVolumeAction::Mute,
             volume_level: 50,
+            left_volume: None,
+            right_volume: None,
         },
     },
     CatalogItem {
         category_idx: 2,
         badge: "AUDIO",
-        title: |loc| loc.inspector_menu_process_audio,
-        description: |loc| loc.catalog_desc_process_audio,
-        glyph: egui_phosphor::regular::FADERS,
+        title: |loc| loc.catalog_title_audio_format,
+        description: |loc| loc.catalog_desc_audio_format,
+        glyph: egui_phosphor::regular::EQUALIZER,
         tint: |t| t.warn,
         keywords: &[
-            "process audio", "app volume", "mixer", "fader", "mute app", "application audio",
-            "микшер", "звук приложения", "громкость процесса", "глушить программу", "аудио",
+            "audio format", "sample rate", "hz", "bit", "depth", "channels", "frequency",
+            "формат аудио", "частота", "герц", "бит", "каналы", "звук",
         ],
-        constructor: || Action::ProcessAudio {
-            process_name: String::new(),
-            action_type: ProcessAudioActionType::Mute,
-            volume_level: 100,
+        constructor: || Action::AudioFormat {
+            target: crate::models::AudioTarget::Playback,
+            device_name: None,
+            sample_rate: 48000,
+            bit_depth: 24,
+            channels: 2,
         },
     },
     CatalogItem {
@@ -149,11 +154,14 @@ const CATALOG_ITEMS: [CatalogItem; 18] = [
         glyph: egui_phosphor::regular::MUSIC_NOTES,
         tint: |t| t.warn,
         keywords: &[
-            "play sound", "audio", "wav", "file", "play", "music", "alert", "effect",
-            "звук", "воспроизвести", "аудио", "мелодия", "файл", "эффект", "сигнал",
+            "play sound", "audio", "wav", "mp3", "beep", "file", "play", "music", "alert", "effect",
+            "звук", "воспроизвести", "аудио", "бип", "сигнал", "мелодия", "файл", "эффект",
         ],
         constructor: || Action::PlaySound {
             file_path: String::new(),
+            play_beep: false,
+            beep_frequency: None,
+            beep_duration_ms: None,
         },
     },
 
@@ -239,7 +247,6 @@ const CATALOG_ITEMS: [CatalogItem; 18] = [
             "если", "иначе", "ветвление", "условие", "логика", "проверка",
         ],
         constructor: || Action::IfElse {
-            condition: None,
             conditions: vec![crate::models::RuleConditionItem::new(crate::models::RuleCondition::default_process())],
             then_actions: Vec::new(),
             else_if_branches: Vec::new(),
@@ -309,7 +316,7 @@ const CATALOG_ITEMS: [CatalogItem; 18] = [
     },
     CatalogItem {
         category_idx: 2,
-        badge: "DEV",
+        badge: "AUDIO",
         title: |loc| loc.action_default_device_title,
         description: |loc| loc.action_default_device_desc,
         glyph: egui_phosphor::regular::HEADPHONES,

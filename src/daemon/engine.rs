@@ -96,22 +96,6 @@ pub fn get_current_foreground_process() -> Option<String> {
     None
 }
 
-#[cfg(windows)]
-pub fn is_power_ac() -> bool {
-    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
-    unsafe {
-        let mut sps: SYSTEM_POWER_STATUS = std::mem::zeroed();
-        if GetSystemPowerStatus(&mut sps).is_ok() {
-            return sps.ACLineStatus == 1;
-        }
-    }
-    true
-}
-#[cfg(not(windows))]
-pub fn is_power_ac() -> bool {
-    true
-}
-
 impl DaemonEngine {
     pub const MAX_LOGS: usize = 500;
 
@@ -297,13 +281,91 @@ impl DaemonEngine {
                     cur_hm.as_str() >= st || cur_hm.as_str() <= et
                 }
             }
-            RuleCondition::PowerSource { require_ac } => {
-                let is_ac = is_power_ac();
-                is_ac == *require_ac
+            RuleCondition::Event { event_type, idle_duration_sec } => {
+                match event_type {
+                    crate::models::SystemEventType::PowerSourceAc => {
+                        crate::daemon::system_events::is_ac_power().unwrap_or(true)
+                    }
+                    crate::models::SystemEventType::PowerSourceBattery => {
+                        !crate::daemon::system_events::is_ac_power().unwrap_or(true)
+                    }
+                    crate::models::SystemEventType::UserIdle => {
+                        let idle_s = crate::daemon::system_events::get_user_idle_seconds().unwrap_or(0);
+                        idle_s >= (*idle_duration_sec as u64)
+                    }
+                    crate::models::SystemEventType::UserActive => {
+                        let idle_s = crate::daemon::system_events::get_user_idle_seconds().unwrap_or(0);
+                        idle_s < (*idle_duration_sec as u64)
+                    }
+                    crate::models::SystemEventType::SessionLock => {
+                        crate::daemon::system_events::is_session_locked()
+                    }
+                    crate::models::SystemEventType::SessionUnlock => {
+                        !crate::daemon::system_events::is_session_locked()
+                    }
+                    crate::models::SystemEventType::SystemSleep => false,
+                    crate::models::SystemEventType::SystemResume => true,
+                    _ => false,
+                }
             }
-            RuleCondition::FileExists { path, must_exist } => {
-                let exists = std::path::Path::new(path).exists();
+            RuleCondition::FileWatcher { path, filter_extension, must_exist } => {
+                let p = std::path::Path::new(path);
+                let exists = if p.is_dir() {
+                    if let Some(ext) = filter_extension {
+                        let ext_clean = ext.trim().trim_start_matches('*').trim_start_matches('.').to_lowercase();
+                        if ext_clean.is_empty() {
+                            p.exists()
+                        } else if let Ok(entries) = std::fs::read_dir(p) {
+                            entries.filter_map(|e| e.ok()).any(|e| {
+                                let ep = e.path();
+                                if let Some(file_ext) = ep.extension().and_then(|s| s.to_str()) {
+                                    file_ext.eq_ignore_ascii_case(&ext_clean)
+                                } else if let Some(file_name) = ep.file_name().and_then(|s| s.to_str()) {
+                                    file_name.eq_ignore_ascii_case(&ext_clean)
+                                } else {
+                                    false
+                                }
+                            })
+                        } else {
+                            false
+                        }
+                    } else {
+                        p.exists()
+                    }
+                } else if let Some(ext) = filter_extension {
+                    let ext_clean = ext.trim().trim_start_matches('*').trim_start_matches('.').to_lowercase();
+                    if ext_clean.is_empty() {
+                        p.exists()
+                    } else {
+                        let matches_ext = p.extension()
+                            .and_then(|s| s.to_str())
+                            .map(|e| e.eq_ignore_ascii_case(&ext_clean))
+                            .unwrap_or(false);
+                        p.exists() && matches_ext
+                    }
+                } else {
+                    p.exists()
+                };
                 exists == *must_exist
+            }
+            RuleCondition::ResourceThreshold { process_name, cpu_percent, ram_mb, duration_sec: _ } => {
+                let snap = ProcessWatcher::get_detailed_snapshot();
+                let mut matched_any = false;
+                for proc in &snap {
+                    if Self::matches_process(process_name, &proc.name, ProcessMatchMode::Exact) {
+                        matched_any = true;
+                        let mem_mb = proc.memory_bytes / (1024 * 1024);
+                        let over_mem = ram_mb.is_none_or(|limit| mem_mb >= limit);
+                        let over_cpu = cpu_percent.is_none_or(|limit| proc.cpu_percent >= limit);
+                        if over_mem && over_cpu && (ram_mb.is_some() || cpu_percent.is_some()) {
+                            return true;
+                        }
+                    }
+                }
+                if (ram_mb.is_none() && cpu_percent.is_none()) && matched_any {
+                    return true;
+                }
+                false
             }
         }
     }
@@ -1364,7 +1426,7 @@ mod tests {
 
     #[test]
     fn test_process_audio_rule_serde() {
-        use crate::models::ProcessAudioActionType;
+        use crate::models::{AudioTarget, AudioVolumeAction};
 
         let json = r#"{
             "id": "audio_rule_1",
@@ -1372,7 +1434,8 @@ mod tests {
             "is_enabled": true,
             "actions": [
                 {
-                    "$action_type": "process_audio",
+                    "$action_type": "audio_control",
+                    "target": "process",
                     "process_name": "game.exe",
                     "action_type": "mute",
                     "volume_level": 100
@@ -1382,7 +1445,8 @@ mod tests {
                     "seconds": 5.0
                 },
                 {
-                    "$action_type": "process_audio",
+                    "$action_type": "audio_control",
+                    "target": "process",
                     "process_name": "{ProcessName}",
                     "action_type": "unmute",
                     "volume_level": 100
@@ -1394,11 +1458,12 @@ mod tests {
         assert_eq!(rule.name, "Game Audio Intro Muter");
         assert_eq!(rule.actions.len(), 3);
 
-        if let Action::ProcessAudio { process_name, action_type, .. } = &rule.actions[0] {
-            assert_eq!(process_name, "game.exe");
-            assert_eq!(*action_type, ProcessAudioActionType::Mute);
+        if let Action::AudioControl { target, process_name, action_type, .. } = &rule.actions[0] {
+            assert_eq!(*target, AudioTarget::Process);
+            assert_eq!(process_name.as_deref(), Some("game.exe"));
+            assert_eq!(*action_type, AudioVolumeAction::Mute);
         } else {
-            panic!("Expected ProcessAudio Mute");
+            panic!("Expected AudioControl Process Mute");
         }
 
         if let Action::Delay { seconds } = &rule.actions[1] {
@@ -1407,21 +1472,22 @@ mod tests {
             panic!("Expected Delay");
         }
 
-        if let Action::ProcessAudio { process_name, action_type, .. } = &rule.actions[2] {
-            assert_eq!(process_name, "{ProcessName}");
-            assert_eq!(*action_type, ProcessAudioActionType::Unmute);
+        if let Action::AudioControl { target, process_name, action_type, .. } = &rule.actions[2] {
+            assert_eq!(*target, AudioTarget::Process);
+            assert_eq!(process_name.as_deref(), Some("{ProcessName}"));
+            assert_eq!(*action_type, AudioVolumeAction::Unmute);
         } else {
-            panic!("Expected ProcessAudio Unmute");
+            panic!("Expected AudioControl Process Unmute");
         }
 
         let serialized = serde_json::to_string(&rule).expect("serialize rule");
-        assert!(serialized.contains("process_audio"));
+        assert!(serialized.contains("audio_control"));
         assert!(serialized.contains("game.exe"));
     }
 
     #[test]
     fn test_microphone_rule_serde() {
-        use crate::models::MicrophoneActionType;
+        use crate::models::{AudioTarget, AudioVolumeAction};
 
         let json = r#"{
             "id": "mic_rule_1",
@@ -1429,7 +1495,8 @@ mod tests {
             "is_enabled": true,
             "actions": [
                 {
-                    "$action_type": "microphone",
+                    "$action_type": "audio_control",
+                    "target": "microphone",
                     "action_type": "toggle_mute",
                     "volume_level": 80
                 }
@@ -1440,15 +1507,16 @@ mod tests {
         assert_eq!(rule.name, "Mic Muter");
         assert_eq!(rule.actions.len(), 1);
 
-        if let Action::Microphone { action_type, volume_level } = &rule.actions[0] {
-            assert_eq!(*action_type, MicrophoneActionType::ToggleMute);
+        if let Action::AudioControl { target, action_type, volume_level, .. } = &rule.actions[0] {
+            assert_eq!(*target, AudioTarget::Microphone);
+            assert_eq!(*action_type, AudioVolumeAction::ToggleMute);
             assert_eq!(*volume_level, 80);
         } else {
-            panic!("Expected Action::Microphone");
+            panic!("Expected Action::AudioControl Microphone");
         }
 
         let serialized = serde_json::to_string(&rule).expect("serialize mic rule");
-        assert!(serialized.contains("microphone"));
+        assert!(serialized.contains("audio_control"));
         assert!(serialized.contains("toggle_mute"));
     }
 
@@ -2002,20 +2070,23 @@ mod tests {
         let _ = std::fs::write(&existing_path, "test");
         let non_existing_path = temp_dir.join("processhandler_non_existing_file_12345.tmp");
 
-        let cond_file_exists = RuleCondition::FileExists {
+        let cond_file_exists = RuleCondition::FileWatcher {
             path: existing_path.to_string_lossy().to_string(),
+            filter_extension: None,
             must_exist: true,
         };
-        let cond_file_not_exists = RuleCondition::FileExists {
+        let cond_file_not_exists = RuleCondition::FileWatcher {
             path: non_existing_path.to_string_lossy().to_string(),
+            filter_extension: None,
             must_exist: true,
         };
 
         assert!(DaemonEngine::evaluate_condition(&cond_file_exists));
         assert!(!DaemonEngine::evaluate_condition(&cond_file_not_exists));
 
-        let cond_file_must_not_exist = RuleCondition::FileExists {
+        let cond_file_must_not_exist = RuleCondition::FileWatcher {
             path: non_existing_path.to_string_lossy().to_string(),
+            filter_extension: None,
             must_exist: false,
         };
         assert!(DaemonEngine::evaluate_condition(&cond_file_must_not_exist));
@@ -2069,8 +2140,9 @@ mod tests {
             cooldown_seconds: 0.0,
             trigger: None,
             conditions: vec![
-                RuleConditionItem::new(RuleCondition::FileExists {
+                RuleConditionItem::new(RuleCondition::FileWatcher {
                     path: non_existing_path.to_string_lossy().to_string(),
+                    filter_extension: None,
                     must_exist: true,
                 }),
             ],

@@ -6,7 +6,7 @@ use egui::{CornerRadius, pos2, Rect, Ui, vec2};
 use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
-use crate::models::{Action, MicrophoneActionType, ProcessAudioActionType, Rule, Trigger};
+use crate::models::{Action, Rule, Trigger};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum RuleFilter {
@@ -134,10 +134,16 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
         if filtered.is_empty() {
             ui.add_space(48.0);
             ui.vertical_centered(|ui| {
-                widgets::hud(ui, loc.rules_empty_title, t.muted);
-                ui.add_space(12.0);
-                if widgets::button(ui, loc.rules_btn_create_first, Kind::Secondary, 0.0).clicked() {
-                    state.start_new_rule();
+                if total == 0 {
+                    widgets::hud(ui, loc.rules_empty_title, t.muted);
+                    ui.add_space(12.0);
+                    if widgets::button(ui, loc.rules_btn_create_first, Kind::Secondary, 0.0).clicked() {
+                        state.start_new_rule();
+                    }
+                } else {
+                    widgets::hud(ui, loc.rules_no_filtered_matches, t.muted);
+                    ui.add_space(6.0);
+                    ui.label(egui::RichText::new(loc.rules_no_filtered_matches_tip).color(t.faint));
                 }
             });
             return;
@@ -399,23 +405,38 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
         Action::KillProcess { process_name, .. } => {
             format!("KILL {}", process_name)
         }
-        Action::AudioControl { target, action_type, volume_level } => {
+        Action::AudioControl { target, action_type, volume_level, process_name, left_volume, right_volume } => {
             let target_str = match target {
-                crate::models::AudioTarget::Playback => "SOUND",
-                crate::models::AudioTarget::Microphone => "MIC",
+                crate::models::AudioTarget::Playback => "SOUND".to_string(),
+                crate::models::AudioTarget::Microphone => "MIC".to_string(),
+                crate::models::AudioTarget::Process => format!("PROC ({})", process_name.as_deref().unwrap_or("?")),
             };
             match action_type {
                 crate::models::AudioVolumeAction::Mute => format!("{} {}", loc.summary_action_mute, target_str),
                 crate::models::AudioVolumeAction::Unmute => format!("{} {}", loc.summary_action_unmute, target_str),
                 crate::models::AudioVolumeAction::ToggleMute => format!("{} {}", loc.summary_action_toggle, target_str),
-                crate::models::AudioVolumeAction::SetVolume => format!("{} {}% {}", loc.summary_action_vol, volume_level, target_str),
+                crate::models::AudioVolumeAction::SetVolume => {
+                    if let (Some(l), Some(r)) = (left_volume, right_volume) {
+                        format!("VOL L:{}% R:{}% {}", l, r, target_str)
+                    } else {
+                        format!("{} {}% {}", loc.summary_action_vol, volume_level, target_str)
+                    }
+                }
                 crate::models::AudioVolumeAction::PlayBeep => "BEEP".to_string(),
             }
+        }
+        Action::AudioFormat { target, sample_rate, bit_depth, .. } => {
+            let t_str = match target {
+                crate::models::AudioTarget::Playback | crate::models::AudioTarget::Process => "OUT",
+                crate::models::AudioTarget::Microphone => "IN",
+            };
+            format!("FORMAT {} {}Hz/{}-bit", t_str, sample_rate, bit_depth)
         }
         Action::DefaultDevice { target, device_name } => {
             let pfx = match target {
                 crate::models::AudioTarget::Playback => "AUDIO DEV",
                 crate::models::AudioTarget::Microphone => "MIC DEV",
+                crate::models::AudioTarget::Process => "PROC AUDIO",
             };
             format!("{} {}", pfx, device_name)
         }
@@ -435,26 +456,7 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
             let spd_str = if (*speed - 1.0).abs() > 0.05 { format!(" @{:.1}x", speed) } else { String::new() };
             format!("MACRO ({} ev){}{}", events.len(), rep_str, spd_str)
         }
-        Action::PowerShell { .. } => "POWERSHELL".to_string(),
-        Action::Cmd { .. } => "CMD".to_string(),
         Action::Notification { title, .. } => format!("NOTIFY \"{}\"", title),
-        Action::Sound { .. } => "SOUND".to_string(),
-        Action::Microphone { action_type, volume_level } => {
-            match action_type {
-                MicrophoneActionType::Mute => format!("{} MIC", loc.summary_action_mute),
-                MicrophoneActionType::Unmute => format!("{} MIC", loc.summary_action_unmute),
-                MicrophoneActionType::ToggleMute => format!("{} MIC", loc.summary_action_toggle),
-                MicrophoneActionType::SetVolume => format!("{} {}% MIC", loc.summary_action_vol, volume_level),
-            }
-        }
-        Action::ProcessAudio { process_name, action_type, volume_level } => {
-            match action_type {
-                ProcessAudioActionType::Mute => format!("{} {}", loc.summary_action_mute, process_name),
-                ProcessAudioActionType::Unmute => format!("{} {}", loc.summary_action_unmute, process_name),
-                ProcessAudioActionType::ToggleMute => format!("{} {}", loc.summary_action_toggle, process_name),
-                ProcessAudioActionType::SetVolume => format!("{} {}% {}", loc.summary_action_vol, volume_level, process_name),
-            }
-        }
         Action::SystemPower { power_type } => format!("{} {:?}", loc.summary_action_power, power_type),
         Action::Delay { seconds } => format!("{} {:.1}S", loc.summary_action_wait, seconds),
         Action::HttpWebhook { .. } => "WEBHOOK".to_string(),
@@ -468,7 +470,6 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
         }
         Action::PowerPlan { plan } => format!("{:?} POWER", plan),
         Action::PlaySound { .. } => "PLAY SOUND".to_string(),
-        Action::LuaScript { .. } => "LUA".to_string(),
         Action::Firewall { process_name, block } => if *block { format!("BLOCK {}", process_name) } else { format!("ALLOW {}", process_name) },
         Action::Display { width, height, refresh_rate, monitor_index } => {
             let res = match (width, height) {
@@ -478,10 +479,8 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
             let mon_prefix = monitor_index.map(|m| format!("[M{}] ", m)).unwrap_or_default();
             refresh_rate.map(|r| format!("DISPLAY {}{} @ {}Hz", mon_prefix, res, r)).unwrap_or_else(|| format!("DISPLAY {}{}", mon_prefix, res))
         }
-        Action::AudioDevice { device_name } => format!("AUDIO DEV {}", device_name),
-        Action::MicrophoneDevice { device_name } => format!("MIC DEV {}", device_name),
-        Action::IfElse { conditions, condition, then_actions, else_actions, .. } => {
-            let first_cond = conditions.first().map(|c| &c.condition).or(condition.as_ref());
+        Action::IfElse { conditions, then_actions, else_actions, .. } => {
+            let first_cond = conditions.first().map(|c| &c.condition);
             let cond_summary = if let Some(cond) = first_cond {
                 match cond {
                     crate::models::RuleCondition::ProcessRunning { process_name, must_be_running, .. } => {
@@ -493,12 +492,18 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
                     crate::models::RuleCondition::TimeRange { start_time, end_time, .. } => {
                         format!("{}-{}", start_time, end_time)
                     }
-                    crate::models::RuleCondition::PowerSource { require_ac } => {
-                        if *require_ac { "AC".to_string() } else { "BATTERY".to_string() }
+                    crate::models::RuleCondition::Event { event_type, .. } => {
+                        format!("EVENT:{:?}", event_type)
                     }
-                    crate::models::RuleCondition::FileExists { path, must_exist } => {
+                    crate::models::RuleCondition::FileWatcher { path, must_exist, .. } => {
                         let fname = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy();
                         if *must_exist { format!("FILE:{}", fname) } else { format!("!FILE:{}", fname) }
+                    }
+                    crate::models::RuleCondition::ResourceThreshold { process_name, cpu_percent, ram_mb, .. } => {
+                        let mut limits = Vec::new();
+                        if let Some(cpu) = cpu_percent { limits.push(format!("CPU>{:.0}%", cpu)); }
+                        if let Some(ram) = ram_mb { limits.push(format!("RAM>{}MB", ram)); }
+                        format!("RES:{}({})", process_name, limits.join(","))
                     }
                 }
             } else {

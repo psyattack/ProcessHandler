@@ -11,7 +11,7 @@ pub const SHARE_PREFIX: &str = "PH1:";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum SharedAutomation {
-    Single(Rule),
+    Single(Box<Rule>),
     Batch(Vec<Rule>),
 }
 
@@ -38,8 +38,6 @@ pub fn decode_and_decompress(raw_input: &str) -> Result<Vec<Rule>, String> {
 
     let encoded = if let Some(stripped) = clean.strip_prefix(SHARE_PREFIX) {
         stripped
-    } else if let Some(stripped) = clean.strip_prefix("PH_AUTO:") {
-        stripped
     } else {
         clean
     };
@@ -51,7 +49,7 @@ pub fn decode_and_decompress(raw_input: &str) -> Result<Vec<Rule>, String> {
         if decoder.read_to_string(&mut json_str).is_ok() {
             if let Ok(shared) = serde_json::from_str::<SharedAutomation>(&json_str) {
                 return Ok(match shared {
-                    SharedAutomation::Single(r) => vec![r],
+                    SharedAutomation::Single(r) => vec![*r],
                     SharedAutomation::Batch(v) => v,
                 });
             }
@@ -67,7 +65,7 @@ pub fn decode_and_decompress(raw_input: &str) -> Result<Vec<Rule>, String> {
     // 2. Fallback: Direct JSON parsing
     if let Ok(shared) = serde_json::from_str::<SharedAutomation>(clean) {
         return Ok(match shared {
-            SharedAutomation::Single(r) => vec![r],
+            SharedAutomation::Single(r) => vec![*r],
             SharedAutomation::Batch(v) => v,
         });
     }
@@ -135,7 +133,7 @@ mod tests {
             ..Default::default()
         };
 
-        let encoded = compress_and_encode(&SharedAutomation::Single(rule.clone())).expect("encode failed");
+        let encoded = compress_and_encode(&SharedAutomation::Single(Box::new(rule.clone()))).expect("encode failed");
         assert!(encoded.starts_with(SHARE_PREFIX));
         println!("Encoded length: {}", encoded.len());
 

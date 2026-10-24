@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::process::Command;
 use crate::models::{
-    Action, MicrophoneActionType, MouseActionType, MouseButton, MouseCoordMode, PowerPlanType,
-    ProcessAudioActionType, ProcessPriorityLevel, SoundActionType, SystemPowerType, WindowActionType,
+    Action, AudioVolumeAction, MouseActionType, MouseButton, MouseCoordMode, PowerPlanType,
+    ProcessPriorityLevel, SystemPowerType, WindowActionType,
 };
 
 #[cfg(windows)]
@@ -60,15 +60,6 @@ impl ActionRunner {
         match action {
             Action::ExecuteScript { interpreter, script, run_in_window } => {
                 Self::run_script_internal(interpreter, script, *run_in_window, context)
-            }
-            Action::PowerShell { script, run_in_window } => {
-                Self::run_script_internal(&crate::models::ScriptType::PowerShell, script, *run_in_window, context)
-            }
-            Action::Cmd { command, run_in_window } => {
-                Self::run_script_internal(&crate::models::ScriptType::Batch, command, *run_in_window, context)
-            }
-            Action::LuaScript { script } => {
-                Self::run_script_internal(&crate::models::ScriptType::Lua, script, false, context)
             }
             other => {
                 Self::execute_void_action(other, context).await?;
@@ -291,9 +282,24 @@ impl ActionRunner {
                 Ok(())
             }
 
-            Action::PlaySound { file_path } => {
-                let path = Self::interpolate_tokens(file_path, context);
-                play_sound_file(&path)?;
+            Action::PlaySound { file_path, play_beep, beep_frequency, beep_duration_ms } => {
+                if *play_beep {
+                    #[cfg(windows)]
+                    unsafe {
+                        if let Some(freq) = beep_frequency {
+                            let f = (*freq).clamp(37, 32767);
+                            let d = beep_duration_ms.unwrap_or(200).clamp(10, 10000);
+                            let _ = windows::Win32::System::Diagnostics::Debug::Beep(f, d);
+                        } else {
+                            let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(
+                                windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE(0),
+                            );
+                        }
+                    }
+                } else {
+                    let path = Self::interpolate_tokens(file_path, context);
+                    play_sound_file(&path)?;
+                }
                 Ok(())
             }
 
@@ -357,35 +363,6 @@ impl ActionRunner {
                 Ok(())
             }
 
-            Action::Sound { sound_type, volume_level } => {
-                if *sound_type == SoundActionType::PlayBeep {
-                    #[cfg(windows)]
-                    unsafe {
-                        let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(
-                            windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE(0),
-                        );
-                    }
-                } else {
-                    #[cfg(windows)]
-                    {
-                        if let Err(e) = set_audio_volume_or_mute(*sound_type, *volume_level) {
-                            eprintln!("Audio action error: {e}");
-                        }
-                    }
-                }
-                Ok(())
-            }
-
-            Action::Microphone { action_type, volume_level } => {
-                #[cfg(windows)]
-                {
-                    if let Err(e) = set_microphone_volume_or_mute(*action_type, *volume_level) {
-                        eprintln!("Microphone action error: {e}");
-                    }
-                }
-                Ok(())
-            }
-
             Action::SystemPower { power_type } => {
                 match power_type {
                     SystemPowerType::Lock => {
@@ -426,39 +403,6 @@ impl ActionRunner {
                 Ok(())
             }
 
-            Action::ProcessAudio {
-                process_name,
-                action_type,
-                volume_level,
-            } => {
-                let proc_name = Self::interpolate_tokens(process_name, context);
-                let target_pid = context.get("ProcessId").and_then(|p| p.parse::<u32>().ok());
-
-                #[cfg(windows)]
-                {
-                    // Retry up to 15 times with 150ms delay (~2.2s total) in case audio session is not yet registered
-                    let mut matched = false;
-                    for attempt in 0..15 {
-                        match set_process_audio(&proc_name, target_pid, *action_type, *volume_level) {
-                            Ok(found) => {
-                                if found {
-                                    matched = true;
-                                    break;
-                                }
-                            }
-                            Err(e) => return Err(e),
-                        }
-                        if attempt < 14 {
-                            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-                        }
-                    }
-                    if !matched {
-                        return Err(format!("No audio session found for process '{}'", proc_name));
-                    }
-                }
-                Ok(())
-            }
-
             Action::Delay { seconds } => {
                 tokio::time::sleep(std::time::Duration::from_secs_f64(*seconds)).await;
                 Ok(())
@@ -472,65 +416,77 @@ impl ActionRunner {
                 Ok(())
             }
 
-            Action::AudioDevice { device_name } => {
-                let name = Self::interpolate_tokens(device_name, context);
-                #[cfg(windows)]
-                {
-                    set_default_audio_device(&name)?;
-                }
-                Ok(())
-            }
-
-            Action::MicrophoneDevice { device_name } => {
-                let name = Self::interpolate_tokens(device_name, context);
-                #[cfg(windows)]
-                {
-                    set_default_microphone_device(&name)?;
-                }
-                Ok(())
-            }
-
-            Action::AudioControl { target, action_type, volume_level } => {
+            Action::AudioControl {
+                target,
+                process_name,
+                action_type,
+                volume_level,
+                left_volume,
+                right_volume,
+            } => {
                 match target {
                     crate::models::AudioTarget::Playback => {
-                        if *action_type == crate::models::AudioVolumeAction::PlayBeep {
-                            #[cfg(windows)]
-                            unsafe {
-                                let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(
-                                    windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE(0),
-                                );
-                            }
-                        } else {
-                            let sound_type = match action_type {
-                                crate::models::AudioVolumeAction::Mute => SoundActionType::Mute,
-                                crate::models::AudioVolumeAction::Unmute => SoundActionType::Unmute,
-                                crate::models::AudioVolumeAction::ToggleMute => SoundActionType::ToggleMute,
-                                crate::models::AudioVolumeAction::SetVolume => SoundActionType::SetVolume,
-                                crate::models::AudioVolumeAction::PlayBeep => SoundActionType::PlayBeep,
-                            };
-                            #[cfg(windows)]
-                            {
-                                if let Err(e) = set_audio_volume_or_mute(sound_type, *volume_level) {
-                                    eprintln!("Audio action error: {e}");
-                                }
+                        #[cfg(windows)]
+                        {
+                            if let Err(e) = set_audio_volume_or_mute(*action_type, *volume_level, *left_volume, *right_volume) {
+                                eprintln!("Audio action error: {e}");
                             }
                         }
                     }
                     crate::models::AudioTarget::Microphone => {
-                        let mic_type = match action_type {
-                            crate::models::AudioVolumeAction::Mute => MicrophoneActionType::Mute,
-                            crate::models::AudioVolumeAction::Unmute => MicrophoneActionType::Unmute,
-                            crate::models::AudioVolumeAction::ToggleMute => MicrophoneActionType::ToggleMute,
-                            crate::models::AudioVolumeAction::SetVolume => MicrophoneActionType::SetVolume,
-                            crate::models::AudioVolumeAction::PlayBeep => MicrophoneActionType::Mute,
-                        };
                         #[cfg(windows)]
                         {
-                            if let Err(e) = set_microphone_volume_or_mute(mic_type, *volume_level) {
+                            if let Err(e) = set_microphone_volume_or_mute(*action_type, *volume_level) {
                                 eprintln!("Microphone action error: {e}");
                             }
                         }
                     }
+                    crate::models::AudioTarget::Process => {
+                        let p_name = process_name.as_deref().unwrap_or("");
+                        let target_proc = Self::interpolate_tokens(p_name, context);
+                        let target_pid = context.get("ProcessId").and_then(|p| p.parse::<u32>().ok());
+                        #[cfg(windows)]
+                        {
+                            // Retry up to 15 times with 150ms delay (~2.2s total) in case audio session is not yet registered
+                            let mut matched = false;
+                            for attempt in 0..15 {
+                                match set_process_audio(&target_proc, target_pid, *action_type, *volume_level) {
+                                    Ok(found) => {
+                                        if found {
+                                            matched = true;
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => return Err(e),
+                                }
+                                if attempt < 14 {
+                                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                                }
+                            }
+                            if !matched && !target_proc.is_empty() && target_proc != "*" && target_proc != "current" {
+                                eprintln!("No audio session found for process '{}'", target_proc);
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+
+            Action::AudioFormat {
+                target,
+                device_name,
+                sample_rate,
+                bit_depth,
+                channels,
+            } => {
+                let dev_name = device_name.as_ref().map(|d| Self::interpolate_tokens(d, context));
+                #[cfg(windows)]
+                {
+                    set_audio_device_format(*target, *sample_rate, *bit_depth, *channels, dev_name.as_deref())?;
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = (target, dev_name, sample_rate, bit_depth, channels);
                 }
                 Ok(())
             }
@@ -546,6 +502,7 @@ impl ActionRunner {
                         crate::models::AudioTarget::Microphone => {
                             set_default_microphone_device(&name)?;
                         }
+                        crate::models::AudioTarget::Process => {}
                     }
                 }
                 Ok(())
@@ -568,11 +525,9 @@ impl ActionRunner {
                 Ok(())
             }
 
-            Action::IfElse { conditions, condition, then_actions, else_if_branches, else_actions } => {
+            Action::IfElse { conditions, then_actions, else_if_branches, else_actions } => {
                 let is_true = if !conditions.is_empty() {
                     crate::daemon::engine::DaemonEngine::evaluate_rule_conditions(conditions)
-                } else if let Some(c) = condition {
-                    crate::daemon::engine::DaemonEngine::evaluate_condition(c)
                 } else {
                     true
                 };
@@ -599,8 +554,6 @@ impl ActionRunner {
                 }
                 Ok(())
             }
-
-            _ => Ok(()),
         }
     }
 
@@ -750,6 +703,7 @@ fn set_default_microphone_device(name: &str) -> Result<(), String> {
 }
 
 #[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
 fn window_control(
     target_process: &str,
     target_pid: Option<u32>,
@@ -1041,20 +995,32 @@ fn random_range(min: u32, max: u32) -> u32 {
     min + (s % range) as u32
 }
 
+pub(crate) fn random_gaussian(mean: f64, std_dev: f64) -> f64 {
+    let u1 = ((random_range(1, 10000) as f64) / 10000.0).max(1e-6);
+    let u2 = ((random_range(1, 10000) as f64) / 10000.0).max(1e-6);
+    let z0 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+    mean + z0 * std_dev
+}
+
 pub(crate) fn calculate_sleep_ms(base_ms: u32, organic: bool, jitter_percent: u32, ch_opt: Option<char>) -> u64 {
     if !organic {
         return base_ms as u64;
     }
-    let base = if base_ms == 0 { 25 } else { base_ms };
-    let jitter = jitter_percent.clamp(5, 95);
-    let delta = ((base as f64) * (jitter as f64 / 100.0)).round() as u32;
-    let min_d = base.saturating_sub(delta).max(5);
-    let max_d = base.saturating_add(delta).max(min_d);
-    let mut chosen = random_range(min_d, max_d) as u64;
+    let base = if base_ms == 0 { 25 } else { base_ms } as f64;
+    let jitter = (jitter_percent.clamp(5, 95) as f64) / 100.0;
+    let std_dev = base * (jitter / 2.3);
+    let sample = random_gaussian(base, std_dev);
+    let mut chosen = sample.round().max(5.0) as u64;
+
+    // Rare biological hesitation / micro-pause: ~1.2% chance of 120-260ms delay
+    if random_range(1, 1000) <= 12 {
+        chosen += random_range(120, 260) as u64;
+    }
 
     if let Some(ch) = ch_opt {
         if ch == ' ' || ch == ',' || ch == '.' || ch == '!' || ch == '?' || ch == '\n' {
-            chosen += random_range(20, 60) as u64;
+            let pause = random_gaussian(45.0, 15.0).round().max(10.0) as u64;
+            chosen += pause;
         }
     }
     chosen
@@ -1273,6 +1239,7 @@ fn smooth_relative_mouse_move(
 }
 
 #[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
 fn mouse_control(
     action_type: crate::models::MouseActionType,
     button: crate::models::MouseButton,
@@ -1694,7 +1661,8 @@ pub async fn execute_macro_event(
             crate::models::MacroEvent::KeyPress { key } => {
                 if let Some(vk) = parse_virtual_key(key) {
                     send_key_event(vk, false);
-                    tokio::time::sleep(std::time::Duration::from_millis(35)).await;
+                    let hold_ms = random_gaussian(55.0, 12.0).round().clamp(35.0, 110.0) as u64;
+                    tokio::time::sleep(std::time::Duration::from_millis(hold_ms)).await;
                     send_key_event(vk, true);
                 }
             }
@@ -1739,19 +1707,27 @@ pub async fn execute_macro_event(
             }
             crate::models::MacroEvent::MouseClick { button, clicks, x, y, coord_mode, smooth } => {
                 let cm = if x.is_some() || y.is_some() { *coord_mode } else { MouseCoordMode::Current };
+                let (disp_x, disp_y) = if let (Some(px), Some(py)) = (x, y) {
+                    let jx = random_gaussian(0.0, 1.2).round() as i32;
+                    let jy = random_gaussian(0.0, 1.2).round() as i32;
+                    (Some(px + jx), Some(py + jy))
+                } else {
+                    (*x, *y)
+                };
+                let click_hold = random_gaussian(45.0, 10.0).round().clamp(30.0, 85.0) as u32;
                 mouse_control(
                     MouseActionType::Click,
                     *button,
                     cm,
-                    *x,
-                    *y,
+                    disp_x,
+                    disp_y,
                     *smooth,
                     Some(200),
                     false,
                     None,
                     Some(*clicks),
-                    Some(40),
-                    false,
+                    Some(click_hold),
+                    true,
                 )?;
             }
             crate::models::MacroEvent::MouseWheel { delta } => {
@@ -1797,13 +1773,45 @@ fn set_power_plan(plan: PowerPlanType) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+extern "system" {
+    fn mciSendStringW(
+        lpstrcommand: windows::core::PCWSTR,
+        lpstrreturnstring: windows::core::PWSTR,
+        ucmbreturn: u32,
+        hwndcallback: windows::Win32::Foundation::HWND,
+    ) -> u32;
+}
+
 fn play_sound_file(path: &str) -> Result<(), String> {
     #[cfg(windows)]
     {
-        let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-        unsafe {
-            let _ = PlaySoundW(PCWSTR(path_w.as_ptr()), None, SND_FILENAME | SND_ASYNC);
+        let lower = path.to_lowercase();
+        if lower.ends_with(".wav") {
+            let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe {
+                let _ = PlaySoundW(PCWSTR(path_w.as_ptr()), None, SND_FILENAME | SND_ASYNC);
+            }
+        } else {
+            let close_cmd: Vec<u16> = "close ph_media\0".encode_utf16().collect();
+            let open_cmd_str = format!("open \"{}\" alias ph_media\0", path);
+            let open_cmd: Vec<u16> = open_cmd_str.encode_utf16().collect();
+            let play_cmd: Vec<u16> = "play ph_media from 0\0".encode_utf16().collect();
+            unsafe {
+                let _ = mciSendStringW(PCWSTR(close_cmd.as_ptr()), windows::core::PWSTR::null(), 0, HWND(std::ptr::null_mut()));
+                let res = mciSendStringW(PCWSTR(open_cmd.as_ptr()), windows::core::PWSTR::null(), 0, HWND(std::ptr::null_mut()));
+                if res == 0 {
+                    let _ = mciSendStringW(PCWSTR(play_cmd.as_ptr()), windows::core::PWSTR::null(), 0, HWND(std::ptr::null_mut()));
+                } else {
+                    let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+                    let _ = PlaySoundW(PCWSTR(path_w.as_ptr()), None, SND_FILENAME | SND_ASYNC);
+                }
+            }
         }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
     }
     Ok(())
 }
@@ -1834,7 +1842,113 @@ fn set_firewall_rule(proc_name: &str, block: bool) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn set_audio_volume_or_mute(sound_type: SoundActionType, volume_level: u8) -> Result<(), String> {
+fn construct_waveformat_extensible(sample_rate: u32, bit_depth: u16, channels: u16) -> [u8; 40] {
+    let mut bytes = [0u8; 40];
+    let block_align = channels * (bit_depth / 8);
+    let avg_bytes_per_sec = sample_rate * (block_align as u32);
+    let channel_mask: u32 = if channels == 1 { 0x4 } else { 0x3 };
+
+    bytes[0..2].copy_from_slice(&0xFFFEu16.to_le_bytes());
+    bytes[2..4].copy_from_slice(&channels.to_le_bytes());
+    bytes[4..8].copy_from_slice(&sample_rate.to_le_bytes());
+    bytes[8..12].copy_from_slice(&avg_bytes_per_sec.to_le_bytes());
+    bytes[12..14].copy_from_slice(&block_align.to_le_bytes());
+    bytes[14..16].copy_from_slice(&bit_depth.to_le_bytes());
+    bytes[16..18].copy_from_slice(&22u16.to_le_bytes());
+    bytes[18..20].copy_from_slice(&bit_depth.to_le_bytes());
+    bytes[20..24].copy_from_slice(&channel_mask.to_le_bytes());
+
+    let pcm_guid: [u8; 16] = [
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
+        0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71
+    ];
+    bytes[24..40].copy_from_slice(&pcm_guid);
+    bytes
+}
+
+#[cfg(windows)]
+fn set_audio_device_format(
+    target: crate::models::AudioTarget,
+    sample_rate: u32,
+    bit_depth: u32,
+    channels: u32,
+    _device_name: Option<&str>,
+) -> Result<(), String> {
+    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+    use windows::Win32::Media::Audio::{eCapture, eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator};
+
+    let sample_rate = sample_rate.clamp(8000, 384000);
+    let bit_depth = (bit_depth as u16).clamp(8, 32);
+    let channels = (channels as u16).clamp(1, 8);
+
+    let wave_bytes = construct_waveformat_extensible(sample_rate, bit_depth, channels);
+
+    unsafe {
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let must_uninit = hr.is_ok();
+
+        let res = (|| -> Result<(), String> {
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| format!("CoCreateInstance MMDeviceEnumerator failed: {e}"))?;
+
+            let data_flow = match target {
+                crate::models::AudioTarget::Playback | crate::models::AudioTarget::Process => eRender,
+                crate::models::AudioTarget::Microphone => eCapture,
+            };
+
+            let device = enumerator.GetDefaultAudioEndpoint(data_flow, eMultimedia)
+                .map_err(|e| format!("GetDefaultAudioEndpoint failed: {e}"))?;
+
+            let dev_id_pwstr = device.GetId()
+                .map_err(|e| format!("GetId failed: {e}"))?;
+            let dev_id = dev_id_pwstr.to_string().map_err(|e| format!("DevId parse: {e}"))?;
+
+            let flow_dir = match target {
+                crate::models::AudioTarget::Playback | crate::models::AudioTarget::Process => "Render",
+                crate::models::AudioTarget::Microphone => "Capture",
+            };
+
+            let byte_list = wave_bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(",");
+            let ps_script = format!(
+                r#"
+                $id = '{}'
+                $keyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\{}\$id\Properties"
+                if (Test-Path $keyPath) {{
+                    $bytes = [byte[]]@({})
+                    Set-ItemProperty -Path $keyPath -Name '{{e4870e26-3cc5-4cd2-ba46-56665703c64e}},0' -Value $bytes -Type Binary -ErrorAction SilentlyContinue
+                    Set-ItemProperty -Path $keyPath -Name '{{e4870e26-3cc5-4cd2-ba46-56665703c64e}},3' -Value $bytes -Type Binary -ErrorAction SilentlyContinue
+                    Set-ItemProperty -Path $keyPath -Name '{{f19f064d-0824-4d22-8222-99be777a77f0}},0' -Value $bytes -Type Binary -ErrorAction SilentlyContinue
+                }}
+                "#,
+                dev_id.replace('\'', "''"),
+                flow_dir,
+                byte_list
+            );
+
+            let mut cmd = std::process::Command::new("powershell");
+            cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps_script]);
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+            let _ = cmd.output().map_err(|e| format!("Failed to apply audio format: {e}"))?;
+
+            Ok(())
+        })();
+
+        if must_uninit {
+            CoUninitialize();
+        }
+
+        res
+    }
+}
+
+#[cfg(windows)]
+fn set_audio_volume_or_mute(
+    action_type: AudioVolumeAction,
+    volume_level: u8,
+    left_volume: Option<u8>,
+    right_volume: Option<u8>,
+) -> Result<(), String> {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
     use windows::Win32::Media::Audio::{eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator};
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
@@ -1853,27 +1967,42 @@ fn set_audio_volume_or_mute(sound_type: SoundActionType, volume_level: u8) -> Re
             let endpoint_volume: IAudioEndpointVolume = device.Activate(CLSCTX_ALL, None)
                 .map_err(|e| format!("Activate IAudioEndpointVolume failed: {e}"))?;
 
-            match sound_type {
-                SoundActionType::Mute => {
+            match action_type {
+                AudioVolumeAction::Mute => {
                     endpoint_volume.SetMute(true, std::ptr::null())
                         .map_err(|e| format!("SetMute failed: {e}"))?;
                 }
-                SoundActionType::Unmute => {
+                AudioVolumeAction::Unmute => {
                     endpoint_volume.SetMute(false, std::ptr::null())
                         .map_err(|e| format!("SetMute failed: {e}"))?;
                 }
-                SoundActionType::ToggleMute => {
+                AudioVolumeAction::ToggleMute => {
                     let current = endpoint_volume.GetMute()
                         .map_err(|e| format!("GetMute failed: {e}"))?;
                     endpoint_volume.SetMute(!current.as_bool(), std::ptr::null())
                         .map_err(|e| format!("SetMute failed: {e}"))?;
                 }
-                SoundActionType::SetVolume => {
-                    let scalar = (volume_level.min(100) as f32) / 100.0;
-                    endpoint_volume.SetMasterVolumeLevelScalar(scalar, std::ptr::null())
-                        .map_err(|e| format!("SetMasterVolumeLevelScalar failed: {e}"))?;
+                AudioVolumeAction::SetVolume => {
+                    let channel_count = endpoint_volume.GetChannelCount().unwrap_or(2);
+                    if let Some(left) = left_volume {
+                        if channel_count > 0 {
+                            let left_scalar = (left.min(100) as f32) / 100.0;
+                            let _ = endpoint_volume.SetChannelVolumeLevelScalar(0, left_scalar, std::ptr::null());
+                        }
+                    }
+                    if let Some(right) = right_volume {
+                        if channel_count > 1 {
+                            let right_scalar = (right.min(100) as f32) / 100.0;
+                            let _ = endpoint_volume.SetChannelVolumeLevelScalar(1, right_scalar, std::ptr::null());
+                        }
+                    }
+                    if left_volume.is_none() && right_volume.is_none() {
+                        let scalar = (volume_level.min(100) as f32) / 100.0;
+                        endpoint_volume.SetMasterVolumeLevelScalar(scalar, std::ptr::null())
+                            .map_err(|e| format!("SetMasterVolumeLevelScalar failed: {e}"))?;
+                    }
                 }
-                SoundActionType::PlayBeep => {}
+                AudioVolumeAction::PlayBeep => {}
             }
             Ok(())
         })();
@@ -1887,7 +2016,7 @@ fn set_audio_volume_or_mute(sound_type: SoundActionType, volume_level: u8) -> Re
 }
 
 #[cfg(windows)]
-fn set_microphone_volume_or_mute(action_type: MicrophoneActionType, volume_level: u8) -> Result<(), String> {
+fn set_microphone_volume_or_mute(action_type: AudioVolumeAction, volume_level: u8) -> Result<(), String> {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
     use windows::Win32::Media::Audio::{eCapture, eCommunications, eConsole, eMultimedia, IMMDeviceEnumerator, MMDeviceEnumerator};
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
@@ -1909,25 +2038,26 @@ fn set_microphone_volume_or_mute(action_type: MicrophoneActionType, volume_level
                 .map_err(|e| format!("Activate IAudioEndpointVolume failed: {e}"))?;
 
             match action_type {
-                MicrophoneActionType::Mute => {
+                AudioVolumeAction::Mute => {
                     endpoint_volume.SetMute(true, std::ptr::null())
                         .map_err(|e| format!("SetMute failed: {e}"))?;
                 }
-                MicrophoneActionType::Unmute => {
+                AudioVolumeAction::Unmute => {
                     endpoint_volume.SetMute(false, std::ptr::null())
                         .map_err(|e| format!("SetMute failed: {e}"))?;
                 }
-                MicrophoneActionType::ToggleMute => {
+                AudioVolumeAction::ToggleMute => {
                     let current = endpoint_volume.GetMute()
                         .map_err(|e| format!("GetMute failed: {e}"))?;
                     endpoint_volume.SetMute(!current.as_bool(), std::ptr::null())
                         .map_err(|e| format!("SetMute failed: {e}"))?;
                 }
-                MicrophoneActionType::SetVolume => {
+                AudioVolumeAction::SetVolume => {
                     let scalar = (volume_level.min(100) as f32) / 100.0;
                     endpoint_volume.SetMasterVolumeLevelScalar(scalar, std::ptr::null())
                         .map_err(|e| format!("SetMasterVolumeLevelScalar failed: {e}"))?;
                 }
+                AudioVolumeAction::PlayBeep => {}
             }
             Ok(())
         })();
@@ -1944,7 +2074,7 @@ fn set_microphone_volume_or_mute(action_type: MicrophoneActionType, volume_level
 fn set_process_audio(
     target_process: &str,
     target_pid: Option<u32>,
-    action_type: ProcessAudioActionType,
+    action_type: AudioVolumeAction,
     volume_level: u8,
 ) -> Result<bool, String> {
     use windows::core::Interface;
@@ -2014,25 +2144,26 @@ fn set_process_audio(
                     };
 
                     match action_type {
-                        ProcessAudioActionType::Mute => {
+                        AudioVolumeAction::Mute => {
                             volume.SetMute(true, std::ptr::null())
                                 .map_err(|e| format!("SetMute failed: {e}"))?;
                         }
-                        ProcessAudioActionType::Unmute => {
+                        AudioVolumeAction::Unmute => {
                             volume.SetMute(false, std::ptr::null())
                                 .map_err(|e| format!("SetMute failed: {e}"))?;
                         }
-                        ProcessAudioActionType::ToggleMute => {
+                        AudioVolumeAction::ToggleMute => {
                             let current = volume.GetMute()
                                 .map_err(|e| format!("GetMute failed: {e}"))?;
                             volume.SetMute(!current.as_bool(), std::ptr::null())
                                 .map_err(|e| format!("SetMute failed: {e}"))?;
                         }
-                        ProcessAudioActionType::SetVolume => {
+                        AudioVolumeAction::SetVolume => {
                             let scalar = (volume_level.min(100) as f32) / 100.0;
                             volume.SetMasterVolume(scalar, std::ptr::null())
                                 .map_err(|e| format!("SetMasterVolume failed: {e}"))?;
                         }
+                        AudioVolumeAction::PlayBeep => {}
                     }
                     matched_any = true;
                 }
@@ -2107,15 +2238,16 @@ mod tests {
         let non_existing_path = temp_dir.join("ph_action_test_never_exists.tmp");
 
         let action = crate::models::Action::IfElse {
-            condition: None,
-            conditions: vec![crate::models::RuleConditionItem::new(crate::models::RuleCondition::FileExists {
+            conditions: vec![crate::models::RuleConditionItem::new(crate::models::RuleCondition::FileWatcher {
                 path: non_existing_path.to_string_lossy().to_string(),
+                filter_extension: None,
                 must_exist: true,
             })],
             then_actions: vec![crate::models::Action::Delay { seconds: 0.001 }],
             else_if_branches: vec![crate::models::ElseIfBranch {
-                conditions: vec![crate::models::RuleConditionItem::new(crate::models::RuleCondition::FileExists {
+                conditions: vec![crate::models::RuleConditionItem::new(crate::models::RuleCondition::FileWatcher {
                     path: existing_path.to_string_lossy().to_string(),
+                    filter_extension: None,
                     must_exist: true,
                 })],
                 actions: vec![crate::models::Action::Delay { seconds: 0.001 }],

@@ -443,7 +443,7 @@ fn render_shortcuts_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "F9 / Кнопка Записи", "Низкоуровневая запись клавиатуры и мыши с гибкими фильтрами: клавиши, клики, курсор, колесо и паузы", t);
         doc_table_row(ui, "Drag & Drop со скроллом", "Изменение порядка шагов перетаскиванием; во время переноса работает колесико мыши и автоскролл у границ холста", t);
         doc_table_row(ui, "Группировка Движений", "Последовательные перемещения мыши без задержек автоматически объединяются в раскрываемую серию «A → B», сохраняя точную траекторию без захламления холста", t);
-        doc_table_row(ui, "Вся Органика", "Случайный человеческий разброс задержек (±30% jitter) на все паузы и печать текста для обхода бот-детекторов", t);
+        doc_table_row(ui, "Хуманизация (Анти-бот)", "Полноценная анти-бот защита: Гауссово распределение пауз, микро-тремор, вариативность удержания клавиш, дисперсия кликов и естественные задержки", t);
         doc_table_row(ui, "Объединять нажатия", "Визуальное объединение связанных шагов (Зажатие + Пауза + Отпускание) в единые удобные карточки", t);
         doc_table_row(ui, "Бесконечный режим", "Непрерывное циклическое выполнение макроса; выключается повторным нажатием хоткея или отпусканием кнопки в Hold mode", t);
         doc_table_row(ui, "Захват Точки", "Инструмент захвата экранных координат: наведите мышь на экран и нажмите Space или Enter для фиксации", t);
@@ -480,8 +480,8 @@ fn render_shortcuts_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "F9 / Record Button", "Low-level hardware recording with modular filters for keys, clicks, moves, wheel, and delays", t);
         doc_table_row(ui, "Drag & Drop with Scrolling", "Intuitive step reordering; supports mouse wheel scrolling and boundary auto-scrolling while dragging", t);
         doc_table_row(ui, "Stacked Move Sequences", "Sequential cursor movements without delays automatically stack into an expandable «A → B» group, preserving exact coordinates without canvas clutter", t);
-        doc_table_row(ui, "Global Organic Delay", "Applies humanized timing jitter (±30%) across all delays and text typing to bypass anti-bot detection", t);
-        doc_table_row(ui, "Group Presses", "Visually groups connected Down, Delay, and Up events into unified full-press cards", t);
+        doc_table_row(ui, "Humanize (Anti-Bot)", "Full anti-bot protection: Gaussian timing delays, micro-tremor, key hold variance, click dispersion, and natural hesitation", t);
+        doc_table_row(ui, "Group", "Visually groups connected Down, Delay, and Up events into unified full-press cards", t);
         doc_table_row(ui, "Infinite Mode", "Continuous macro looping; stops via hotkey toggle or immediately upon release in Hold mode", t);
         doc_table_row(ui, "Coordinate Picker", "Target position tool: hover anywhere on desktop and press Space or Enter to lock exact X/Y", t);
         doc_table_row(ui, "Physical Hardware Actions", "Separated Down / Up events for keys and mouse buttons matching real hardware physics", t);
@@ -514,7 +514,7 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             ui,
             "Предварительные Условия Правил (Pre-conditions)",
             "• Фильтрация запуска: правило сработает только тогда, когда соблюдены все необходимые системные критерии.\n\
-             • Доступные условия: наличие или отсутствие процесса в памяти, фокус конкретного окна, заданный интервал времени (чч:мм) с фильтром по дням недели, источник питания (от сети AC или от батареи), а также существование файла по указанному пути.\n\
+             • Доступные условия: наличие или отсутствие процесса в памяти, фокус конкретного окна, заданный интервал времени (чч:мм) с фильтром по дням недели, системные события (простой / активность пользователя с настраиваемым порогом секунд, блокировка / разблокировка Windows, питание от сети AC / от батареи), пороги ресурсов процесса (CPU % и RAM MB с порогом времени), а также проверка существования папки или файла с фильтром расширений (напр. *.log).\n\
              • Гибкая логика связывания: условия можно объединять операторами И (AND) и ИЛИ (OR) в любой последовательности.\n\
              • Пропуск без ошибок: если условия не выполнены в момент срабатывания триггера, выполнение правила пропускается без генерации ошибок в логах.",
             t,
@@ -547,11 +547,13 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
 
         doc_callout(
             ui,
-            "Глобальные Хоткеи и Режим Удержания (Hold mode)",
+            "Глобальные Хоткеи и Режимы Работы",
             "• Поддержка клавиш и мыши: в качестве хоткея можно задавать любые клавиатурные сочетания, а также кнопки мыши: M4, M5, ПКМ, СКМ, ЛКМ.\n\
+             • Обычный триггер: нажатие хоткея запускает выполнение правила, а повторное нажатие останавливает текущее выполнение или бесконечный макрос.\n\
+             • Повторять в цикле (Repeat in loop): при обычном нажатии правило циклически повторяется до повторного нажатия хоткея.\n\
              • Режим Hold mode: правило непрерывно выполняется пока физически зажата клавиша или кнопка мыши, и мгновенно прерывается при ее отпускании.\n\
              • Повтор при удержании (repeat_while_held): циклический повтор пайплайна пока удерживается хоткей, со строгой синхронизацией квоты (max_executions). При отпускании все зажатые макросом кнопки сбрасываются мгновенно.\n\
-             • Обычный режим: повторное нажатие хоткея переключает состояние и останавливает текущее выполнение правила или бесконечного макроса.",
+             • Права Администратора: для перехвата хоткеев и эмуляции ввода в играх или программах, запущенных с повышенными привилегиями, ProcessHandler также должен быть запущен от имени администратора.",
             t,
             false,
         );
@@ -570,7 +572,7 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             ui,
             "Rule Pre-conditions",
             "• Gating Executions: ensure rules execute only when specific environmental criteria are satisfied.\n\
-             • Available Condition Checks: process running or not running, window focused or unfocused, active time window (HH:MM) with day-of-week filters, power source (Mains AC vs Battery), and file existence check.\n\
+             • Available Condition Checks: process running or not running, window focused or unfocused, active time window (HH:MM) with day-of-week filters, system events (user idle / active duration, session lock / unlock, AC mains vs Battery power), process resource thresholds (sustained CPU % and RAM MB over time), and file or directory existence / change checks with extension filters (e.g. *.log).\n\
              • Chainable Logic: seamlessly chain condition items with AND / OR boolean operators.\n\
              • Silent Skip: when preconditions fail upon trigger activation, the rule gracefully skips without logging errors.",
             t,
@@ -603,11 +605,13 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
 
         doc_callout(
             ui,
-            "Global Hotkeys & Hold Mode",
+            "Global Hotkeys & Execution Modes",
             "• Keyboard & Mouse Buttons: hotkey combinations support keyboard keys as well as mouse buttons: M4, M5, RMB, MMB, LMB.\n\
+             • Standard Trigger: pressing the hotkey starts execution, and pressing it again cleanly stops active rules or infinite macros.\n\
+             • Repeat in Loop: in toggle mode, repeats rule pipeline execution continuously until the hotkey is pressed again.\n\
              • Hold Mode: execution continues while the hotkey or mouse button is physically held down, and automatically terminates on release.\n\
-             • Loop While Held: when Hold Mode is active, repeat pipeline execution continuously in a loop while held (respects execution quota).\n\
-             • Toggle Off: in standard trigger mode, pressing the hotkey again toggles execution off, cleanly stopping running rules or infinite macros.",
+             • Loop While Held: repeat pipeline execution continuously in a loop while held (respects execution quota and releases stuck inputs).\n\
+             • Admin Privileges: to trigger shortcuts or dispatch inputs in elevated games or tools, ProcessHandler must also be run as administrator.",
             t,
             false,
         );
@@ -625,14 +629,15 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Launch / Kill Process", "Запуск со скрытием окна или от админа; завершение процессов с деревом потоков.", t);
         doc_table_row(ui, "Скрипты (PS / CMD / Lua)", "Единый шаг для PowerShell, CMD/Batch и встроенного Lua с передачей вывода в {PrevOutput}.", t);
         doc_table_row(ui, "Аппаратный Макрос", "Единый воркфлоу клавиатуры и мыши: зажатия, клики, перемещения, плавный ход, текст, паузы и запись по F9.", t);
-        doc_table_row(ui, "Управление Звуком", "Единый контроллер громкости динамиков и микрофона (Mute, Unmute, Toggle, Set Volume, Beep).", t);
+        doc_table_row(ui, "Управление Звуком", "Единый контроллер громкости динамиков, микрофона и конкретных процессов (Mute, Set Volume, баланс L/R).", t);
+        doc_table_row(ui, "Формат Аудио", "Переключение частоты дискретизации (до 192 кГц), разрядности (16-32 бит) и каналов (Stereo/Mono).", t);
+        doc_table_row(ui, "Воспроизведение Звука", "Воспроизведение звуковых файлов (WAV/MP3/OGG) или генерация тональных сигналов (Beep) с настраиваемой частотой.", t);
         doc_table_row(ui, "Устройство по Умолчанию", "Мгновенное переключение основного аудиовыхода или микрофона по имени устройства.", t);
         doc_table_row(ui, "Window & Display", "Управление окнами (свернуть, прижать, TopMost), выбор целевого монитора, разрешение и Гц.", t);
-        doc_table_row(ui, "Звук Процессов", "Регулировка громкости и глушение звука конкретных запущенных приложений.", t);
         doc_table_row(ui, "Tuning & Firewall", "Изменение приоритета процессов, сброс Working Set RAM и блокировка сетевого трафика.", t);
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Отправка исходящих REST-запросов (GET, POST, PUT, DELETE) с заголовками и телом.", t);
         doc_table_row(ui, "Power & System", "Схемы питания Windows; переход в сон, гибернация, перезагрузка, выключение и блокировка.", t);
-        doc_table_row(ui, "Delay & Notification", "Асинхронные паузы между шагами, всплывающие уведомления Windows и воспроизведение WAV.", t);
+        doc_table_row(ui, "Delay & Notification", "Асинхронные паузы между шагами, всплывающие уведомления Windows и воспроизведение звуковых сигналов.", t);
         doc_table_row(ui, "Ветвление (Если / Иначе)", "Динамическая проверка условий на лету с выполнением веток Если (THEN), Иначе Если (ELSE IF) и Иначе (ELSE).", t);
 
         ui.add_space(2.0);
@@ -646,7 +651,7 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
              • Запись по F9: глобальный аппаратный перехват в реальном времени с настраиваемыми фильтрами и звуковым подтверждением.\n\
              • Бесконечный Режим: циклическое воспроизведение макроса с возможностью прерывания по хоткею или при отпускании в Hold mode.\n\
              • Группировка Движений: последовательные перемещения курсора объединяются в блоки «A → B» с возможностью раскрытия для детальной правки координат.\n\
-             • Вся Органика: включение случайных микро-флуктуаций (±30%) на все паузы для обхода бот-детекторов.\n\
+             • Хуманизация (Анти-бот): включение естественной вариативности задержек по Гауссу, микро-тремора курсора, разброса кликов и пауз для защиты от бот-детекторов.\n\
              • Объединять Нажатия: компактное группирование связанных шагов (Зажатие + Пауза + Отпускание) в единую карточку.",
             t,
             false,
@@ -658,14 +663,15 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Launch / Kill Process", "Run hidden/admin; terminate processes with full process tree kill.", t);
         doc_table_row(ui, "Script (PS / CMD / Lua)", "Unified runner for PowerShell, CMD/Batch, and Lua with piped output in {PrevOutput}.", t);
         doc_table_row(ui, "Hardware Macro", "Unified keyboard and mouse workflow: press/release, clicks, cursor move, wheel scroll, typing, delays, and F9 recording.", t);
-        doc_table_row(ui, "Audio & Mic Control", "Unified volume and mute controller for both playback speakers and microphones.", t);
+        doc_table_row(ui, "Audio & Mic Control", "Unified volume and mute controller for playback speakers, microphones, and per-process audio with L/R balance.", t);
+        doc_table_row(ui, "Audio Format", "Configure sample rate (up to 192 kHz), bit depth (16-32 bit), and channels (Stereo/Mono) for audio devices.", t);
+        doc_table_row(ui, "Play Sound", "Play local audio files (WAV/MP3/OGG) or generate customizable frequency/duration system beeps.", t);
         doc_table_row(ui, "Default Audio Device", "Switch default system playback audio output or recording microphone by name.", t);
         doc_table_row(ui, "Window & Display", "Window positioning, TopMost on/off, target monitor index selection, resolution & Hz.", t);
-        doc_table_row(ui, "Per-Process Audio", "Adjust volume or mute specific running application audio sessions.", t);
         doc_table_row(ui, "Tuning & Firewall", "Process priority class, RAM memory trim, and Windows Firewall traffic blocking.", t);
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Send outbound HTTP requests (GET, POST, PUT, DELETE) with custom headers and body.", t);
         doc_table_row(ui, "Power & System", "Windows power plans; sleep, hibernate, restart, shutdown, and workstation lock.", t);
-        doc_table_row(ui, "Delay & Notification", "Non-blocking delay pauses in pipeline, Windows desktop toast notifications, and WAV audio chimes.", t);
+        doc_table_row(ui, "Delay & Notification", "Non-blocking delay pauses in pipeline, Windows desktop toast notifications, and audio alerts.", t);
         doc_table_row(ui, "Branching (If / Else)", "Evaluate conditions dynamically and branch into Then, Else If, and Else sub-action sequences.", t);
 
         ui.add_space(2.0);
@@ -679,8 +685,8 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
              • F9 Global Recording: real-time low-level hardware capture with customizable action filters and audio chime confirmation.\n\
              • Infinite Mode: continuous macro cycling with on-demand cancellation via hotkey toggle or release in Hold mode.\n\
              • Stacked Move Sequences: sequential mouse movements group into expandable «A → B» blocks with inline inspection.\n\
-             • Global Organic Delays: optional random humanized jitter (±30%) across all pauses and typing to evade anti-bot detection.\n\
-             • Group Presses: optional visual grouping of connected Down, Delay, and Up events into single cards.",
+             • Holistic Humanization (Anti-Bot): full anti-bot protection with Gaussian timing jitter, micro-tremor, click coordinate dispersion, and hesitation patterns.\n\
+             • Group: optional visual grouping of connected Down, Delay, and Up events into single cards.",
             t,
             false,
         );

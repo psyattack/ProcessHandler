@@ -362,7 +362,7 @@ impl GuiState {
     }
 
     pub fn copy_single_rule_to_clipboard(&mut self, ctx: &egui::Context, rule: &Rule) {
-        match crate::sharing::compress_and_encode(&crate::sharing::SharedAutomation::Single(rule.clone())) {
+        match crate::sharing::compress_and_encode(&crate::sharing::SharedAutomation::Single(Box::new(rule.clone()))) {
             Ok(encoded) => {
                 crate::sharing::copy_text_to_clipboard(ctx, &encoded);
                 self.set_toast(self.loc().toast_copy_single_success.replace("{}", &rule.name));
@@ -581,11 +581,9 @@ impl GuiState {
                 }
                 Some(ProcessPickerTarget::ActionCondition { action_idx, cond_idx, is_exit }) => {
                     let list = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
-                    if let Some(crate::models::Action::IfElse { conditions, condition, .. }) = list.get_mut(action_idx) {
+                    if let Some(crate::models::Action::IfElse { conditions, .. }) = list.get_mut(action_idx) {
                         if let Some(item) = conditions.get_mut(cond_idx) {
                             apply_process_to_condition(&mut item.condition, proc_name);
-                        } else if let Some(c) = condition.as_mut() {
-                            apply_process_to_condition(c, proc_name);
                         }
                     }
                 }
@@ -858,8 +856,10 @@ fn apply_process_to_action(action: &mut crate::models::Action, proc_name: &str) 
         crate::models::Action::KillProcess { process_name, .. } => {
             *process_name = proc_name.to_string();
         }
-        crate::models::Action::ProcessAudio { process_name, .. } => {
-            *process_name = proc_name.to_string();
+        crate::models::Action::AudioControl { target, process_name, .. } => {
+            if *target == crate::models::AudioTarget::Process {
+                *process_name = Some(proc_name.to_string());
+            }
         }
         crate::models::Action::Firewall { process_name, .. } => {
             *process_name = proc_name.to_string();
@@ -880,6 +880,9 @@ fn apply_process_to_condition(cond: &mut crate::models::RuleCondition, proc_name
             *process_name = proc_name.to_string();
         }
         crate::models::RuleCondition::WindowFocused { process_name, .. } => {
+            *process_name = proc_name.to_string();
+        }
+        crate::models::RuleCondition::ResourceThreshold { process_name, .. } => {
             *process_name = proc_name.to_string();
         }
         _ => {}

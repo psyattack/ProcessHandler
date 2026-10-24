@@ -32,11 +32,11 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 * **Event-driven process detection** via native Windows WMI subscriptions and low-latency snapshotting
 * **Versatile trigger engine** spanning process lifecycles, window focus, CPU/RAM thresholds, global hotkeys, file watcher, webhooks, and schedules
-* **Pre-conditions & logic branching** with multi-condition checks (running apps, window focus, time/days, power, files), AND/OR chaining, and dynamic If/Else action flows
+* **Pre-conditions & logic branching** with multi-condition checks (running apps, window focus, time/days, system events, resource thresholds, file watcher), AND/OR chaining, and dynamic If/Else action flows
 * **Flexible action pipeline** covering process control, window management, CPU/memory tuning, scripts, macros, audio devices, and webhooks
 * **Embedded Lua 5.4 runtime** (`mlua`) with dedicated `ph` API alongside PowerShell and Batch scripting
-* **Macro Studio** with hardware keyboard/mouse recording, in-game 3D camera rotation support, timeline editing, loop control, and organic jitter
-* **Deep Windows audio & device control** covering per-process volume/mute, master sound, and default playback/mic devices (WASAPI)
+* **Macro Studio** with hardware keyboard/mouse recording, in-game 3D camera rotation support, timeline editing, loop control, and anti-bot humanization
+* **Deep Windows audio & device control** covering master & per-process volume/mute, channel balance, audio format switching (sample rate & bit depth), and default devices (WASAPI)
 * **Companion process mode** with automated lifecycle coupling and graceful exit cleanup
 * **Ultra-lightweight daemon architecture** with background tray operation (<0.1% CPU, ~2MB RAM) and named-pipe IPC
 * **Portable rule sharing** via compressed, self-contained clipboard codes (single and batch import/export)
@@ -59,13 +59,13 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Process Lifecycle*: Target application launch, termination, or duration (exact match, wildcard, regex).
   - *Window Focus*: Gain or loss of active foreground window focus.
   - *Resource Thresholds*: Sustained high CPU (%) or RAM (MB) usage limits.
-  - *Global Hotkeys*: System-wide shortcut listener with toggle mode, hold mode, and repeat-while-held execution.
+  - *Global Hotkeys*: System-wide shortcut listener with toggle mode, continuous loop mode, hold mode, and repeat-while-held execution.
   - *File Watcher*: File and folder creation, modification, or deletion with extension filters.
   - *Local Webhooks*: Inbound HTTP REST requests (`http://127.0.0.1:48123/api/v1/trigger/{endpoint}`).
   - *Schedules & Alarms*: Fixed intervals, daily recurring schedules, and one-shot date/time alarms.
   - *System & Power*: User idle/active state, session lock/unlock, sleep/wake, and AC/battery transitions.
 - **Rule Pre-conditions**:
-  - *Gating Criteria*: Running process, active window focus, time window & days of week, power source (AC mains vs battery), and file existence check.
+  - *Gating Criteria*: Running process, active window focus, time window & days of week, system events (idle time, session lock, AC/battery), resource thresholds (CPU % and RAM MB per process), and file/folder existence checks with extension filters.
   - *Chainable Logic*: Combine multiple conditions with boolean AND / OR operators.
 - **Action Pipelines**:
   - *Logic & Branching*: Dynamic If / Else If / Else actions with condition checks to execute conditional sub-pipelines.
@@ -74,7 +74,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Process Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and trim memory working sets.
   - *Scripting & Automation*: Embedded Lua 5.4 (`ph` API), PowerShell, and Batch scripts with token interpolation (`{pid}`, `{process}`, `{window_title}`, `{file_path}`).
   - *Macro Playback*: Recorded keyboard and mouse sequences (with in-game 3D camera turns, DirectInput scancodes, and instant stuck-key release on cancellation), speed multipliers, loop counts, and organic jitter.
-  - *Audio & Device Control*: System and per-app volume/mute, microphone levels, and default playback/recording device switching.
+  - *Audio & Device Control*: System and per-app volume/mute, microphone levels, independent L/R channel balance, audio device format switching (sample rate & bit depth), custom beep tones, and default playback/recording device switching.
   - *Alerts & Webhooks*: Windows toast notifications and outbound HTTP REST calls (POST/GET/PUT).
   - *System Power & Delays*: System lock, sleep, display off, shutdown, and configurable pause intervals between steps.
 - **Execution & Safeguards**:
@@ -125,6 +125,9 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 To install, download the latest release from [**GitHub Releases**](https://github.com/psyattack/ProcessHandler/releases):
 - **Portable Version (`ProcessHandler.exe`):** Place the executable in any convenient directory and run it.
+
+> [!IMPORTANT]
+> **Administrator Privileges & In-Game Hotkeys**: If you plan to trigger hotkeys, macros, or automate actions in games or programs running with elevated (administrator) privileges, ProcessHandler must also be **Run as administrator**. Under Windows UIPI (User Interface Privilege Isolation), non-elevated background services cannot intercept global keyboard shortcuts or dispatch simulated input (SendInput) into elevated windows.
 
 > [!NOTE]
 > When you run ProcessHandler for the first time, it automatically registers itself in the Windows startup list. You can always toggle the startup option in the settings window. (If you move the executable file, the startup may stop working; simply turn it off and then back on again.)

@@ -129,20 +129,6 @@ impl AppConfig {
         let is_app_config = !cfg!(test) && (path == Self::config_path() || path.ends_with("config.json"));
 
         if !path.exists() {
-            // Check if local config.json exists to migrate it
-            let cwd_candidate = PathBuf::from("config.json");
-            if cwd_candidate.exists() {
-                if let Ok(content) = fs::read_to_string(&cwd_candidate) {
-                    if let Ok(mut cfg) = serde_json::from_str::<AppConfig>(&content) {
-                        if is_app_config && !cfg.autorun_configured {
-                            cfg.autorun_configured = true;
-                            let _ = crate::autorun::set_autorun(crate::autorun::APP_NAME, true);
-                        }
-                        let _ = cfg.save_to_file(path);
-                        return cfg;
-                    }
-                }
-            }
             let mut default_cfg = Self::default();
             if is_app_config {
                 default_cfg.autorun_configured = true;

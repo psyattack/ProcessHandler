@@ -10,7 +10,7 @@ use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
 use crate::models::{
-    Action, ConditionOperator, PowerPlanType, ProcessAudioActionType, ProcessMatchMode,
+    Action, ConditionOperator, PowerPlanType, ProcessMatchMode,
     ProcessPriorityLevel, ProcessSnapshotItem, Rule, RuleCondition, RuleConditionItem, ScheduleType,
     SystemEventType, SystemPowerType, Trigger, WindowActionType,
 };
@@ -480,10 +480,10 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                     .margin(vec2(10.0, 9.0)),
                             );
 
-                            if rule.custom_icon_path.is_some() {
-                                if widgets::glyph_button(ui, Glyph::Reset, loc.inspector_icon_reset_tip).clicked() {
-                                    rule.custom_icon_path = None;
-                                }
+                            if rule.custom_icon_path.is_some()
+                                && widgets::glyph_button(ui, Glyph::Reset, loc.inspector_icon_reset_tip).clicked()
+                            {
+                                rule.custom_icon_path = None;
                             }
                         });
 
@@ -685,15 +685,15 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                         ui.add_space(4.0);
                                         widgets::hud(ui, "EVENT TYPE", t.muted);
                                         ui.horizontal_wrapped(|ui| {
-                                            if ui.checkbox(on_focus_gained, "Gained Focus").changed() {
-                                                if !*on_focus_gained && !*on_focus_lost {
-                                                    *on_focus_lost = true;
-                                                }
+                                            if ui.checkbox(on_focus_gained, "Gained Focus").changed()
+                                                && !*on_focus_gained && !*on_focus_lost
+                                            {
+                                                *on_focus_lost = true;
                                             }
-                                            if ui.checkbox(on_focus_lost, "Lost Focus").changed() {
-                                                if !*on_focus_lost && !*on_focus_gained {
-                                                    *on_focus_gained = true;
-                                                }
+                                            if ui.checkbox(on_focus_lost, "Lost Focus").changed()
+                                                && !*on_focus_lost && !*on_focus_gained
+                                            {
+                                                *on_focus_gained = true;
                                             }
                                         });
                                     }
@@ -981,11 +981,11 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                         ui.add_space(6.0);
                                         ui.checkbox(hold_mode, loc.inspector_hotkey_hold_mode).on_hover_text(loc.inspector_hotkey_hold_mode_tip);
 
+                                        ui.add_space(4.0);
                                         if *hold_mode {
-                                            ui.add_space(4.0);
                                             ui.checkbox(repeat_while_held, loc.inspector_hotkey_repeat_while_held).on_hover_text(loc.inspector_hotkey_repeat_while_held_tip);
                                         } else {
-                                            *repeat_while_held = false;
+                                            ui.checkbox(repeat_while_held, loc.inspector_hotkey_repeat_in_loop).on_hover_text(loc.inspector_hotkey_repeat_in_loop_tip);
                                         }
                                     }
                                 }
@@ -1207,7 +1207,6 @@ fn action_type_badge(action: &Action, loc: &crate::i18n::Strings) -> &'static st
         }
         Action::KillProcess { .. } => loc.inspector_badge_kill_process,
         Action::Notification { .. } => loc.inspector_badge_notification,
-        Action::ProcessAudio { .. } => loc.inspector_badge_process_audio,
         Action::SystemPower { .. } => loc.inspector_badge_system_power,
         Action::Delay { .. } => loc.inspector_badge_delay,
         Action::HttpWebhook { .. } => loc.inspector_badge_webhook,
@@ -1217,11 +1216,12 @@ fn action_type_badge(action: &Action, loc: &crate::i18n::Strings) -> &'static st
         Action::PlaySound { .. } => loc.inspector_badge_play_sound,
         Action::Firewall { .. } => loc.inspector_badge_firewall,
         Action::Display { .. } => loc.inspector_badge_display,
-        Action::AudioControl { .. } | Action::Sound { .. } | Action::Microphone { .. } => loc.inspector_badge_audio_control,
-        Action::DefaultDevice { .. } | Action::AudioDevice { .. } | Action::MicrophoneDevice { .. } => loc.inspector_badge_default_device,
-        Action::ExecuteScript { .. } | Action::PowerShell { .. } | Action::Cmd { .. } | Action::LuaScript { .. } => loc.inspector_badge_execute_script,
+        Action::AudioControl { .. } => loc.inspector_badge_audio_control,
+        Action::DefaultDevice { .. } => loc.inspector_badge_default_device,
+        Action::ExecuteScript { .. } => loc.inspector_badge_execute_script,
         Action::Macro { .. } => loc.inspector_badge_macro,
         Action::IfElse { .. } => loc.inspector_badge_if_else,
+        Action::AudioFormat { .. } => loc.inspector_badge_audio_format,
     }
 }
 
@@ -1246,16 +1246,6 @@ fn action_summary_preview(action: &Action) -> String {
                 format!("Notify \"{}\"", title)
             }
         }
-        Action::ProcessAudio {
-            process_name,
-            action_type,
-            volume_level,
-        } => match action_type {
-            ProcessAudioActionType::Mute => format!("Mute {}", process_name),
-            ProcessAudioActionType::Unmute => format!("Unmute {}", process_name),
-            ProcessAudioActionType::ToggleMute => format!("Toggle mute {}", process_name),
-            ProcessAudioActionType::SetVolume => format!("Volume {}% {}", volume_level, process_name),
-        },
         Action::SystemPower { power_type } => format!("Power: {:?}", power_type),
         Action::Delay { seconds } => format!("Wait {:.1} seconds", seconds),
         Action::HttpWebhook { url, method, .. } => {
@@ -1274,9 +1264,17 @@ fn action_summary_preview(action: &Action) -> String {
             format!("Tuning {}", proc)
         }
         Action::PowerPlan { plan } => format!("Power Plan: {:?}", plan),
-        Action::PlaySound { file_path } => {
-            let f = std::path::Path::new(file_path).file_name().and_then(|s| s.to_str()).unwrap_or(file_path);
-            format!("Play sound: {}", f)
+        Action::PlaySound { file_path, play_beep, beep_frequency, beep_duration_ms } => {
+            if *play_beep {
+                if let Some(f) = beep_frequency {
+                    format!("Beep {}Hz ({}ms)", f, beep_duration_ms.unwrap_or(200))
+                } else {
+                    "System Beep".to_string()
+                }
+            } else {
+                let f = std::path::Path::new(file_path).file_name().and_then(|s| s.to_str()).unwrap_or(file_path);
+                format!("Play sound: {}", f)
+            }
         }
         Action::Firewall { process_name, block } => {
             if *block {
@@ -1293,23 +1291,41 @@ fn action_summary_preview(action: &Action) -> String {
             let mon = monitor_index.map(|m| format!("[Monitor {}] ", m)).unwrap_or_default();
             refresh_rate.map(|r| format!("Display: {}{} @ {}Hz", mon, res, r)).unwrap_or_else(|| format!("Display: {}{}", mon, res))
         }
-        Action::AudioControl { target, action_type, volume_level } => {
+        Action::AudioControl { target, action_type, volume_level, left_volume, right_volume, process_name } => {
             let target_str = match target {
                 crate::models::AudioTarget::Playback => "Playback",
                 crate::models::AudioTarget::Microphone => "Microphone",
+                crate::models::AudioTarget::Process => "Process",
             };
             match action_type {
                 crate::models::AudioVolumeAction::Mute => format!("Mute {}", target_str),
                 crate::models::AudioVolumeAction::Unmute => format!("Unmute {}", target_str),
                 crate::models::AudioVolumeAction::ToggleMute => format!("Toggle {} Mute", target_str),
-                crate::models::AudioVolumeAction::SetVolume => format!("{} Volume {}%", target_str, volume_level),
+                crate::models::AudioVolumeAction::SetVolume => {
+                    if let (Some(l), Some(r)) = (left_volume, right_volume) {
+                        format!("{} Vol L:{}% R:{}%", target_str, l, r)
+                    } else if let Some(p) = process_name {
+                        format!("{} ({}) Vol {}%", target_str, p, volume_level)
+                    } else {
+                        format!("{} Volume {}%", target_str, volume_level)
+                    }
+                }
                 crate::models::AudioVolumeAction::PlayBeep => "Play System Beep".into(),
             }
+        }
+        Action::AudioFormat { target, sample_rate, bit_depth, channels, .. } => {
+            let target_str = match target {
+                crate::models::AudioTarget::Playback | crate::models::AudioTarget::Process => "Output",
+                crate::models::AudioTarget::Microphone => "Input",
+            };
+            let ch_str = if *channels == 1 { "Mono" } else { "Stereo" };
+            format!("{} Format: {}Hz, {}-bit, {}", target_str, sample_rate, bit_depth, ch_str)
         }
         Action::DefaultDevice { target, device_name } => {
             let pfx = match target {
                 crate::models::AudioTarget::Playback => "Audio Output",
                 crate::models::AudioTarget::Microphone => "Microphone",
+                crate::models::AudioTarget::Process => "Process Audio",
             };
             format!("Default {}: {}", pfx, device_name)
         }
@@ -1337,16 +1353,15 @@ fn action_summary_preview(action: &Action) -> String {
             let spd_str = if (*speed - 1.0).abs() > 0.05 { format!(" @{:.1}x", speed) } else { String::new() };
             format!("Macro: {} events{}{}", events.len(), rep_str, spd_str)
         }
-        Action::IfElse { conditions, condition, then_actions, else_if_branches, else_actions } => {
-            let glyph = conditions.first().map(|c| c.condition.icon_glyph()).or_else(|| condition.as_ref().map(|c| c.icon_glyph())).unwrap_or("❓");
-            let count = if !conditions.is_empty() { conditions.len() } else if condition.is_some() { 1 } else { 0 };
+        Action::IfElse { conditions, then_actions, else_if_branches, else_actions } => {
+            let glyph = conditions.first().map(|c| c.condition.icon_glyph()).unwrap_or("❓");
+            let count = conditions.len();
             if else_if_branches.is_empty() {
                 format!("If {} ({} cond) [then: {}, else: {}]", glyph, count, then_actions.len(), else_actions.len())
             } else {
                 format!("If {} ({} cond) [then: {}, elif: {}, else: {}]", glyph, count, then_actions.len(), else_if_branches.len(), else_actions.len())
             }
         }
-        _ => "Legacy Action".into(),
     }
 }
 
@@ -1592,7 +1607,7 @@ fn render_actions_pipeline(
 
         // Render card idx
         let is_ghost = active_src == Some(idx);
-        let is_executing = exec_opt.map_or(false, |e| e.is_exit == is_exit_pipeline && e.current_step == idx);
+        let is_executing = exec_opt.is_some_and(|e| e.is_exit == is_exit_pipeline && e.current_step == idx);
         let is_dimmed = has_infinite_prior;
         let resp = render_action_card(
             ui,
@@ -1788,6 +1803,7 @@ fn render_infinite_macro_warning(ui: &mut Ui, state: &GuiState, t: &Tokens) {
     ui.add_space(2.0);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_action_card(
     ui: &mut Ui,
     state: &GuiState,
@@ -1804,8 +1820,6 @@ fn render_action_card(
     let mut clone_clicked = false;
     let mut drag_started = false;
     let mut fields_resp = ActionFieldsResponse::default();
-
-    action.migrate_to_unified();
 
     let ghost_id = ui.id().with(("card_ghost", is_exit_pipeline, idx));
     let ghost_anim = ui.ctx().animate_bool_with_time_and_easing(ghost_id, is_being_dragged, 0.15, easing::cubic_out);
@@ -2101,46 +2115,6 @@ fn render_action_parameter_fields(
                         );
                     }
 
-                    Action::ProcessAudio {
-                        process_name,
-                        action_type,
-                        volume_level,
-                    } => {
-                        widgets::hud(ui, loc.inspector_field_target_process, t.muted);
-                        ui.horizontal(|ui| {
-                            ui.set_width(ui.available_width());
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if render_process_picker(ui, loc) {
-                                    resp.pick_target = Some(default_picker_target);
-                                }
-                                ui.add(
-                                    egui::TextEdit::singleline(process_name)
-                                        .hint_text("notepad.exe")
-                                        .desired_width(ui.available_width())
-                                        .min_size(vec2(0.0, theme::CONTROL_H))
-                                        .vertical_align(egui::Align::Center)
-                                        .margin(vec2(10.0, 8.0)),
-                                );
-                            });
-                        });
-
-                        widgets::hud(ui, loc.inspector_field_process_audio_action, t.muted);
-                        let pa_options = [
-                            (ProcessAudioActionType::Mute, Cell::new(loc.inspector_cell_mute, loc.inspector_audio_mute)),
-                            (ProcessAudioActionType::Unmute, Cell::new(loc.inspector_cell_unmute, loc.inspector_audio_unmute)),
-                            (ProcessAudioActionType::ToggleMute, Cell::new(loc.inspector_cell_toggle, loc.inspector_audio_toggle_mute)),
-                            (ProcessAudioActionType::SetVolume, Cell::new(loc.inspector_cell_volume, loc.inspector_audio_set_volume)),
-                        ];
-                        widgets::cells(ui, action_type, &pa_options);
-                        if *action_type == ProcessAudioActionType::SetVolume {
-                            ui.add_space(4.0);
-                            widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
-                            ui.horizontal(|ui| {
-                                ui.add(egui::Slider::new(volume_level, 0..=100).suffix("%"));
-                            });
-                        }
-                    }
-
                     Action::SystemPower { power_type } => {
                         widgets::hud(ui, loc.inspector_field_power_action, t.muted);
                         let power_options = [
@@ -2346,30 +2320,71 @@ fn render_action_parameter_fields(
                         widgets::cells(ui, plan, &plan_options);
                     }
 
-                    Action::PlaySound { file_path } => {
-                        widgets::hud(ui, "WAV SOUND FILE PATH", t.muted);
-                        ui.horizontal(|ui| {
-                            ui.set_width(ui.available_width());
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let btn_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
-                                if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, btn_w).clicked() {
-                                    if let Some(file) = rfd::FileDialog::new()
-                                        .add_filter("WAV Sound", &["wav"])
-                                        .pick_file()
-                                    {
-                                        *file_path = file.to_string_lossy().to_string();
-                                    }
+                    Action::PlaySound { file_path, play_beep, beep_frequency, beep_duration_ms } => {
+                        let mode_options = [
+                            (false, Cell::new(loc.inspector_sound_mode_file, "")),
+                            (true, Cell::new(loc.inspector_sound_mode_beep, "")),
+                        ];
+                        widgets::cells(ui, play_beep, &mode_options);
+                        ui.add_space(4.0);
+
+                        if *play_beep {
+                            let mut is_custom = beep_frequency.is_some();
+                            let tone_options = [
+                                (false, Cell::new("WINDOWS ALERT", "Default Windows notification alert beep")),
+                                (true, Cell::new("CUSTOM TONE", "Custom frequency & duration beep tone")),
+                            ];
+                            if widgets::cells(ui, &mut is_custom, &tone_options) {
+                                if is_custom {
+                                    *beep_frequency = Some(750);
+                                    *beep_duration_ms = Some(200);
+                                } else {
+                                    *beep_frequency = None;
+                                    *beep_duration_ms = None;
                                 }
-                                ui.add(
-                                    egui::TextEdit::singleline(file_path)
-                                        .hint_text("C:\\Windows\\Media\\notify.wav")
-                                        .desired_width(ui.available_width())
-                                        .min_size(vec2(0.0, theme::CONTROL_H))
-                                        .vertical_align(egui::Align::Center)
-                                        .margin(vec2(10.0, 8.0)),
-                                );
+                            }
+
+                            if is_custom {
+                                ui.add_space(4.0);
+                                let mut freq = beep_frequency.unwrap_or(750);
+                                let mut dur = beep_duration_ms.unwrap_or(200);
+
+                                widgets::hud(ui, loc.inspector_sound_beep_frequency, t.muted);
+                                if ui.add(egui::Slider::new(&mut freq, 100..=5000).suffix(" Hz")).changed() {
+                                    *beep_frequency = Some(freq);
+                                }
+
+                                ui.add_space(4.0);
+                                widgets::hud(ui, loc.inspector_sound_beep_duration, t.muted);
+                                if ui.add(egui::Slider::new(&mut dur, 50..=3000).suffix(" ms")).changed() {
+                                    *beep_duration_ms = Some(dur);
+                                }
+                            }
+                        } else {
+                            widgets::hud(ui, "AUDIO FILE PATH (WAV, MP3, WMA)", t.muted);
+                            ui.horizontal(|ui| {
+                                ui.set_width(ui.available_width());
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let btn_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
+                                    if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, btn_w).clicked() {
+                                        if let Some(file) = rfd::FileDialog::new()
+                                            .add_filter("Audio File", &["wav", "mp3", "wma", "m4a", "ogg"])
+                                            .pick_file()
+                                        {
+                                            *file_path = file.to_string_lossy().to_string();
+                                        }
+                                    }
+                                    ui.add(
+                                        egui::TextEdit::singleline(file_path)
+                                            .hint_text("C:\\Windows\\Media\\notify.wav")
+                                            .desired_width(ui.available_width())
+                                            .min_size(vec2(0.0, theme::CONTROL_H))
+                                            .vertical_align(egui::Align::Center)
+                                            .margin(vec2(10.0, 8.0)),
+                                    );
+                                });
                             });
-                        });
+                        }
                     }
 
                     Action::Firewall { process_name, block } => {
@@ -2435,7 +2450,14 @@ fn render_action_parameter_fields(
                         });
                     }
 
-                    Action::AudioControl { target, action_type, volume_level } => {
+                    Action::AudioControl {
+                        target,
+                        process_name,
+                        action_type,
+                        volume_level,
+                        left_volume,
+                        right_volume,
+                    } => {
                         widgets::hud(ui, loc.inspector_audio_target_label, t.muted);
                         let target_options = [
                             (crate::models::AudioTarget::Playback, Cell::new(
@@ -2446,68 +2468,142 @@ fn render_action_parameter_fields(
                                 loc.inspector_audio_target_mic,
                                 loc.inspector_audio_target_mic_tip,
                             )),
+                            (crate::models::AudioTarget::Process, Cell::new(
+                                loc.inspector_audio_target_process,
+                                loc.inspector_audio_target_process_tip,
+                            )),
                         ];
-                        if widgets::cells(ui, target, &target_options) {
-                            if *target == crate::models::AudioTarget::Microphone && *action_type == crate::models::AudioVolumeAction::PlayBeep {
-                                *action_type = crate::models::AudioVolumeAction::Mute;
-                            }
+                        widgets::cells(ui, target, &target_options);
+
+                        if *target == crate::models::AudioTarget::Process {
+                            ui.add_space(4.0);
+                            widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+                            ui.horizontal(|ui| {
+                                ui.set_width(ui.available_width());
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if render_process_picker(ui, loc) {
+                                        resp.pick_target = Some(default_picker_target);
+                                    }
+                                    let mut p_buf = process_name.clone().unwrap_or_default();
+                                    if ui.add(
+                                        egui::TextEdit::singleline(&mut p_buf)
+                                            .hint_text("Application .exe")
+                                            .desired_width(ui.available_width())
+                                            .min_size(vec2(0.0, theme::CONTROL_H))
+                                            .vertical_align(egui::Align::Center)
+                                            .margin(vec2(10.0, 8.0)),
+                                    ).changed() {
+                                        let trimmed = p_buf.trim().to_string();
+                                        *process_name = if trimmed.is_empty() { None } else { Some(trimmed) };
+                                    }
+                                });
+                            });
                         }
 
                         ui.add_space(4.0);
                         widgets::hud(ui, loc.inspector_field_audio_action_type, t.muted);
-                        if *target == crate::models::AudioTarget::Playback {
-                            let audio_options = [
-                                (crate::models::AudioVolumeAction::Mute, Cell::new(
-                                    loc.inspector_cell_mute,
-                                    loc.inspector_audio_mute,
-                                )),
-                                (crate::models::AudioVolumeAction::Unmute, Cell::new(
-                                    loc.inspector_cell_unmute,
-                                    loc.inspector_audio_unmute,
-                                )),
-                                (crate::models::AudioVolumeAction::ToggleMute, Cell::new(
-                                    loc.inspector_cell_toggle,
-                                    loc.inspector_audio_toggle_mute,
-                                )),
-                                (crate::models::AudioVolumeAction::SetVolume, Cell::new(
-                                    loc.inspector_cell_volume,
-                                    loc.inspector_audio_set_volume,
-                                )),
-                                (crate::models::AudioVolumeAction::PlayBeep, Cell::new(
-                                    loc.inspector_cell_beep,
-                                    loc.inspector_audio_beep,
-                                )),
-                            ];
-                            widgets::cells(ui, action_type, &audio_options);
-                        } else {
-                            let mic_options = [
-                                (crate::models::AudioVolumeAction::Mute, Cell::new(
-                                    loc.inspector_cell_mute,
-                                    loc.inspector_audio_mute,
-                                )),
-                                (crate::models::AudioVolumeAction::Unmute, Cell::new(
-                                    loc.inspector_cell_unmute,
-                                    loc.inspector_audio_unmute,
-                                )),
-                                (crate::models::AudioVolumeAction::ToggleMute, Cell::new(
-                                    loc.inspector_cell_toggle,
-                                    loc.inspector_audio_toggle_mute,
-                                )),
-                                (crate::models::AudioVolumeAction::SetVolume, Cell::new(
-                                    loc.inspector_cell_volume,
-                                    loc.inspector_audio_set_volume,
-                                )),
-                            ];
-                            widgets::cells(ui, action_type, &mic_options);
-                        }
+                        let audio_options = [
+                            (crate::models::AudioVolumeAction::Mute, Cell::new(
+                                loc.inspector_cell_mute,
+                                loc.inspector_audio_mute,
+                            )),
+                            (crate::models::AudioVolumeAction::Unmute, Cell::new(
+                                loc.inspector_cell_unmute,
+                                loc.inspector_audio_unmute,
+                            )),
+                            (crate::models::AudioVolumeAction::ToggleMute, Cell::new(
+                                loc.inspector_cell_toggle,
+                                loc.inspector_audio_toggle_mute,
+                            )),
+                            (crate::models::AudioVolumeAction::SetVolume, Cell::new(
+                                loc.inspector_cell_volume,
+                                loc.inspector_audio_set_volume,
+                            )),
+                        ];
+                        widgets::cells(ui, action_type, &audio_options);
 
                         if *action_type == crate::models::AudioVolumeAction::SetVolume {
                             ui.add_space(4.0);
-                            widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
-                            ui.horizontal(|ui| {
-                                ui.add(egui::Slider::new(volume_level, 0..=100).suffix("%"));
-                            });
+                            if *target == crate::models::AudioTarget::Playback {
+                                let mut separate = left_volume.is_some() || right_volume.is_some();
+                                if ui.checkbox(&mut separate, loc.inspector_audio_separate_channels).changed() {
+                                    if separate {
+                                        *left_volume = Some(*volume_level);
+                                        *right_volume = Some(*volume_level);
+                                    } else {
+                                        *left_volume = None;
+                                        *right_volume = None;
+                                    }
+                                }
+
+                                if separate {
+                                    let mut l = left_volume.unwrap_or(*volume_level);
+                                    let mut r = right_volume.unwrap_or(*volume_level);
+                                    ui.add_space(2.0);
+                                    widgets::hud(ui, loc.inspector_audio_left_channel, t.muted);
+                                    if ui.add(egui::Slider::new(&mut l, 0..=100).suffix("%")).changed() {
+                                        *left_volume = Some(l);
+                                    }
+                                    ui.add_space(2.0);
+                                    widgets::hud(ui, loc.inspector_audio_right_channel, t.muted);
+                                    if ui.add(egui::Slider::new(&mut r, 0..=100).suffix("%")).changed() {
+                                        *right_volume = Some(r);
+                                    }
+                                } else {
+                                    widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
+                                    ui.horizontal(|ui| {
+                                        ui.add(egui::Slider::new(volume_level, 0..=100).suffix("%"));
+                                    });
+                                }
+                            } else {
+                                widgets::hud(ui, loc.inspector_field_volume_level, t.muted);
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Slider::new(volume_level, 0..=100).suffix("%"));
+                                });
+                            }
                         }
+                    }
+
+                    Action::AudioFormat {
+                        target,
+                        device_name: _,
+                        sample_rate,
+                        bit_depth,
+                        channels,
+                    } => {
+                        widgets::hud(ui, loc.inspector_audio_target_label, t.muted);
+                        let target_options = [
+                            (crate::models::AudioTarget::Playback, Cell::new(loc.inspector_audio_target_playback, loc.inspector_audio_target_playback_tip)),
+                            (crate::models::AudioTarget::Microphone, Cell::new(loc.inspector_audio_target_mic, loc.inspector_audio_target_mic_tip)),
+                        ];
+                        widgets::cells(ui, target, &target_options);
+
+                        ui.add_space(4.0);
+                        widgets::hud(ui, loc.inspector_audio_format_sample_rate, t.muted);
+                        let rate_options = [
+                            (44100, Cell::new("44.1 kHz", "CD Quality")),
+                            (48000, Cell::new("48.0 kHz", "Studio Standard")),
+                            (96000, Cell::new("96.0 kHz", "High Resolution")),
+                            (192000, Cell::new("192.0 kHz", "Ultra High Resolution")),
+                        ];
+                        widgets::cells(ui, sample_rate, &rate_options);
+
+                        ui.add_space(4.0);
+                        widgets::hud(ui, loc.inspector_audio_format_bit_depth, t.muted);
+                        let depth_options = [
+                            (16, Cell::new("16-bit", "Standard Depth")),
+                            (24, Cell::new("24-bit", "Studio Quality")),
+                            (32, Cell::new("32-bit", "Float / Extended")),
+                        ];
+                        widgets::cells(ui, bit_depth, &depth_options);
+
+                        ui.add_space(4.0);
+                        widgets::hud(ui, loc.inspector_audio_format_channels, t.muted);
+                        let ch_options = [
+                            (2, Cell::new("Stereo (2.0)", "Two channels (Left & Right)")),
+                            (1, Cell::new("Mono (1.0)", "Single channel microphone / headset")),
+                        ];
+                        widgets::cells(ui, channels, &ch_options);
                     }
 
                     Action::DefaultDevice { target, device_name } => {
@@ -2528,6 +2624,7 @@ fn render_action_parameter_fields(
                         let dev_hint = match target {
                             crate::models::AudioTarget::Playback => "Speakers (Realtek Audio), Headphones...",
                             crate::models::AudioTarget::Microphone => "Microphone (Realtek Audio), Headset...",
+                            crate::models::AudioTarget::Process => "Process name...",
                         };
                         widgets::hud(ui, "DEVICE NAME", t.muted);
                         ui.add(
@@ -2632,16 +2729,12 @@ fn render_action_parameter_fields(
                         );
                     }
 
-        Action::IfElse { conditions, condition, then_actions, else_if_branches, else_actions } => {
+        Action::IfElse { conditions, then_actions, else_if_branches, else_actions } => {
             if depth > 0 {
                 ui.label(egui::RichText::new(loc.inspector_ifelse_nested_not_supported).color(t.muted));
             } else {
                 if conditions.is_empty() {
-                    if let Some(c) = condition.take() {
-                        conditions.push(RuleConditionItem::new(c));
-                    } else {
-                        conditions.push(RuleConditionItem::new(RuleCondition::default_process()));
-                    }
+                    conditions.push(RuleConditionItem::new(RuleCondition::default_process()));
                 }
 
                 // ── 1. PRIMARY IF BLOCK ──
@@ -2670,10 +2763,8 @@ fn render_action_parameter_fields(
                                 is_exit: is_exit_pipeline,
                             });
                         },
-                    ) {
-                        if total_if_conds > 1 {
-                            remove_if_cond_idx = Some(c_idx);
-                        }
+                    ) && total_if_conds > 1 {
+                        remove_if_cond_idx = Some(c_idx);
                     }
                 }
                 if let Some(c_idx) = remove_if_cond_idx {
@@ -2751,10 +2842,8 @@ fn render_action_parameter_fields(
                                     is_exit: is_exit_pipeline,
                                 });
                             },
-                        ) {
-                            if total_elif_conds > 1 {
-                                remove_elif_cond_idx = Some(c_idx);
-                            }
+                        ) && total_elif_conds > 1 {
+                            remove_elif_cond_idx = Some(c_idx);
                         }
                     }
                     if let Some(c_idx) = remove_elif_cond_idx {
@@ -2837,7 +2926,6 @@ fn render_action_parameter_fields(
                 );
             }
         }
-        _ => {}
     }
 
     resp
@@ -2849,8 +2937,8 @@ enum ConditionKind {
     Process,
     Window,
     Time,
-    Power,
-    File,
+    Event,
+    System,
 }
 
 impl ConditionKind {
@@ -2859,8 +2947,8 @@ impl ConditionKind {
             RuleCondition::ProcessRunning { .. } => ConditionKind::Process,
             RuleCondition::WindowFocused { .. } => ConditionKind::Window,
             RuleCondition::TimeRange { .. } => ConditionKind::Time,
-            RuleCondition::PowerSource { .. } => ConditionKind::Power,
-            RuleCondition::FileExists { .. } => ConditionKind::File,
+            RuleCondition::Event { .. } => ConditionKind::Event,
+            RuleCondition::ResourceThreshold { .. } | RuleCondition::FileWatcher { .. } => ConditionKind::System,
         }
     }
 
@@ -2869,8 +2957,8 @@ impl ConditionKind {
             ConditionKind::Process => loc.inspector_cond_type_process,
             ConditionKind::Window => loc.inspector_cond_type_window,
             ConditionKind::Time => loc.inspector_cond_type_time,
-            ConditionKind::Power => loc.inspector_cond_type_power,
-            ConditionKind::File => loc.inspector_cond_type_file,
+            ConditionKind::Event => loc.inspector_cond_type_event,
+            ConditionKind::System => loc.inspector_cond_type_system,
         }
     }
 
@@ -2879,10 +2967,16 @@ impl ConditionKind {
             ConditionKind::Process => RuleCondition::default_process(),
             ConditionKind::Window => RuleCondition::default_window(),
             ConditionKind::Time => RuleCondition::default_time(),
-            ConditionKind::Power => RuleCondition::default_power(),
-            ConditionKind::File => RuleCondition::default_file(),
+            ConditionKind::Event => RuleCondition::default_event(),
+            ConditionKind::System => RuleCondition::default_resource(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SystemConditionSubMode {
+    Resource,
+    FileWatcher,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2936,8 +3030,8 @@ fn render_condition_card(
                     (ConditionKind::Process, Cell::new(loc.inspector_cond_tab_process, "")),
                     (ConditionKind::Window, Cell::new(loc.inspector_cond_tab_window, "")),
                     (ConditionKind::Time, Cell::new(loc.inspector_cond_tab_time, "")),
-                    (ConditionKind::Power, Cell::new(loc.inspector_cond_tab_power, "")),
-                    (ConditionKind::File, Cell::new(loc.inspector_cond_tab_file, "")),
+                    (ConditionKind::Event, Cell::new(loc.inspector_cond_tab_event, "")),
+                    (ConditionKind::System, Cell::new(loc.inspector_cond_tab_system, "")),
                 ];
                 let prev_kind = kind;
                 if widgets::cells(ui, &mut kind, &kind_options) && kind != prev_kind {
@@ -3184,28 +3278,57 @@ fn render_single_condition_editor(
                 }
             });
         }
-        RuleCondition::PowerSource { require_ac } => {
-            widgets::hud(ui, loc.inspector_cond_power_label, t.muted);
-            let power_options = [
-                (true, Cell::new(loc.inspector_cond_power_ac, "")),
-                (false, Cell::new(loc.inspector_cond_power_battery, "")),
+        RuleCondition::Event { event_type, idle_duration_sec } => {
+            widgets::hud(ui, loc.inspector_cond_type_event, t.muted);
+            let sys_events = [
+                (crate::models::SystemEventType::SessionLock, format!("{} {}", egui_phosphor::regular::LOCK, loc.inspector_sys_event_lock)),
+                (crate::models::SystemEventType::SessionUnlock, format!("{} {}", egui_phosphor::regular::LOCK_OPEN, loc.inspector_sys_event_unlock)),
+                (crate::models::SystemEventType::SystemSleep, format!("{} {}", egui_phosphor::regular::MOON, loc.inspector_sys_event_sleep)),
+                (crate::models::SystemEventType::SystemResume, format!("{} {}", egui_phosphor::regular::SUN, loc.inspector_sys_event_resume)),
+                (crate::models::SystemEventType::PowerSourceAc, format!("{} {}", egui_phosphor::regular::PLUG, loc.inspector_sys_event_ac)),
+                (crate::models::SystemEventType::PowerSourceBattery, format!("{} {}", egui_phosphor::regular::BATTERY_CHARGING, loc.inspector_sys_event_battery)),
+                (crate::models::SystemEventType::UserIdle, format!("{} {}", egui_phosphor::regular::HOURGLASS, loc.inspector_sys_event_idle)),
+                (crate::models::SystemEventType::UserActive, format!("{} {}", egui_phosphor::regular::ACTIVITY, loc.inspector_sys_event_active)),
             ];
-            widgets::cells(ui, require_ac, &power_options);
+
+            let selected_label = sys_events.iter().find(|(k, _)| k == event_type).map(|(_, l)| l.as_str()).unwrap_or("");
+            egui::ComboBox::from_id_salt(ui.id().with("cond_sys_event_combo"))
+                .selected_text(selected_label)
+                .width(ui.available_width() - 8.0)
+                .show_ui(ui, |ui| {
+                    for (k, label) in &sys_events {
+                        ui.selectable_value(event_type, *k, label);
+                    }
+                });
+
+            if matches!(event_type, crate::models::SystemEventType::UserIdle | crate::models::SystemEventType::UserActive) {
+                ui.add_space(4.0);
+                widgets::hud(ui, loc.inspector_field_idle_duration, t.muted);
+                ui.add(egui::Slider::new(idle_duration_sec, 5..=3600).suffix(" s"));
+            }
         }
-        RuleCondition::FileExists { path, must_exist } => {
-            widgets::hud(ui, loc.inspector_cond_file_path_label, t.muted);
+        RuleCondition::ResourceThreshold { process_name, cpu_percent, ram_mb, duration_sec } => {
+            let mut submode = SystemConditionSubMode::Resource;
+            let sub_options = [
+                (SystemConditionSubMode::Resource, Cell::new(loc.inspector_cond_sub_resource, "")),
+                (SystemConditionSubMode::FileWatcher, Cell::new(loc.inspector_cond_sub_file_watcher, "")),
+            ];
+            if widgets::cells(ui, &mut submode, &sub_options) && submode == SystemConditionSubMode::FileWatcher {
+                *cond = RuleCondition::default_file();
+                return;
+            }
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_field_target_process, t.muted);
             ui.horizontal(|ui| {
                 ui.set_width(ui.available_width());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let btn_w = widgets::button_width(ui, loc.inspector_btn_folder, 0.0);
-                    if widgets::button(ui, loc.inspector_btn_folder, Kind::Secondary, btn_w).clicked() {
-                        if let Some(file) = rfd::FileDialog::new().pick_file() {
-                            *path = file.to_string_lossy().to_string();
-                        }
+                    if render_process_picker(ui, loc) {
+                        on_pick_process();
                     }
                     ui.add(
-                        egui::TextEdit::singleline(path)
-                            .hint_text("C:\\path\\to\\file.ext")
+                        egui::TextEdit::singleline(process_name)
+                            .hint_text("Process executable")
                             .desired_width(ui.available_width())
                             .min_size(vec2(0.0, theme::CONTROL_H))
                             .vertical_align(egui::Align::Center)
@@ -3214,6 +3337,91 @@ fn render_single_condition_editor(
                 });
             });
 
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                let mut has_cpu = cpu_percent.is_some();
+                if ui.checkbox(&mut has_cpu, loc.inspector_cond_res_cpu).changed() {
+                    *cpu_percent = if has_cpu { Some(80.0) } else { None };
+                }
+                if let Some(cpu) = cpu_percent {
+                    ui.add(egui::DragValue::new(cpu).range(1.0..=100.0).suffix("%"));
+                }
+
+                ui.add_space(10.0);
+                let mut has_mem = ram_mb.is_some();
+                if ui.checkbox(&mut has_mem, loc.inspector_cond_res_ram).changed() {
+                    *ram_mb = if has_mem { Some(1024) } else { None };
+                }
+                if let Some(mem) = ram_mb {
+                    ui.add(egui::DragValue::new(mem).range(10..=65536).suffix(" MB"));
+                }
+            });
+
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                widgets::hud(ui, loc.inspector_cond_res_duration, t.muted);
+                ui.add(egui::DragValue::new(duration_sec).range(1..=3600).suffix(" s"));
+            });
+        }
+        RuleCondition::FileWatcher { path, filter_extension, must_exist } => {
+            let mut submode = SystemConditionSubMode::FileWatcher;
+            let sub_options = [
+                (SystemConditionSubMode::Resource, Cell::new(loc.inspector_cond_sub_resource, "")),
+                (SystemConditionSubMode::FileWatcher, Cell::new(loc.inspector_cond_sub_file_watcher, "")),
+            ];
+            if widgets::cells(ui, &mut submode, &sub_options) && submode == SystemConditionSubMode::Resource {
+                *cond = RuleCondition::default_resource();
+                return;
+            }
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_cond_file_path_label, t.muted);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::button(ui, loc.inspector_cond_file_btn_folder, Kind::Secondary, 0.0)
+                        .on_hover_text(loc.inspector_cond_file_btn_folder_tip)
+                        .clicked()
+                    {
+                        if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                            *path = folder.to_string_lossy().to_string();
+                        }
+                    }
+                    if widgets::button(ui, loc.inspector_cond_file_btn_file, Kind::Secondary, 0.0)
+                        .on_hover_text(loc.inspector_cond_file_btn_file_tip)
+                        .clicked()
+                    {
+                        if let Some(file) = rfd::FileDialog::new().pick_file() {
+                            *path = file.to_string_lossy().to_string();
+                        }
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(path)
+                            .hint_text("C:\\path\\to\\file_or_folder")
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .vertical_align(egui::Align::Center)
+                            .margin(vec2(10.0, 8.0)),
+                    );
+                });
+            });
+
+            ui.add_space(4.0);
+            widgets::hud(ui, loc.inspector_cond_file_ext_filter, t.muted);
+            let mut ext_buf = filter_extension.clone().unwrap_or_default();
+            if ui.add(
+                egui::TextEdit::singleline(&mut ext_buf)
+                    .hint_text(loc.inspector_cond_file_ext_hint)
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(0.0, theme::CONTROL_H))
+                    .vertical_align(egui::Align::Center)
+                    .margin(vec2(10.0, 8.0)),
+            ).changed() {
+                let trimmed = ext_buf.trim().to_string();
+                *filter_extension = if trimmed.is_empty() { None } else { Some(trimmed) };
+            }
+
+            ui.add_space(4.0);
             widgets::hud(ui, loc.inspector_cond_file_state_label, t.muted);
             let file_options = [
                 (true, Cell::new(loc.inspector_cond_file_exists, "")),
@@ -3933,14 +4141,12 @@ fn render_schedule_trigger(
                 *target_datetime = None;
             }
             ScheduleType::Daily => {}
-            ScheduleType::OneShot => {
-                if target_datetime.is_none() {
-                    let now = chrono::Local::now();
-                    *target_datetime = Some(format!(
-                        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-                        now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second()
-                    ));
-                }
+            ScheduleType::OneShot if target_datetime.is_none() => {
+                let now = chrono::Local::now();
+                *target_datetime = Some(format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                    now.year(), now.month(), now.day(), now.hour(), now.minute(), now.second()
+                ));
             }
             _ => {}
         }
