@@ -20,7 +20,7 @@
 1. **System Tray Daemon**: An ultra-low overhead background service that listens reactively to system events, process lifecycles, and triggers, managing schedules and executing automated rule pipelines with zero window baggage.
 2. **Interactive Desktop GUI**: A hardware-accelerated, high-DPI desktop interface powered by `egui` and `eframe`, communicating seamlessly with the daemon via high-throughput Windows Named Pipes (`\\.\pipe\ProcessHandler_daemon`).
 
-Whether you need to boost game performance by binding companion utilities, safeguard your PC from rogue memory leaks, or automate daily workflow scripts, ProcessHandler delivers full control with near-zero resource utilization (<0.1% CPU, ~2MB RAM).
+Whether you need to boost game performance by binding companion utilities, safeguard your PC from rogue memory leaks, or automate daily workflow scripts, ProcessHandler delivers full control with near-zero resource utilization (~0.1% CPU, ~2MB RAM).
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/777a1893-7a49-45bf-ad52-84375a5ef808" width="100%">
@@ -126,8 +126,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 #### Prerequisites
 - **Windows 10 / 11** (64-bit)
 
-To install, download the latest release from [**GitHub Releases**](https://github.com/psyattack/ProcessHandler/releases):
-- **Portable Version (`ProcessHandler.exe`):** Place the executable in any convenient directory and run it.
+To install, download the latest release from [**GitHub Releases**](https://github.com/psyattack/ProcessHandler/releases) and extract the downloaded archive to a convenient location on your drive.
 
 > [!IMPORTANT]
 > **Administrator Privileges & In-Game Hotkeys**: If you plan to trigger hotkeys, macros, or automate actions in games or programs running with elevated (administrator) privileges, ProcessHandler must also be **Run as administrator**. Under Windows UIPI (User Interface Privilege Isolation), non-elevated background services cannot intercept global keyboard shortcuts or dispatch simulated input (SendInput) into elevated windows.
@@ -143,7 +142,7 @@ To install, download the latest release from [**GitHub Releases**](https://githu
 <summary><b>Development Setup</b></summary>
 
 #### Prerequisites
-- **Rust** (1.75+ recommended, MSVC toolchain)
+- **Rust** (1.75+)
 
 #### Build & Run Commands
 
@@ -164,14 +163,9 @@ cargo run -- --daemon
 # Execute test suite
 cargo test
 
-# Run Clippy linter
-cargo clippy --tests
-
 # Build optimized release binary
 cargo build --release
 ```
-
-The compiled binary will be located at `target\release\ProcessHandler.exe`.
 
 </details>
 
@@ -179,40 +173,16 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 
 ## 🛠️ Tech Stack
 
-<table>
-<tr>
-<td width="50%">
-
 ### Frontend / UI
-- **egui** (Immediate-mode GUI engine)
-- **eframe** (Desktop windowing & rendering integration)
-- **Custom Design Tokens & Themes** (Dark, Light, Chocolate palettes)
-- **i18n Localization Engine** (Full English & Russian support)
-- **Script Syntax Highlighter** (PowerShell, Batch & Lua lexer)
-- **Win32 Shell GDI & image crate** (Native icon rasterization, PNG/JPEG decoding & textures)
-- **arboard** (Cross-platform system clipboard integration)
-- **Named Pipe Client** (Thread-safe IPC client)
-
-</td>
-<td width="50%">
+- **egui**
+- **eframe**
 
 ### Backend / Engine
-- **Rust** (High-performance, memory-safe systems language)
-- **Tokio** (Asynchronous runtime for decoupled rule execution & IPC)
-- **mlua** (Embedded Lua 5.4 engine with vendored build)
-- **windows-rs** (Official Win32, COM & Core Audio bindings)
-- **WMI** (Windows Management Instrumentation event listener)
-- **Core Audio & WASAPI** (System volume, default devices & per-process)
-- **reqwest** (Async HTTP client for GitHub releases & binary updates)
-- **Named Pipes Server** (Multi-client background IPC listener)
-- **Serde + Serde JSON** (Strongly-typed state persistence)
-- **flate2 & Base64** (Zlib compression for portable rule sharing payloads)
-- **zip** (Zip archive compression and decompression engine with Deflate support)
-- **Windows Registry API** (System autorun persistence)
-
-</td>
-</tr>
-</table>
+- **Tokio**
+- **mlua**
+- **windows-rs**
+- **reqwest**
+- **Serde + Serde JSON**
 
 ---
 
@@ -288,15 +258,7 @@ ProcessHandler/
 
 ## 📝 Configuration
 
-Configuration and state files are located in:  
-**`%LOCALAPPDATA%\ProcessHandler\`**
-
-| File / Directory | Description |
-|------|-------------|
-| `config.json` | Application settings, user rules, poll interval, window geometry, color theme (`dark`, `light`, `chocolate`), language (`english`, `russian`), startup update checks, and autorun state |
-
-> [!NOTE]
-> Event and action execution logs are maintained in an in-memory ring buffer (up to 500 entries) in RAM, with smart eviction prioritizing rule execution and error history, and streamed via IPC directly to the GUI without incurring disk I/O wear.
+Configuration and state files are located in: **`%LOCALAPPDATA%\ProcessHandler\`**
 
 ---
 
@@ -314,7 +276,7 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## ⚠️ Disclaimer
 
-ProcessHandler interacts directly with Windows system processes and administrative APIs. When configuring process termination or priority rules, ensure critical operating system processes are excluded from automated termination.
+ProcessHandler interacts directly with Windows system processes and administrative APIs. The developers are not liable for any errors, including those caused by the user, as also stated in the license.
 
 ---
 
