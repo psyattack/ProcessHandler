@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.4.0](https://github.com/psyattack/ProcessHandler/compare/v2.3.0...v2.4.0) - 2026-10-25
+
+### Added
+- Discord Rich Presence: Added actions to broadcast custom game and application status directly to Discord via local IPC, including activity details, custom image assets, elapsed session timers, interactive buttons, and automatic status clearing when a target process exits.
+- Archive Compression and Extraction: Added an archive management action supporting packing and unpacking files and directories across ZIP, 7Z, TAR, TAR.GZ, and RAR formats with configurable compression levels and overwrite protection.
+- Filesystem Operations: Added automated file and directory management actions, including creating files or folders, copying, moving, renaming, deleting, and writing or appending text with dynamic token interpolation.
+- Process Memory Trimming: Added a memory optimization action that forcefully flushes process working set RAM to free up system memory for targeted applications.
+- Monthly Schedule Trigger: Added monthly recurring triggers allowing rules to execute automatically on a designated day of the month at a specific time.
+
+### Changed
+- Expanded the Action Catalog and Rule Inspector with dedicated visual editors for Discord status, file archiving, filesystem management, and memory trimming.
+- Updated the in-app user guide, architecture documentation, and README with guides for the new automation actions.
+- Expanded English and Russian localization catalogs across all new actions, triggers, and configuration options.
+
+<details><summary>Detailed Changelog</summary>
+
+### Added
+- **actions:** add discord rich presence, archive compression, filesystem ops, and memory trimming (by @psyattack in efe4028)
+
+</details>
+
+
 ## [2.3.0](https://github.com/psyattack/ProcessHandler/compare/v2.2.0...v2.3.0) - 2026-10-24
 
 ### Added
