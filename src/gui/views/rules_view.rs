@@ -45,7 +45,7 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                     RuleFilter::All,
                     Cell {
                         label: loc.rules_cell_all,
-                        tip: loc.rules_cell_all_tip,
+                        tip: "",
                         count: Some((total, None)),
                     },
                 ),
@@ -53,7 +53,7 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                     RuleFilter::ActiveOnly,
                     Cell {
                         label: loc.rules_cell_active,
-                        tip: loc.rules_cell_active_tip,
+                        tip: "",
                         count: Some((active_count, Some(t.good))),
                     },
                 ),
@@ -61,7 +61,7 @@ pub fn render_rules_view(ui: &mut Ui, state: &mut GuiState) {
                     RuleFilter::PausedOnly,
                     Cell {
                         label: loc.rules_cell_paused,
-                        tip: loc.rules_cell_paused_tip,
+                        tip: "",
                         count: Some((paused_count, None)),
                     },
                 ),
@@ -227,7 +227,6 @@ fn render_rule_card(
 
                     // 1. Delete button (always on far right)
                     if widgets::button(ui, loc.rules_btn_delete, Kind::Danger, 0.0)
-                        .on_hover_text(loc.rules_btn_delete_tip)
                         .clicked()
                     {
                         state.delete_rule(&rule.id);
@@ -265,7 +264,6 @@ fn render_rule_card(
 
                                 // In right-to-left, Edit is closest to More button:
                                 if widgets::button(ui, loc.rules_btn_edit, Kind::Secondary, 0.0)
-                                    .on_hover_text(loc.rules_btn_edit_tip)
                                     .clicked()
                                 {
                                     state.edit_rule(rule.clone());
@@ -273,7 +271,6 @@ fn render_rule_card(
 
                                 // Clone
                                 if widgets::button(ui, loc.rules_btn_clone, Kind::Secondary, 0.0)
-                                    .on_hover_text(loc.rules_btn_clone_tip)
                                     .clicked()
                                 {
                                     state.clone_rule(rule);
@@ -340,7 +337,7 @@ fn render_rule_card(
                     );
                 }
 
-                if icon_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
+                if icon_resp.clicked() {
                     state.edit_rule(rule.clone());
                 }
 
@@ -356,7 +353,7 @@ fn render_rule_card(
                                     .color(t.ink_strong),
                             ).sense(egui::Sense::click())
                         );
-                        if title_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
+                        if title_resp.clicked() {
                             state.edit_rule(rule.clone());
                         }
 
@@ -383,7 +380,7 @@ fn render_rule_card(
                     );
                     widgets::paint_left(ui, title_rect, galley, t.ink_strong);
                     let title_resp = title_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if title_resp.on_hover_text(loc.rules_btn_edit_tip).clicked() {
+                    if title_resp.clicked() {
                         state.edit_rule(rule.clone());
                     }
                 }
@@ -512,6 +509,37 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
             let count_suffix = if conditions.len() > 1 { format!("+{}", conditions.len() - 1) } else { String::new() };
             format!("IF {}{} [{} | {}]", cond_summary, count_suffix, then_actions.len(), else_actions.len())
         }
+        Action::TrimWorkingSet { target_process } => {
+            let proc = target_process.as_deref().unwrap_or("ACTIVE");
+            format!("RAM {}", proc)
+        }
+        Action::DiscordRpcSet { details, .. } => {
+            if details.is_empty() {
+                "DISCORD RPC".to_string()
+            } else {
+                format!("RPC: {}", details)
+            }
+        }
+        Action::DiscordRpcClear => "CLEAR RPC".to_string(),
+        Action::Archive { operation, format, destination_path, .. } => {
+            let fname = std::path::Path::new(destination_path).file_name().unwrap_or_default().to_string_lossy();
+            match operation {
+                crate::models::ArchiveOperation::Pack => format!("PACK {:?} {}", format, fname),
+                crate::models::ArchiveOperation::Unpack => format!("UNPACK {:?} {}", format, fname),
+            }
+        }
+        Action::FileSystem { operation, path, .. } => {
+            let fname = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy();
+            match operation {
+                crate::models::FileSystemOperation::CreateFile => format!("MKFILE {}", fname),
+                crate::models::FileSystemOperation::CreateDirectory => format!("MKDIR {}", fname),
+                crate::models::FileSystemOperation::Rename => format!("RENAME {}", fname),
+                crate::models::FileSystemOperation::Copy => format!("COPY {}", fname),
+                crate::models::FileSystemOperation::Delete => format!("DEL {}", fname),
+                crate::models::FileSystemOperation::WriteText => format!("WRITE {}", fname),
+                crate::models::FileSystemOperation::AppendText => format!("APPEND {}", fname),
+            }
+        }
     }
 }
 
@@ -566,7 +594,7 @@ fn render_pipeline_summary(
             Some(Trigger::SystemEvent { event_type, .. }) => {
                 format!("{}{:?}", loc.rules_summary_trigger_system, event_type)
             }
-            Some(Trigger::Schedule { schedule_type, interval_sec, daily_time, target_datetime, .. }) => {
+            Some(Trigger::Schedule { schedule_type, interval_sec, daily_time, day_of_month, target_datetime, .. }) => {
                 match schedule_type {
                     crate::models::ScheduleType::Interval => {
                         let s = *interval_sec;
@@ -589,6 +617,12 @@ fn render_pipeline_summary(
                     }
                     crate::models::ScheduleType::Daily => {
                         loc.rules_summary_trigger_daily.replace("{}", daily_time.as_deref().unwrap_or("12:00"))
+                    }
+                    crate::models::ScheduleType::Monthly => {
+                        let day_str = day_of_month.unwrap_or(1).to_string();
+                        let time_str = daily_time.as_deref().unwrap_or("12:00");
+                        let res = loc.rules_summary_trigger_monthly.replacen("{}", &day_str, 1);
+                        res.replacen("{}", time_str, 1)
                     }
                     crate::models::ScheduleType::OneShot => {
                         loc.rules_summary_trigger_once.replace("{}", target_datetime.as_deref().unwrap_or("SPECIFIED TIME"))

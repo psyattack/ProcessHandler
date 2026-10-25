@@ -344,7 +344,6 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
 
                                 if !state.is_creating_new_rule
                                     && widgets::button(ui, loc.inspector_btn_clone, Kind::Secondary, 0.0)
-                                        .on_hover_text(loc.inspector_btn_clone_tip)
                                         .clicked()
                                 {
                                     state.clone_rule(&rule);
@@ -352,7 +351,6 @@ pub fn render_inspector_drawer(ctx: &egui::Context, state: &mut GuiState) {
 
                                 if state.is_creating_new_rule
                                     && widgets::button(ui, loc.inspector_btn_reset, Kind::Secondary, 0.0)
-                                        .on_hover_text(loc.inspector_btn_reset_tip)
                                         .clicked()
                                 {
                                     state.reset_builder_state();
@@ -497,39 +495,48 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                 .margin(vec2(10.0, 8.0)),
                         );
 
-                        // Metadata row: Cooldown + Status + Auto process icon
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing.x = 16.0;
-                            ui.horizontal(|ui| {
-                                widgets::hud(ui, loc.inspector_field_cooldown, t.muted);
-                                ui.add(egui::DragValue::new(&mut rule.cooldown_seconds).speed(0.1).range(0.0..=60.0).suffix(" s"));
-                            });
-                            ui.checkbox(&mut rule.is_enabled, loc.inspector_checkbox_rule_active);
-                            ui.checkbox(&mut rule.auto_process_icon, loc.inspector_icon_auto_process)
-                                .on_hover_text(loc.inspector_icon_auto_process_tip);
+                        // Cooldown row
+                        ui.add_space(2.0);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().interact_size.y = 24.0;
+                            widgets::hud(ui, loc.inspector_field_cooldown, t.muted);
+                            ui.add(egui::DragValue::new(&mut rule.cooldown_seconds).speed(0.1).range(0.0..=60.0).suffix(" s"));
                         });
 
-                        // Execution Quota (auto-pause when reached)
                         ui.add_space(4.0);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing.x = 10.0;
-                            let mut has_quota = rule.max_executions.is_some();
-                            if ui.checkbox(&mut has_quota, loc.inspector_field_max_executions).changed() {
-                                rule.max_executions = if has_quota { Some(10) } else { None };
-                            }
-                            if let Some(limit) = &mut rule.max_executions {
-                                if widgets::glyph_button(ui, Glyph::Reset, "Reset execution counter").clicked() {
-                                    rule.execution_count = 0;
+
+                        // Unified compact options group
+                        widgets::checkbox_group(ui, |ui| {
+                            // Icon from target process (separate line below cooldown)
+                            ui.checkbox(&mut rule.auto_process_icon, loc.inspector_icon_auto_process)
+                                .on_hover_text(loc.inspector_icon_auto_process_tip);
+
+                            // Execution Quota (separate line)
+                            ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                let mut has_quota = rule.max_executions.is_some();
+                                if ui.checkbox(&mut has_quota, loc.inspector_field_max_executions).changed() {
+                                    rule.max_executions = if has_quota { Some(10) } else { None };
                                 }
-                                ui.add(egui::DragValue::new(limit).range(1..=100000).suffix(" runs"));
-                                let remaining = limit.saturating_sub(rule.execution_count);
-                                let note = loc.inspector_runs_remaining
-                                    .replacen("{}", &remaining.to_string(), 1)
-                                    .replacen("{}", &limit.to_string(), 1);
-                                widgets::hud(ui, &note, t.faint);
-                            }
+                                if let Some(limit) = &mut rule.max_executions {
+                                    if widgets::glyph_button(ui, Glyph::Reset, "Reset execution counter").clicked() {
+                                        rule.execution_count = 0;
+                                    }
+                                    ui.add(egui::DragValue::new(limit).range(1..=100000).suffix(" runs"));
+                                    let remaining = limit.saturating_sub(rule.execution_count);
+                                    let note = loc.inspector_runs_remaining
+                                        .replacen("{}", &remaining.to_string(), 1)
+                                        .replacen("{}", &limit.to_string(), 1);
+                                    widgets::hud(ui, &note, t.faint);
+                                }
+                            });
+
+                            // Stop pipeline on error (separate line)
                             ui.checkbox(&mut rule.stop_on_error, loc.inspector_field_stop_on_error)
                                 .on_hover_text(loc.inspector_field_stop_on_error_tip);
+
+                            // Rule active (at the very end of the block on a separate line)
+                            ui.checkbox(&mut rule.is_enabled, loc.inspector_checkbox_rule_active);
                         });
                     });
                 });
@@ -600,6 +607,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                     interval_sec: 60,
                                     daily_time: Some("12:00:00".into()),
                                     days_of_week: Vec::new(),
+                                    day_of_month: None,
                                     delay_sec: 0,
                                     target_datetime: None,
                                 });
@@ -610,6 +618,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                     interval_sec: 0,
                                     daily_time: None,
                                     days_of_week: Vec::new(),
+                                    day_of_month: None,
                                     delay_sec: 0,
                                     target_datetime: None,
                                 });
@@ -658,7 +667,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                         widgets::cells(ui, match_mode, &match_options);
 
                                         ui.add_space(6.0);
-                                        ui.checkbox(single_instance, loc.inspector_checkbox_single_instance);
+                                        widgets::checkbox(ui, single_instance, loc.inspector_checkbox_single_instance);
                             }
                         }
 
@@ -684,23 +693,25 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
                                         ui.add_space(4.0);
                                         widgets::hud(ui, "EVENT TYPE", t.muted);
-                                        ui.horizontal_wrapped(|ui| {
-                                            if ui.checkbox(on_focus_gained, "Gained Focus").changed()
-                                                && !*on_focus_gained && !*on_focus_lost
-                                            {
-                                                *on_focus_lost = true;
-                                            }
-                                            if ui.checkbox(on_focus_lost, "Lost Focus").changed()
-                                                && !*on_focus_lost && !*on_focus_gained
-                                            {
-                                                *on_focus_gained = true;
-                                            }
+                                        widgets::checkbox_group(ui, |ui| {
+                                            ui.horizontal_wrapped(|ui| {
+                                                if ui.checkbox(on_focus_gained, "Gained Focus").changed()
+                                                    && !*on_focus_gained && !*on_focus_lost
+                                                {
+                                                    *on_focus_lost = true;
+                                                }
+                                                if ui.checkbox(on_focus_lost, "Lost Focus").changed()
+                                                    && !*on_focus_lost && !*on_focus_gained
+                                                {
+                                                    *on_focus_gained = true;
+                                                }
+                                            });
                                         });
                                     }
                                 }
 
                         TriggerCategory::Schedule => {
-                            if let Some(Trigger::Schedule { schedule_type, interval_sec, daily_time, days_of_week, target_datetime, .. }) = &mut rule.trigger {
+                            if let Some(Trigger::Schedule { schedule_type, interval_sec, daily_time, days_of_week, day_of_month, target_datetime, .. }) = &mut rule.trigger {
                                 render_schedule_trigger(
                                     ui,
                                     loc,
@@ -708,6 +719,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                     interval_sec,
                                     daily_time,
                                     days_of_week,
+                                    day_of_month,
                                     target_datetime,
                                     t,
                                 );
@@ -767,6 +779,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                             interval_sec: 0,
                                             daily_time: None,
                                             days_of_week: Vec::new(),
+                                            day_of_month: None,
                                             delay_sec: 0,
                                             target_datetime: None,
                                         });
@@ -777,6 +790,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                             interval_sec: 0,
                                             daily_time: None,
                                             days_of_week: Vec::new(),
+                                            day_of_month: None,
                                             delay_sec: 0,
                                             target_datetime: None,
                                         });
@@ -904,7 +918,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
 
                                         ui.add_space(4.0);
                                         ui.horizontal_wrapped(|ui| {
-                                            widgets::hud(ui, "DURATION THRESHOLD:", t.muted);
+                                            widgets::hud(ui, "DURATION THRESHOLD", t.muted);
                                             ui.add(egui::DragValue::new(duration_sec).range(1..=3600).suffix(" s"));
                                         });
                                     }
@@ -978,15 +992,20 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                             });
                                         });
 
-                                        ui.add_space(6.0);
-                                        ui.checkbox(hold_mode, loc.inspector_hotkey_hold_mode).on_hover_text(loc.inspector_hotkey_hold_mode_tip);
-
                                         ui.add_space(4.0);
-                                        if *hold_mode {
-                                            ui.checkbox(repeat_while_held, loc.inspector_hotkey_repeat_while_held).on_hover_text(loc.inspector_hotkey_repeat_while_held_tip);
-                                        } else {
-                                            ui.checkbox(repeat_while_held, loc.inspector_hotkey_repeat_in_loop).on_hover_text(loc.inspector_hotkey_repeat_in_loop_tip);
-                                        }
+                                        widgets::checkbox_group(ui, |ui| {
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.checkbox(hold_mode, loc.inspector_hotkey_hold_mode)
+                                                    .on_hover_text(loc.inspector_hotkey_hold_mode_tip);
+                                                if *hold_mode {
+                                                    ui.checkbox(repeat_while_held, loc.inspector_hotkey_repeat_while_held)
+                                                        .on_hover_text(loc.inspector_hotkey_repeat_while_held_tip);
+                                                } else {
+                                                    ui.checkbox(repeat_while_held, loc.inspector_hotkey_repeat_in_loop)
+                                                        .on_hover_text(loc.inspector_hotkey_repeat_in_loop_tip);
+                                                }
+                                            });
+                                        });
                                     }
                                 }
                                 SystemSubMode::FileWatcher => {
@@ -995,18 +1014,12 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                         ui.horizontal(|ui| {
                                             ui.set_width(ui.available_width());
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                if widgets::button(ui, "FILE", Kind::Secondary, 0.0)
-                                                    .on_hover_text("Select a specific file to monitor")
-                                                    .clicked()
-                                                {
+                                                if widgets::button(ui, "FILE", Kind::Secondary, 0.0).clicked() {
                                                     if let Some(f) = rfd::FileDialog::new().pick_file() {
                                                         *folder_path = f.to_string_lossy().to_string();
                                                     }
                                                 }
-                                                if widgets::button(ui, "FOLDER", Kind::Secondary, 0.0)
-                                                    .on_hover_text("Select a directory/folder to monitor")
-                                                    .clicked()
-                                                {
+                                                if widgets::button(ui, "FOLDER", Kind::Secondary, 0.0).clicked() {
                                                     if let Some(f) = rfd::FileDialog::new().pick_folder() {
                                                         *folder_path = f.to_string_lossy().to_string();
                                                     }
@@ -1038,10 +1051,12 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                         }
 
                                         ui.add_space(4.0);
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.checkbox(on_created, "On Created");
-                                            ui.checkbox(on_modified, "On Modified");
-                                            ui.checkbox(on_deleted, "On Deleted");
+                                        widgets::checkbox_group(ui, |ui| {
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.checkbox(on_created, "On Created");
+                                                ui.checkbox(on_modified, "On Modified");
+                                                ui.checkbox(on_deleted, "On Deleted");
+                                            });
                                         });
                                     }
                                 }
@@ -1180,9 +1195,7 @@ fn render_add_action_button(
     let label_pos = pos2(start_x + plus_w + spacing, rect.center().y - label_galley.size().y * 0.5);
     p.galley_with_override_text_color(label_pos, label_galley, text_color);
 
-    let resp = resp
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(loc.inspector_btn_add_action_tip);
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
 
     if resp.clicked() {
         state.open_action_catalog(is_exit_pipeline, None);
@@ -1222,6 +1235,11 @@ fn action_type_badge(action: &Action, loc: &crate::i18n::Strings) -> &'static st
         Action::Macro { .. } => loc.inspector_badge_macro,
         Action::IfElse { .. } => loc.inspector_badge_if_else,
         Action::AudioFormat { .. } => loc.inspector_badge_audio_format,
+        Action::TrimWorkingSet { .. } => loc.inspector_badge_trim_working_set,
+        Action::DiscordRpcSet { .. } => loc.inspector_badge_discord_rpc_set,
+        Action::DiscordRpcClear => loc.inspector_badge_discord_rpc_clear,
+        Action::Archive { .. } => loc.inspector_badge_archive,
+        Action::FileSystem { .. } => loc.inspector_badge_file_system,
     }
 }
 
@@ -1361,6 +1379,28 @@ fn action_summary_preview(action: &Action) -> String {
             } else {
                 format!("If {} ({} cond) [then: {}, elif: {}, else: {}]", glyph, count, then_actions.len(), else_if_branches.len(), else_actions.len())
             }
+        }
+        Action::TrimWorkingSet { target_process } => {
+            let proc = target_process.as_deref().unwrap_or("Trigger / Active");
+            format!("Trim Working Set: {}", proc)
+        }
+        Action::DiscordRpcSet { details, state, .. } => {
+            if details.is_empty() && state.is_empty() {
+                "Discord Rich Presence".to_string()
+            } else if !details.is_empty() && !state.is_empty() {
+                format!("Discord RPC: {} ({})", details, state)
+            } else {
+                format!("Discord RPC: {}{}", details, state)
+            }
+        }
+        Action::DiscordRpcClear => "Clear Discord Presence".to_string(),
+        Action::Archive { operation, format, destination_path, .. } => {
+            let fname = std::path::Path::new(destination_path).file_name().unwrap_or_default().to_string_lossy();
+            format!("{:?} {:?} -> {}", operation, format, fname)
+        }
+        Action::FileSystem { operation, path, .. } => {
+            let fname = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy();
+            format!("{:?}: {}", operation, fname)
         }
     }
 }
@@ -2060,12 +2100,14 @@ fn render_action_parameter_fields(
                             });
                         });
 
-                        ui.checkbox(run_hidden, loc.inspector_checkbox_run_hidden);
-                        ui.checkbox(only_if_not_running, loc.inspector_checkbox_only_if_not_running);
-                        ui.checkbox(run_as_admin, loc.inspector_checkbox_run_as_admin);
-                        if !is_exit_pipeline {
-                            ui.checkbox(close_on_exit, loc.inspector_checkbox_close_on_exit);
-                        }
+                        widgets::checkbox_group(ui, |ui| {
+                            ui.checkbox(run_hidden, loc.inspector_checkbox_run_hidden);
+                            ui.checkbox(only_if_not_running, loc.inspector_checkbox_only_if_not_running);
+                            ui.checkbox(run_as_admin, loc.inspector_checkbox_run_as_admin);
+                            if !is_exit_pipeline {
+                                ui.checkbox(close_on_exit, loc.inspector_checkbox_close_on_exit);
+                            }
+                        });
                     }
 
                     Action::KillProcess { process_name, kill_tree, force } => {
@@ -2087,7 +2129,7 @@ fn render_action_parameter_fields(
                             });
                         });
 
-                        ui.horizontal_wrapped(|ui| {
+                        widgets::checkbox_group(ui, |ui| {
                             ui.checkbox(kill_tree, loc.inspector_checkbox_kill_tree);
                             ui.checkbox(force, loc.inspector_checkbox_force_terminate);
                         });
@@ -2243,20 +2285,20 @@ fn render_action_parameter_fields(
                             }
                         } else if *window_action == WindowActionType::SnapToPosition {
                             ui.horizontal(|ui| {
-                                widgets::hud(ui, "POS X:", t.muted);
+                                widgets::hud(ui, "POS X", t.muted);
                                 let mut xv = x.unwrap_or(0);
                                 if ui.add(egui::DragValue::new(&mut xv).range(0..=7680)).changed() { *x = Some(xv); }
                                 ui.add_space(10.0);
-                                widgets::hud(ui, "POS Y:", t.muted);
+                                widgets::hud(ui, "POS Y", t.muted);
                                 let mut yv = y.unwrap_or(0);
                                 if ui.add(egui::DragValue::new(&mut yv).range(0..=4320)).changed() { *y = Some(yv); }
                             });
                             ui.horizontal(|ui| {
-                                widgets::hud(ui, "WIDTH:", t.muted);
+                                widgets::hud(ui, "WIDTH", t.muted);
                                 let mut wv = width.unwrap_or(800);
                                 if ui.add(egui::DragValue::new(&mut wv).range(100..=7680)).changed() { *width = Some(wv); }
                                 ui.add_space(10.0);
-                                widgets::hud(ui, "HEIGHT:", t.muted);
+                                widgets::hud(ui, "HEIGHT", t.muted);
                                 let mut hv = height.unwrap_or(600);
                                 if ui.add(egui::DragValue::new(&mut hv).range(100..=4320)).changed() { *height = Some(hv); }
                             });
@@ -2267,7 +2309,7 @@ fn render_action_parameter_fields(
                         target_process,
                         priority,
                         affinity_mask: _,
-                        trim_memory,
+                        trim_memory: _,
                     } => {
                         let mut proc_str = target_process.clone().unwrap_or_default();
                         widgets::hud(ui, loc.inspector_field_target_process, t.muted);
@@ -2305,9 +2347,6 @@ fn render_action_parameter_fields(
                                 ui.selectable_value(priority, Some(ProcessPriorityLevel::High), "High");
                                 ui.selectable_value(priority, Some(ProcessPriorityLevel::Realtime), "Realtime");
                             });
-
-                        ui.add_space(4.0);
-                        ui.checkbox(trim_memory, "Trim Working Set RAM");
                     }
 
                     Action::PowerPlan { plan } => {
@@ -2676,7 +2715,7 @@ fn render_action_parameter_fields(
                         );
 
                         if *interpreter != crate::models::ScriptType::Lua {
-                            ui.checkbox(run_in_window, loc.inspector_checkbox_visible_console);
+                            widgets::checkbox(ui, run_in_window, loc.inspector_checkbox_visible_console);
                         }
                     }
 
@@ -2897,7 +2936,7 @@ fn render_action_parameter_fields(
                     widgets::hud(ui, loc.inspector_ifelse_elseif_badge, t.warn);
                 });
                 ui.add_space(4.0);
-                if render_full_width_action_button(ui, loc.inspector_ifelse_add_elseif, loc.inspector_ifelse_add_elseif, t) {
+                if render_full_width_action_button(ui, loc.inspector_ifelse_add_elseif, "", t) {
                     else_if_branches.push(crate::models::ElseIfBranch::new());
                 }
                 ui.add_space(6.0);
@@ -2925,6 +2964,461 @@ fn render_action_parameter_fields(
                     Some(crate::gui::state::IfElseCatalogTarget::Else(idx)),
                 );
             }
+        }
+
+        Action::TrimWorkingSet { target_process } => {
+            let mut proc_str = target_process.clone().unwrap_or_default();
+            widgets::hud(ui, loc.inspector_field_target_process, t.muted);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if render_process_picker(ui, loc) {
+                        resp.pick_target = Some(default_picker_target);
+                    }
+                    if ui.add(
+                        egui::TextEdit::singleline(&mut proc_str)
+                            .hint_text(loc.inspector_trim_target_hint)
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .vertical_align(egui::Align::Center)
+                            .margin(vec2(10.0, 8.0)),
+                    ).changed() {
+                        *target_process = if proc_str.trim().is_empty() { None } else { Some(proc_str) };
+                    }
+                });
+            });
+        }
+
+        Action::DiscordRpcSet {
+            app_id,
+            details,
+            state: rpc_state,
+            large_image,
+            large_text,
+            small_image,
+            small_text,
+            show_elapsed,
+            buttons,
+            auto_clear_on_process_exit,
+        } => {
+            widgets::hud(ui, loc.inspector_discord_app_id, t.muted);
+            ui.add(
+                egui::TextEdit::singleline(app_id)
+                    .hint_text("123456789012345678")
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(0.0, theme::CONTROL_H))
+                    .margin(vec2(10.0, 8.0)),
+            );
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_discord_details, t.muted);
+            ui.add(
+                egui::TextEdit::singleline(details)
+                    .hint_text("Playing {ProcessName}")
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(0.0, theme::CONTROL_H))
+                    .margin(vec2(10.0, 8.0)),
+            );
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_discord_state, t.muted);
+            ui.add(
+                egui::TextEdit::singleline(rpc_state)
+                    .hint_text("In Main Menu")
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(0.0, theme::CONTROL_H))
+                    .margin(vec2(10.0, 8.0)),
+            );
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_discord_large_image, t.muted);
+            let mut l_img = large_image.clone().unwrap_or_default();
+            if ui.add(
+                egui::TextEdit::singleline(&mut l_img)
+                    .hint_text("logo_key / url")
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(0.0, theme::CONTROL_H))
+                    .margin(vec2(10.0, 8.0)),
+            ).changed() {
+                *large_image = if l_img.trim().is_empty() { None } else { Some(l_img) };
+            }
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_discord_large_text, t.muted);
+            let mut l_txt = large_text.clone().unwrap_or_default();
+            if ui.add(
+                egui::TextEdit::singleline(&mut l_txt)
+                    .hint_text("Game Title")
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(0.0, theme::CONTROL_H))
+                    .margin(vec2(10.0, 8.0)),
+            ).changed() {
+                *large_text = if l_txt.trim().is_empty() { None } else { Some(l_txt) };
+            }
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_discord_small_image, t.muted);
+            let mut s_img = small_image.clone().unwrap_or_default();
+            if ui.add(
+                egui::TextEdit::singleline(&mut s_img)
+                    .hint_text("status_key / url")
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(0.0, theme::CONTROL_H))
+                    .margin(vec2(10.0, 8.0)),
+            ).changed() {
+                *small_image = if s_img.trim().is_empty() { None } else { Some(s_img) };
+            }
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_discord_small_text, t.muted);
+            let mut s_txt = small_text.clone().unwrap_or_default();
+            if ui.add(
+                egui::TextEdit::singleline(&mut s_txt)
+                    .hint_text("Online")
+                    .desired_width(ui.available_width())
+                    .min_size(vec2(0.0, theme::CONTROL_H))
+                    .margin(vec2(10.0, 8.0)),
+            ).changed() {
+                *small_text = if s_txt.trim().is_empty() { None } else { Some(s_txt) };
+            }
+            ui.add_space(4.0);
+
+            widgets::checkbox_group(ui, |ui| {
+                ui.checkbox(show_elapsed, loc.inspector_discord_show_elapsed);
+                ui.checkbox(auto_clear_on_process_exit, loc.inspector_discord_auto_clear);
+            });
+            ui.add_space(6.0);
+
+            // Buttons
+            widgets::hud(ui, loc.inspector_discord_buttons, t.muted);
+            let mut remove_btn_idx = None;
+            for (b_i, btn) in buttons.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if widgets::glyph_button(ui, Glyph::Close, loc.inspector_tip_remove_step).clicked() {
+                            remove_btn_idx = Some(b_i);
+                        }
+                        let avail = ui.available_width();
+                        let label_w = (avail * 0.35).clamp(80.0, 120.0);
+                        let url_w = (avail - label_w - ui.spacing().item_spacing.x).max(40.0);
+                        ui.add(
+                            egui::TextEdit::singleline(&mut btn.url)
+                                .hint_text(loc.inspector_discord_btn_url)
+                                .desired_width(url_w)
+                                .min_size(vec2(0.0, theme::CONTROL_H))
+                                .vertical_align(egui::Align::Center)
+                                .margin(vec2(8.0, 6.0)),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut btn.label)
+                                .hint_text(loc.inspector_discord_btn_label)
+                                .desired_width(label_w)
+                                .min_size(vec2(0.0, theme::CONTROL_H))
+                                .vertical_align(egui::Align::Center)
+                                .margin(vec2(8.0, 6.0)),
+                        );
+                    });
+                });
+                ui.add_space(2.0);
+            }
+            if let Some(del) = remove_btn_idx {
+                buttons.remove(del);
+            }
+            if buttons.len() < 2 {
+                if render_full_width_action_button(ui, loc.inspector_discord_btn_add, "", t) {
+                    buttons.push(crate::models::DiscordRpcButton::default());
+                }
+            }
+        }
+
+        Action::DiscordRpcClear => {
+            egui::Frame::new()
+                .fill(t.sunken)
+                .stroke(t.hairline())
+                .corner_radius(CornerRadius::ZERO)
+                .inner_margin(egui::Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        ui.label(
+                            egui::RichText::new(egui_phosphor::regular::X_CIRCLE)
+                                .size(20.0)
+                                .color(t.bad),
+                        );
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(loc.catalog_desc_discord_rpc_clear)
+                                    .size(11.5)
+                                    .color(t.ink_strong),
+                            ).wrap(),
+                        );
+                    });
+                });
+        }
+
+        Action::Archive {
+            operation,
+            format,
+            source_path,
+            destination_path,
+            overwrite,
+            ..
+        } => {
+            let is_pack = matches!(operation, crate::models::ArchiveOperation::Pack);
+            let ext = match format {
+                crate::models::ArchiveFormat::Zip => "zip",
+                crate::models::ArchiveFormat::SevenZip => "7z",
+                crate::models::ArchiveFormat::TarGz => "tar.gz",
+                crate::models::ArchiveFormat::Tar => "tar",
+                crate::models::ArchiveFormat::TarXz => "tar.xz",
+                crate::models::ArchiveFormat::Rar => "rar",
+            };
+
+            widgets::hud(ui, loc.inspector_archive_operation, t.muted);
+            let op_options = [
+                (crate::models::ArchiveOperation::Pack, Cell::new(loc.inspector_archive_op_pack, "")),
+                (crate::models::ArchiveOperation::Unpack, Cell::new(loc.inspector_archive_op_unpack, "")),
+            ];
+            widgets::cells(ui, operation, &op_options);
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_archive_format, t.muted);
+            let fmt_options = [
+                (crate::models::ArchiveFormat::Zip, Cell::new("ZIP", "")),
+                (crate::models::ArchiveFormat::SevenZip, Cell::new("7Z", "")),
+                (crate::models::ArchiveFormat::TarGz, Cell::new("TAR.GZ", "")),
+                (crate::models::ArchiveFormat::Tar, Cell::new("TAR", "")),
+                (crate::models::ArchiveFormat::Rar, Cell::new("RAR", "")),
+            ];
+            widgets::cells(ui, format, &fmt_options);
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_archive_source, t.muted);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if is_pack {
+                        if widgets::button(ui, loc.inspector_cond_file_btn_folder, Kind::Secondary, 0.0).clicked() {
+                            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                *source_path = folder.to_string_lossy().to_string();
+                            }
+                        }
+                        if widgets::button(ui, loc.inspector_cond_file_btn_file, Kind::Secondary, 0.0).clicked() {
+                            if let Some(file) = rfd::FileDialog::new().pick_file() {
+                                *source_path = file.to_string_lossy().to_string();
+                            }
+                        }
+                    } else {
+                        let btn_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
+                        if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, btn_w).clicked() {
+                            if let Some(file) = rfd::FileDialog::new()
+                                .add_filter("Archive Files", &["zip", "7z", "rar", "tar", "gz", "tgz", "xz", "bz2"])
+                                .add_filter("All Files", &["*"])
+                                .pick_file()
+                            {
+                                *source_path = file.to_string_lossy().to_string();
+                            }
+                        }
+                    }
+                    let src_hint = if is_pack {
+                        "C:\\path\\to\\source_folder_or_file"
+                    } else {
+                        "C:\\path\\to\\archive.zip"
+                    };
+                    ui.add(
+                        egui::TextEdit::singleline(source_path)
+                            .hint_text(src_hint)
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .vertical_align(egui::Align::Center)
+                            .margin(vec2(10.0, 8.0)),
+                    );
+                });
+            });
+            ui.add_space(4.0);
+
+            widgets::hud(ui, loc.inspector_archive_destination, t.muted);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let btn_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
+                    if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, btn_w).clicked() {
+                        if is_pack {
+                            let filter_label = format!("{} Archive (*.{})", ext.to_uppercase(), ext);
+                            let default_name = format!("archive.{}", ext);
+                            if let Some(p) = rfd::FileDialog::new()
+                                .add_filter(&filter_label, &[ext])
+                                .set_file_name(&default_name)
+                                .save_file()
+                            {
+                                let mut p_str = p.to_string_lossy().to_string();
+                                let suffix = format!(".{}", ext);
+                                if !p_str.to_lowercase().ends_with(&suffix) {
+                                    p_str.push_str(&suffix);
+                                }
+                                *destination_path = p_str;
+                            }
+                        } else if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                            *destination_path = folder.to_string_lossy().to_string();
+                        }
+                    }
+                    let dst_hint = if is_pack {
+                        "C:\\path\\to\\output_archive.zip"
+                    } else {
+                        "C:\\path\\to\\extracted_folder"
+                    };
+                    ui.add(
+                        egui::TextEdit::singleline(destination_path)
+                            .hint_text(dst_hint)
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .vertical_align(egui::Align::Center)
+                            .margin(vec2(10.0, 8.0)),
+                    );
+                });
+            });
+            ui.add_space(4.0);
+
+            widgets::checkbox(ui, overwrite, loc.inspector_archive_overwrite);
+        }
+
+        Action::FileSystem {
+            operation,
+            path,
+            target_path,
+            content,
+            create_parents,
+            overwrite,
+        } => {
+            widgets::hud(ui, loc.inspector_fs_operation, t.muted);
+            let combo_id = ui.id().with(idx).with("fs_op_combo");
+            let op_text = match operation {
+                crate::models::FileSystemOperation::CreateFile => loc.inspector_fs_op_create_file,
+                crate::models::FileSystemOperation::CreateDirectory => loc.inspector_fs_op_create_dir,
+                crate::models::FileSystemOperation::Rename => loc.inspector_fs_op_rename,
+                crate::models::FileSystemOperation::Copy => loc.inspector_fs_op_copy,
+                crate::models::FileSystemOperation::Delete => loc.inspector_fs_op_delete,
+                crate::models::FileSystemOperation::WriteText => loc.inspector_fs_op_write_text,
+                crate::models::FileSystemOperation::AppendText => loc.inspector_fs_op_append_text,
+            };
+            egui::ComboBox::from_id_salt(combo_id)
+                .selected_text(op_text)
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(operation, crate::models::FileSystemOperation::CreateFile, loc.inspector_fs_op_create_file);
+                    ui.selectable_value(operation, crate::models::FileSystemOperation::CreateDirectory, loc.inspector_fs_op_create_dir);
+                    ui.selectable_value(operation, crate::models::FileSystemOperation::Rename, loc.inspector_fs_op_rename);
+                    ui.selectable_value(operation, crate::models::FileSystemOperation::Copy, loc.inspector_fs_op_copy);
+                    ui.selectable_value(operation, crate::models::FileSystemOperation::Delete, loc.inspector_fs_op_delete);
+                    ui.selectable_value(operation, crate::models::FileSystemOperation::WriteText, loc.inspector_fs_op_write_text);
+                    ui.selectable_value(operation, crate::models::FileSystemOperation::AppendText, loc.inspector_fs_op_append_text);
+                });
+            ui.add_space(4.0);
+
+            let fs_op = *operation;
+            widgets::hud(ui, loc.inspector_fs_path, t.muted);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    match fs_op {
+                        crate::models::FileSystemOperation::CreateDirectory => {
+                            let btn_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
+                            if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, btn_w).clicked() {
+                                if let Some(p) = rfd::FileDialog::new().pick_folder() {
+                                    *path = p.to_string_lossy().to_string();
+                                }
+                            }
+                        }
+                        crate::models::FileSystemOperation::CreateFile => {
+                            let btn_w = widgets::button_width(ui, loc.settings_btn_browse, 0.0);
+                            if widgets::button(ui, loc.settings_btn_browse, Kind::Secondary, btn_w).clicked() {
+                                if let Some(p) = rfd::FileDialog::new().save_file() {
+                                    *path = p.to_string_lossy().to_string();
+                                }
+                            }
+                        }
+                        _ => {
+                            if widgets::button(ui, loc.inspector_cond_file_btn_folder, Kind::Secondary, 0.0).clicked() {
+                                if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                    *path = folder.to_string_lossy().to_string();
+                                }
+                            }
+                            if widgets::button(ui, loc.inspector_cond_file_btn_file, Kind::Secondary, 0.0).clicked() {
+                                if let Some(file) = rfd::FileDialog::new().pick_file() {
+                                    *path = file.to_string_lossy().to_string();
+                                }
+                            }
+                        }
+                    }
+                    let p_hint = match fs_op {
+                        crate::models::FileSystemOperation::CreateDirectory => "C:\\path\\to\\new_folder",
+                        crate::models::FileSystemOperation::CreateFile => "C:\\path\\to\\new_file.txt",
+                        _ => "C:\\folder\\file_or_folder",
+                    };
+                    ui.add(
+                        egui::TextEdit::singleline(path)
+                            .hint_text(p_hint)
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .vertical_align(egui::Align::Center)
+                            .margin(vec2(10.0, 8.0)),
+                    );
+                });
+            });
+            ui.add_space(4.0);
+
+            if matches!(operation, crate::models::FileSystemOperation::Rename | crate::models::FileSystemOperation::Copy) {
+                widgets::hud(ui, loc.inspector_fs_target_path, t.muted);
+                let mut tgt = target_path.clone().unwrap_or_default();
+                ui.horizontal(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if widgets::button(ui, loc.inspector_cond_file_btn_folder, Kind::Secondary, 0.0).clicked() {
+                            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                *target_path = Some(folder.to_string_lossy().to_string());
+                            }
+                        }
+                        if widgets::button(ui, loc.inspector_cond_file_btn_file, Kind::Secondary, 0.0).clicked() {
+                            if let Some(file) = rfd::FileDialog::new().pick_file() {
+                                *target_path = Some(file.to_string_lossy().to_string());
+                            }
+                        }
+                        if ui.add(
+                            egui::TextEdit::singleline(&mut tgt)
+                                .hint_text("C:\\destination\\path")
+                                .desired_width(ui.available_width())
+                                .min_size(vec2(0.0, theme::CONTROL_H))
+                                .vertical_align(egui::Align::Center)
+                                .margin(vec2(10.0, 8.0)),
+                        ).changed() {
+                            *target_path = if tgt.trim().is_empty() { None } else { Some(tgt.clone()) };
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+            }
+
+            if matches!(operation, crate::models::FileSystemOperation::WriteText | crate::models::FileSystemOperation::AppendText) {
+                widgets::hud(ui, loc.inspector_fs_content, t.muted);
+                let mut text_body = content.clone().unwrap_or_default();
+                if ui.add(
+                    egui::TextEdit::multiline(&mut text_body)
+                        .hint_text("Content to write... Tokens like {ProcessName}, {Date}, {Time} are supported.")
+                        .desired_width(ui.available_width())
+                        .desired_rows(4)
+                        .margin(vec2(10.0, 8.0)),
+                ).changed() {
+                    *content = Some(text_body);
+                }
+                ui.add_space(4.0);
+            }
+
+            widgets::checkbox_group(ui, |ui| {
+                ui.checkbox(create_parents, loc.inspector_fs_create_parents);
+                ui.checkbox(overwrite, loc.inspector_fs_overwrite);
+            });
         }
     }
 
@@ -3130,9 +3624,8 @@ fn render_full_width_action_button(
     let label_pos = pos2(start_x + plus_w + spacing, rect.center().y - label_galley.size().y * 0.5);
     p.galley_with_override_text_color(label_pos, label_galley, text_color);
 
-    let resp = resp
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(tip);
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let resp = if !tip.trim().is_empty() { resp.on_hover_text(tip) } else { resp };
 
     resp.clicked()
 }
@@ -3142,7 +3635,7 @@ fn render_add_condition_button(
     loc: &crate::i18n::Strings,
     t: &Tokens,
 ) -> bool {
-    render_full_width_action_button(ui, loc.inspector_conditions_btn_add, loc.inspector_conditions_btn_add, t)
+    render_full_width_action_button(ui, loc.inspector_conditions_btn_add, "", t)
 }
 
 fn render_single_condition_editor(
@@ -3379,18 +3872,12 @@ fn render_single_condition_editor(
             ui.horizontal(|ui| {
                 ui.set_width(ui.available_width());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::button(ui, loc.inspector_cond_file_btn_folder, Kind::Secondary, 0.0)
-                        .on_hover_text(loc.inspector_cond_file_btn_folder_tip)
-                        .clicked()
-                    {
+                    if widgets::button(ui, loc.inspector_cond_file_btn_folder, Kind::Secondary, 0.0).clicked() {
                         if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                             *path = folder.to_string_lossy().to_string();
                         }
                     }
-                    if widgets::button(ui, loc.inspector_cond_file_btn_file, Kind::Secondary, 0.0)
-                        .on_hover_text(loc.inspector_cond_file_btn_file_tip)
-                        .clicked()
-                    {
+                    if widgets::button(ui, loc.inspector_cond_file_btn_file, Kind::Secondary, 0.0).clicked() {
                         if let Some(file) = rfd::FileDialog::new().pick_file() {
                             *path = file.to_string_lossy().to_string();
                         }
@@ -3867,7 +4354,7 @@ fn render_subactions_branch_pipeline(
     }
 
     // Full-width 44px Add Step button at the bottom of the branch!
-    if render_full_width_action_button(ui, add_btn_label, add_btn_label, t) {
+    if render_full_width_action_button(ui, add_btn_label, "", t) {
         if let Some(target) = catalog_target {
             resp.open_catalog_nested = Some(target);
         }
@@ -4125,12 +4612,14 @@ fn render_schedule_trigger(
     interval_sec: &mut u64,
     daily_time: &mut Option<String>,
     days_of_week: &mut Vec<u8>,
+    day_of_month: &mut Option<u8>,
     target_datetime: &mut Option<String>,
     t: &Tokens,
 ) {
     let sub_options = [
         (ScheduleType::Interval, Cell::new(loc.inspector_sched_tab_interval, "")),
         (ScheduleType::Daily, Cell::new(loc.inspector_sched_tab_daily, "")),
+        (ScheduleType::Monthly, Cell::new(loc.inspector_sched_tab_monthly, "")),
         (ScheduleType::OneShot, Cell::new(loc.inspector_sched_tab_specific, "")),
     ];
 
@@ -4141,6 +4630,11 @@ fn render_schedule_trigger(
                 *target_datetime = None;
             }
             ScheduleType::Daily => {}
+            ScheduleType::Monthly => {
+                if day_of_month.is_none() {
+                    *day_of_month = Some(1);
+                }
+            }
             ScheduleType::OneShot if target_datetime.is_none() => {
                 let now = chrono::Local::now();
                 *target_datetime = Some(format!(
@@ -4285,6 +4779,58 @@ fn render_schedule_trigger(
             if daily_time.is_none() {
                 *daily_time = Some("12:00:00".into());
             }
+
+            let cur_str = daily_time.as_deref().unwrap_or("12:00:00");
+            let (mut hour, mut min, mut sec) = {
+                let parts: Vec<&str> = cur_str.split(':').collect();
+                let h = parts.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(12);
+                let m = parts.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                let s = parts.get(2).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                (h, m, s)
+            };
+
+            widgets::hud(ui, loc.inspector_daily_execution_time, t.muted);
+            ui.horizontal_wrapped(|ui| {
+                let h_ch = ui.add(
+                    egui::DragValue::new(&mut hour)
+                        .range(0..=23)
+                        .speed(0.1)
+                        .suffix(" h"),
+                ).changed();
+                ui.label(":");
+                let m_ch = ui.add(
+                    egui::DragValue::new(&mut min)
+                        .range(0..=59)
+                        .speed(0.1)
+                        .suffix(" m"),
+                ).changed();
+                ui.label(":");
+                let s_ch = ui.add(
+                    egui::DragValue::new(&mut sec)
+                        .range(0..=59)
+                        .speed(0.1)
+                        .suffix(" s"),
+                ).changed();
+
+                if h_ch || m_ch || s_ch {
+                    *daily_time = Some(format!("{:02}:{:02}:{:02}", hour, min, sec));
+                }
+            });
+        }
+
+        ScheduleType::Monthly => {
+            widgets::hud(ui, loc.inspector_sched_day_of_month, t.muted);
+            let mut cur_day = day_of_month.unwrap_or(1);
+            if ui.add(
+                egui::DragValue::new(&mut cur_day)
+                    .range(1..=31)
+                    .speed(0.1)
+                    .suffix(" d"),
+            ).changed() {
+                *day_of_month = Some(cur_day.clamp(1, 31));
+            }
+
+            ui.add_space(8.0);
 
             let cur_str = daily_time.as_deref().unwrap_or("12:00:00");
             let (mut hour, mut min, mut sec) = {

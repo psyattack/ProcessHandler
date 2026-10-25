@@ -535,6 +535,18 @@ impl DaemonEngine {
                     }
                 }
             }
+
+            // 3. Auto-clear Discord RPC if configured on process rules
+            for rule in &rules {
+                if let Some(Trigger::Process { process_name, match_mode, .. }) = &rule.trigger {
+                    if Self::matches_process(process_name, &event.process_name, *match_mode) {
+                        let has_auto_clear = rule.actions.iter().any(|a| matches!(a, Action::DiscordRpcSet { auto_clear_on_process_exit: true, .. }));
+                        if has_auto_clear {
+                            let _ = crate::daemon::discord_rpc::clear_presence().await;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -573,6 +585,7 @@ impl DaemonEngine {
                 interval_sec,
                 daily_time,
                 days_of_week,
+                day_of_month,
                 target_datetime,
                 ..
             }) = &rule.trigger
@@ -601,7 +614,23 @@ impl DaemonEngine {
                         let should_run = match self.rule_last_triggered.get(&rule.id) {
                             Some(last) => last.elapsed().as_secs() >= interval,
                             None => {
-                                if target_datetime.is_some() {
+                                if let Some(last_str) = &rule.last_executed_at {
+                                    if let Ok(last_dt) = chrono::NaiveDateTime::parse_from_str(last_str, "%Y-%m-%d %H:%M:%S") {
+                                        let elapsed_secs = now_local.naive_local().signed_duration_since(last_dt).num_seconds();
+                                        if elapsed_secs >= 0 && (elapsed_secs as u64) < interval {
+                                            let virtual_start = now_instant - std::time::Duration::from_secs(elapsed_secs as u64);
+                                            self.rule_last_triggered.insert(rule.id.clone(), virtual_start);
+                                            false
+                                        } else {
+                                            true
+                                        }
+                                    } else if target_datetime.is_some() {
+                                        true
+                                    } else {
+                                        self.rule_last_triggered.insert(rule.id.clone(), now_instant);
+                                        false
+                                    }
+                                } else if target_datetime.is_some() {
                                     true
                                 } else {
                                     self.rule_last_triggered.insert(rule.id.clone(), now_instant);
@@ -635,6 +664,36 @@ impl DaemonEngine {
                                 if !already_ran {
                                     let _ = self.try_execute_rule(rule, &format!("Daily Schedule {}", t_str), 0).await;
                                 }
+                            }
+                        }
+                    }
+                    ScheduleType::Monthly => {
+                        use chrono::Datelike;
+                        let target_day = day_of_month.unwrap_or(1).clamp(1, 31);
+                        let target_time_str = daily_time.as_deref().unwrap_or("12:00:00");
+                        let cur_year_month = now_local.format("%Y-%m").to_string();
+                        let cur_day = now_local.day() as u8;
+                        let cur_time_hms = now_local.format("%H:%M:%S").to_string();
+                        let cur_time_hm = now_local.format("%H:%M").to_string();
+
+                        let already_executed_this_month = match &rule.last_executed_at {
+                            Some(ts) => ts.starts_with(&cur_year_month),
+                            None => false,
+                        };
+
+                        if !already_executed_this_month {
+                            let target_passed = if cur_day > target_day {
+                                true
+                            } else if cur_day == target_day {
+                                cur_time_hms.as_str() >= target_time_str
+                                    || cur_time_hm.as_str() >= target_time_str
+                                    || format!("{}:00", cur_time_hm).as_str() >= target_time_str
+                            } else {
+                                false
+                            };
+
+                            if target_passed {
+                                let _ = self.try_execute_rule(rule, &format!("Monthly Schedule (Day {}, {})", target_day, target_time_str), 0).await;
                             }
                         }
                     }
@@ -885,6 +944,7 @@ impl DaemonEngine {
         let mut quota_msg = None;
         if let Some(r) = self.config.rules.iter_mut().find(|r| r.id == rule.id) {
             r.execution_count += 1;
+            r.last_executed_at = Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
             if let Some(limit) = r.max_executions {
                 if r.execution_count >= limit {
                     r.is_enabled = false;
@@ -1540,6 +1600,7 @@ mod tests {
                 interval_sec: 2,
                 daily_time: None,
                 days_of_week: Vec::new(),
+                day_of_month: None,
                 delay_sec: 0,
                 target_datetime: None,
             }),
@@ -1585,6 +1646,7 @@ mod tests {
                 interval_sec: 0,
                 daily_time: Some(time_str),
                 days_of_week: Vec::new(),
+                day_of_month: None,
                 delay_sec: 0,
                 target_datetime: None,
             }),
@@ -1631,6 +1693,7 @@ mod tests {
                 interval_sec: 0,
                 daily_time: None,
                 days_of_week: Vec::new(),
+                day_of_month: None,
                 delay_sec: 0,
                 target_datetime: Some(dt_str),
             }),
@@ -1672,6 +1735,7 @@ mod tests {
                 interval_sec: 10,
                 daily_time: None,
                 days_of_week: Vec::new(),
+                day_of_month: None,
                 delay_sec: 0,
                 target_datetime: Some(future_str),
             }),
@@ -1720,6 +1784,7 @@ mod tests {
                 interval_sec: 0,
                 daily_time: None,
                 days_of_week: Vec::new(),
+                day_of_month: None,
                 delay_sec: 0,
                 target_datetime: None,
             }),
@@ -2162,6 +2227,77 @@ mod tests {
         let manual_handle = engine.try_execute_rule(&rule, "MANUAL_TEST", 0).await;
         assert!(manual_handle.is_some(), "Manual test should execute");
         let _ = manual_handle.unwrap().await;
+    }
+
+    #[tokio::test]
+    async fn test_schedule_trigger_monthly_catch_up() {
+        let mut config = AppConfig::default();
+        config.rules.push(Rule {
+            id: "monthly_rule".into(),
+            name: "Monthly Catchup Rule".into(),
+            description: String::new(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: Some(Trigger::Schedule {
+                schedule_type: ScheduleType::Monthly,
+                interval_sec: 0,
+                daily_time: Some("00:00:00".into()),
+                days_of_week: Vec::new(),
+                day_of_month: Some(1),
+                delay_sec: 0,
+                target_datetime: None,
+            }),
+            actions: vec![Action::Notification {
+                title: "Month".into(),
+                message: "Run".into(),
+            }],
+            last_executed_at: None,
+            ..Default::default()
+        });
+
+        let mut engine = DaemonEngine::new(config);
+        engine.tick_schedule().await;
+        assert!(engine.logs.iter().any(|l| l.category == "RULE" && l.message.contains("Monthly Catchup Rule")));
+
+        let cur_ym = chrono::Local::now().format("%Y-%m-01 12:00:00").to_string();
+        engine.config.rules[0].last_executed_at = Some(cur_ym);
+        engine.logs.clear();
+
+        engine.tick_schedule().await;
+        assert!(!engine.logs.iter().any(|l| l.category == "RULE" && l.message.contains("Monthly Catchup Rule")));
+    }
+
+    #[tokio::test]
+    async fn test_schedule_interval_persisted_timestamp() {
+        let mut config = AppConfig::default();
+        let last_ts = (chrono::Local::now() - chrono::Duration::seconds(20)).format("%Y-%m-%d %H:%M:%S").to_string();
+        config.rules.push(Rule {
+            id: "persisted_interval_rule".into(),
+            name: "Persisted Interval Rule".into(),
+            description: String::new(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: Some(Trigger::Schedule {
+                schedule_type: ScheduleType::Interval,
+                interval_sec: 100,
+                daily_time: None,
+                days_of_week: Vec::new(),
+                day_of_month: None,
+                delay_sec: 0,
+                target_datetime: None,
+            }),
+            actions: vec![Action::Notification {
+                title: "Timer".into(),
+                message: "Tick".into(),
+            }],
+            last_executed_at: Some(last_ts),
+            ..Default::default()
+        });
+
+        let mut engine = DaemonEngine::new(config);
+        engine.tick_schedule().await;
+        assert!(!engine.logs.iter().any(|l| l.category == "RULE" && l.message.contains("Persisted Interval Rule")));
+        assert!(engine.rule_last_triggered.contains_key("persisted_interval_rule"));
     }
 }
 

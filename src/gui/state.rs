@@ -462,6 +462,7 @@ impl GuiState {
             custom_icon_path: None,
             auto_process_icon: false,
             conditions: Vec::new(),
+            last_executed_at: None,
         }
     }
 

@@ -203,7 +203,6 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
                                                 ui.vertical_centered(|ui| {
                                                     ui.add_space((ui.available_height() - theme::CONTROL_H).max(0.0) / 2.0);
                                                     if widgets::button(ui, loc.hunter_btn_select, Kind::Primary, 0.0)
-                                                        .on_hover_text(loc.hunter_btn_select_tip)
                                                         .clicked()
                                                         || row_double_clicked
                                                     {

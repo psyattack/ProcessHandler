@@ -323,12 +323,8 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                         }
                     } else {
                         let rec_label = loc.macro_studio_btn_record;
-                        let rec_tip = loc.macro_studio_btn_record_tip;
                         let btn_w = widgets::button_width(ui, rec_label, 0.0);
-                        if widgets::button(ui, rec_label, Kind::Primary, btn_w)
-                            .on_hover_text(rec_tip)
-                            .clicked()
-                        {
+                        if widgets::button(ui, rec_label, Kind::Primary, btn_w).clicked() {
                             recorder.start();
                         }
                     }
@@ -351,28 +347,19 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                     ui.add_space(10.0);
 
                     // ZONE 2: ADD STEP ACTIONS
-                    if widgets::compact_button(ui, loc.macro_studio_btn_add_key, Kind::Secondary, 24.0)
-                        .on_hover_text(loc.macro_studio_btn_add_key_tip)
-                        .clicked()
-                    {
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_key, Kind::Secondary, 24.0).clicked() {
                         events.push(MacroEvent::KeyDown { key: "Enter".to_string() });
                         events.push(MacroEvent::Delay { ms: 40, organic: false, jitter_percent: 30 });
                         events.push(MacroEvent::KeyUp { key: "Enter".to_string() });
                     }
 
-                    if widgets::compact_button(ui, loc.macro_studio_btn_add_mouse, Kind::Secondary, 24.0)
-                        .on_hover_text(loc.macro_studio_btn_add_mouse_tip)
-                        .clicked()
-                    {
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_mouse, Kind::Secondary, 24.0).clicked() {
                         events.push(MacroEvent::MouseDown { button: MouseButton::Left });
                         events.push(MacroEvent::Delay { ms: 40, organic: false, jitter_percent: 30 });
                         events.push(MacroEvent::MouseUp { button: MouseButton::Left });
                     }
 
-                    if widgets::compact_button(ui, loc.macro_studio_btn_add_move, Kind::Secondary, 24.0)
-                        .on_hover_text(loc.macro_studio_btn_add_move_tip)
-                        .clicked()
-                    {
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_move, Kind::Secondary, 24.0).clicked() {
                         events.push(MacroEvent::MouseMove {
                             x: 960,
                             y: 540,
@@ -383,24 +370,15 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
                         });
                     }
 
-                    if widgets::compact_button(ui, loc.macro_studio_btn_add_delay, Kind::Secondary, 24.0)
-                        .on_hover_text(loc.macro_studio_btn_add_delay_tip)
-                        .clicked()
-                    {
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_delay, Kind::Secondary, 24.0).clicked() {
                         events.push(MacroEvent::Delay { ms: 100, organic: false, jitter_percent: 30 });
                     }
 
-                    if widgets::compact_button(ui, loc.macro_studio_btn_add_text, Kind::Secondary, 24.0)
-                        .on_hover_text(loc.macro_studio_btn_add_text_tip)
-                        .clicked()
-                    {
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_text, Kind::Secondary, 24.0).clicked() {
                         events.push(MacroEvent::Text { text: "Hello".to_string(), delay_ms: 20, organic: false });
                     }
 
-                    if widgets::compact_button(ui, loc.macro_studio_btn_add_wheel, Kind::Secondary, 24.0)
-                        .on_hover_text(loc.macro_studio_btn_add_wheel_tip)
-                        .clicked()
-                    {
+                    if widgets::compact_button(ui, loc.macro_studio_btn_add_wheel, Kind::Secondary, 24.0).clicked() {
                         events.push(MacroEvent::MouseWheel { delta: 120 });
                     }
 
@@ -410,9 +388,8 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
 
                         if !events.is_empty() {
                             let clr_lbl = loc.macro_studio_btn_clear_all;
-                            let clr_tip = loc.macro_studio_btn_clear_all_tip;
                             let btn_w = widgets::button_width(ui, clr_lbl, 0.0);
-                            if widgets::button(ui, clr_lbl, Kind::Secondary, btn_w).on_hover_text(clr_tip).clicked() {
+                            if widgets::button(ui, clr_lbl, Kind::Secondary, btn_w).clicked() {
                                 events.clear();
                             }
                         }

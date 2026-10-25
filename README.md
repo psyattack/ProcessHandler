@@ -33,7 +33,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 * **Event-driven process detection** via native Windows WMI subscriptions and low-latency snapshotting
 * **Versatile trigger engine** spanning process lifecycles, window focus, CPU/RAM thresholds, global hotkeys, file watcher, webhooks, and schedules
 * **Pre-conditions & logic branching** with multi-condition checks (running apps, window focus, time/days, system events, resource thresholds, file watcher), AND/OR chaining, and dynamic If/Else action flows
-* **Flexible action pipeline** covering process control, window management, CPU/memory tuning, scripts, macros, audio devices, and webhooks
+* **Flexible action pipeline** covering process control, window management, CPU/memory tuning, Discord Rich Presence, archive compression, filesystem operations, scripts, macros, audio devices, and webhooks
 * **Embedded Lua 5.4 runtime** (`mlua`) with dedicated `ph` API alongside PowerShell and Batch scripting
 * **Macro Studio** with hardware keyboard/mouse recording, in-game 3D camera rotation support, timeline editing, loop control, and anti-bot humanization
 * **Deep Windows audio & device control** covering master & per-process volume/mute, channel balance, audio format switching (sample rate & bit depth), and default devices (WASAPI)
@@ -62,7 +62,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Global Hotkeys*: System-wide shortcut listener with toggle mode, continuous loop mode, hold mode, and repeat-while-held execution.
   - *File Watcher*: File and folder creation, modification, or deletion with extension filters.
   - *Local Webhooks*: Inbound HTTP REST requests (`http://127.0.0.1:48123/api/v1/trigger/{endpoint}`).
-  - *Schedules & Alarms*: Fixed intervals, daily recurring schedules, and one-shot date/time alarms.
+  - *Schedules & Alarms*: Fixed intervals, daily recurring schedules, monthly triggers (specific day of month), and one-shot date/time alarms.
   - *System & Power*: User idle/active state, session lock/unlock, sleep/wake, and AC/battery transitions.
 - **Rule Pre-conditions**:
   - *Gating Criteria*: Running process, active window focus, time window & days of week, system events (idle time, session lock, AC/battery), resource thresholds (CPU % and RAM MB per process), and file/folder existence checks with extension filters.
@@ -71,7 +71,10 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Logic & Branching*: Dynamic If / Else If / Else actions with condition checks to execute conditional sub-pipelines.
   - *Process Control*: Launch (custom arguments, working dir, admin, hidden mode), terminate process trees, or restart.
   - *Window Management*: Minimize, maximize, restore, hide, show, close, transparency, always-on-top, and screen positioning.
-  - *Process Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and trim memory working sets.
+  - *Process & Memory Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and forcefully trim process RAM working sets.
+  - *Discord Rich Presence*: Broadcast custom game and app status directly to Discord with activity details, timers, custom asset images, interactive buttons, and auto-clear on exit.
+  - *Archive Compression & Extraction*: Pack and unpack files or directories across multiple formats (Zip, 7z, Tar, Tar.gz, Rar) with overwrite protection.
+  - *Filesystem Operations*: Create files and folders, copy/clone, rename/move, delete, write and append text with dynamic token interpolation.
   - *Scripting & Automation*: Embedded Lua 5.4 (`ph` API), PowerShell, and Batch scripts with token interpolation (`{pid}`, `{process}`, `{window_title}`, `{file_path}`).
   - *Macro Playback*: Recorded keyboard and mouse sequences (with in-game 3D camera turns, DirectInput scancodes, and instant stuck-key release on cancellation), speed multipliers, loop counts, and organic jitter.
   - *Audio & Device Control*: System and per-app volume/mute, microphone levels, independent L/R channel balance, audio device format switching (sample rate & bit depth), custom beep tones, and default playback/recording device switching.
@@ -204,6 +207,7 @@ The compiled binary will be located at `target\release\ProcessHandler.exe`.
 - **Named Pipes Server** (Multi-client background IPC listener)
 - **Serde + Serde JSON** (Strongly-typed state persistence)
 - **flate2 & Base64** (Zlib compression for portable rule sharing payloads)
+- **zip** (Zip archive compression and decompression engine with Deflate support)
 - **Windows Registry API** (System autorun persistence)
 
 </td>
@@ -227,6 +231,7 @@ ProcessHandler/
 ├── src/                                # Source code
 │   ├── daemon/                         # Background daemon service
 │   │   ├── actions.rs                  # Execution handlers (Process, Window, Tuning, Audio, Scripts, Macros)
+│   │   ├── discord_rpc.rs              # Discord Rich Presence client over named pipe
 │   │   ├── engine.rs                   # Central automation state engine & rule evaluator
 │   │   ├── file_watcher.rs             # Filesystem polling & directory event watcher
 │   │   ├── hotkeys.rs                  # Low-level global hotkey listener & hold-mode engine

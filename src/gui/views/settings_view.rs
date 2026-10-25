@@ -306,7 +306,6 @@ fn render_general_content(
             // Clicking the preview box opens the file picker
             if p_resp
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text(loc.settings_btn_browse)
                 .clicked()
             {
                 if let Some(file) = rfd::FileDialog::new()

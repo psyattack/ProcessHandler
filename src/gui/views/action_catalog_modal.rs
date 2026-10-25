@@ -26,7 +26,7 @@ struct CatalogItem {
     constructor: fn() -> Action,
 }
 
-const CATALOG_ITEMS: [CatalogItem; 18] = [
+const CATALOG_ITEMS: [CatalogItem; 23] = [
     // 1. Process Management
     CatalogItem {
         category_idx: 1,
@@ -95,14 +95,29 @@ const CATALOG_ITEMS: [CatalogItem; 18] = [
         glyph: egui_phosphor::regular::CPU,
         tint: |t| t.good,
         keywords: &[
-            "tuning", "priority", "affinity", "cpu", "cores", "trim", "memory", "working set",
-            "приоритет", "ядра", "память", "тюнинг", "оптимизация", "процесс",
+            "tuning", "priority", "affinity", "cpu", "cores",
+            "приоритет", "ядра", "тюнинг", "оптимизация", "процесс",
         ],
         constructor: || Action::ProcessTuning {
             target_process: None,
             priority: None,
             affinity_mask: None,
-            trim_memory: true,
+            trim_memory: false,
+        },
+    },
+    CatalogItem {
+        category_idx: 1,
+        badge: "RAM",
+        title: |loc| loc.catalog_title_trim_working_set,
+        description: |loc| loc.catalog_desc_trim_working_set,
+        glyph: egui_phosphor::regular::BROOM,
+        tint: |t| t.good,
+        keywords: &[
+            "trim", "memory", "working set", "ram", "cleanup", "release", "empty",
+            "очистка", "память", "рам", "озу", "сброс", "оптимизация", "рабочее множество",
+        ],
+        constructor: || Action::TrimWorkingSet {
+            target_process: None,
         },
     },
 
@@ -253,6 +268,43 @@ const CATALOG_ITEMS: [CatalogItem; 18] = [
             else_actions: Vec::new(),
         },
     },
+    CatalogItem {
+        category_idx: 3,
+        badge: "DISCORD",
+        title: |loc| loc.catalog_title_discord_rpc_set,
+        description: |loc| loc.catalog_desc_discord_rpc_set,
+        glyph: egui_phosphor::regular::GAME_CONTROLLER,
+        tint: |t| t.accent_ink,
+        keywords: &[
+            "discord", "rpc", "rich presence", "activity", "game", "status", "profile",
+            "дискорд", "рпц", "статус", "игра", "профиль", "активность",
+        ],
+        constructor: || Action::DiscordRpcSet {
+            app_id: String::new(),
+            details: String::new(),
+            state: String::new(),
+            large_image: None,
+            large_text: None,
+            small_image: None,
+            small_text: None,
+            show_elapsed: true,
+            buttons: Vec::new(),
+            auto_clear_on_process_exit: true,
+        },
+    },
+    CatalogItem {
+        category_idx: 3,
+        badge: "DISCORD",
+        title: |loc| loc.catalog_title_discord_rpc_clear,
+        description: |loc| loc.catalog_desc_discord_rpc_clear,
+        glyph: egui_phosphor::regular::X_CIRCLE,
+        tint: |t| t.bad,
+        keywords: &[
+            "discord", "rpc", "clear", "stop", "reset", "remove status",
+            "дискорд", "сброс", "очистить", "удалить статус", "остановить",
+        ],
+        constructor: || Action::DiscordRpcClear,
+    },
 
     // 4. System & Flow Control
     CatalogItem {
@@ -346,6 +398,46 @@ const CATALOG_ITEMS: [CatalogItem; 18] = [
             height: Some(1080),
             refresh_rate: Some(144),
             monitor_index: None,
+        },
+    },
+    CatalogItem {
+        category_idx: 4,
+        badge: "ARCHIVE",
+        title: |loc| loc.catalog_title_archive,
+        description: |loc| loc.catalog_desc_archive,
+        glyph: egui_phosphor::regular::ARCHIVE,
+        tint: |t| t.warn,
+        keywords: &[
+            "archive", "zip", "rar", "7z", "tar", "compress", "extract", "unzip", "unpack", "pack",
+            "архив", "сжатие", "распаковка", "зип", "рар", "паковать", "распаковать",
+        ],
+        constructor: || Action::Archive {
+            operation: crate::models::ArchiveOperation::Pack,
+            format: crate::models::ArchiveFormat::Zip,
+            source_path: String::new(),
+            destination_path: String::new(),
+            compression_level: None,
+            overwrite: true,
+        },
+    },
+    CatalogItem {
+        category_idx: 4,
+        badge: "FILES",
+        title: |loc| loc.catalog_title_file_system,
+        description: |loc| loc.catalog_desc_file_system,
+        glyph: egui_phosphor::regular::FOLDER,
+        tint: |t| t.accent_ink,
+        keywords: &[
+            "file", "folder", "directory", "create", "delete", "rename", "copy", "clone", "write", "text", "append",
+            "файл", "папка", "создать", "удалить", "переименовать", "копировать", "клонировать", "записать", "текст",
+        ],
+        constructor: || Action::FileSystem {
+            operation: crate::models::FileSystemOperation::CreateFile,
+            path: String::new(),
+            target_path: None,
+            content: None,
+            create_parents: true,
+            overwrite: true,
         },
     },
 ];

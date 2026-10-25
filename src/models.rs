@@ -54,6 +54,8 @@ pub enum Trigger {
         daily_time: Option<String>, // "HH:MM:SS"
         #[serde(default)]
         days_of_week: Vec<u8>,      // 1 = Monday .. 7 = Sunday
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        day_of_month: Option<u8>,   // 1..31 for Monthly schedule
         #[serde(default)]
         delay_sec: u64,
         #[serde(default)]
@@ -120,6 +122,7 @@ pub enum ScheduleType {
     Interval,
     Daily,
     OneShot,
+    Monthly,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -469,6 +472,99 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         else_actions: Vec<Action>,
     },
+    #[serde(rename = "trim_working_set")]
+    TrimWorkingSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_process: Option<String>,
+    },
+    #[serde(rename = "discord_rpc_set")]
+    DiscordRpcSet {
+        app_id: String,
+        #[serde(default)]
+        details: String,
+        #[serde(default)]
+        state: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        large_image: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        large_text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        small_image: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        small_text: Option<String>,
+        #[serde(default = "default_true")]
+        show_elapsed: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        buttons: Vec<DiscordRpcButton>,
+        #[serde(default)]
+        auto_clear_on_process_exit: bool,
+    },
+    #[serde(rename = "discord_rpc_clear")]
+    DiscordRpcClear,
+    #[serde(rename = "archive")]
+    Archive {
+        operation: ArchiveOperation,
+        #[serde(default)]
+        format: ArchiveFormat,
+        source_path: String,
+        destination_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compression_level: Option<u8>,
+        #[serde(default = "default_true")]
+        overwrite: bool,
+    },
+    #[serde(rename = "file_system")]
+    FileSystem {
+        operation: FileSystemOperation,
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content: Option<String>,
+        #[serde(default = "default_true")]
+        create_parents: bool,
+        #[serde(default = "default_true")]
+        overwrite: bool,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct DiscordRpcButton {
+    pub label: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveOperation {
+    #[default]
+    Pack,
+    Unpack,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveFormat {
+    #[default]
+    Zip,
+    Tar,
+    TarGz,
+    TarXz,
+    SevenZip,
+    Rar,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FileSystemOperation {
+    #[default]
+    CreateFile,
+    CreateDirectory,
+    Rename,
+    Copy,
+    Delete,
+    WriteText,
+    AppendText,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -727,6 +823,8 @@ pub struct Rule {
     pub custom_icon_path: Option<String>,
     #[serde(default)]
     pub auto_process_icon: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_executed_at: Option<String>,
 }
 
 impl Default for Rule {
@@ -746,6 +844,7 @@ impl Default for Rule {
             on_exit_actions: Vec::new(),
             custom_icon_path: None,
             auto_process_icon: false,
+            last_executed_at: None,
         }
     }
 }
@@ -766,6 +865,7 @@ impl Rule {
         cloned.name = new_name;
         cloned.is_enabled = false;
         cloned.execution_count = 0;
+        cloned.last_executed_at = None;
         cloned.stop_on_error = self.stop_on_error;
         cloned.custom_icon_path = self.custom_icon_path.clone();
         cloned.auto_process_icon = self.auto_process_icon;
@@ -804,6 +904,11 @@ impl Rule {
                 Action::HttpWebhook { .. } => egui_phosphor::regular::GLOBE,
                 Action::Display { .. } => egui_phosphor::regular::MONITOR,
                 Action::IfElse { .. } => egui_phosphor::regular::GIT_FORK,
+                Action::TrimWorkingSet { .. } => egui_phosphor::regular::BROOM,
+                Action::DiscordRpcSet { .. } => egui_phosphor::regular::GAME_CONTROLLER,
+                Action::DiscordRpcClear => egui_phosphor::regular::X_CIRCLE,
+                Action::Archive { .. } => egui_phosphor::regular::ARCHIVE,
+                Action::FileSystem { .. } => egui_phosphor::regular::FOLDER,
             }
         } else if let Some(trigger) = &self.trigger {
             match trigger {
@@ -907,6 +1012,7 @@ mod tests {
             custom_icon_path: Some("C:\\game.exe".into()),
             auto_process_icon: true,
             conditions: vec![],
+            last_executed_at: None,
         };
 
         let cloned = original.clone_with_new_id();
@@ -941,6 +1047,7 @@ mod tests {
             custom_icon_path: None,
             auto_process_icon: false,
             conditions: vec![],
+            last_executed_at: None,
         };
 
         // Fallback when empty
@@ -1109,6 +1216,7 @@ mod tests {
                     },
                 ),
             ],
+            last_executed_at: None,
         };
 
         let json = serde_json::to_string(&rule).expect("Serialization must succeed");
@@ -1187,6 +1295,51 @@ mod tests {
         let json = serde_json::to_string(&unified_actions).expect("Must serialize");
         let decoded: Vec<Action> = serde_json::from_str(&json).expect("Must deserialize");
         assert_eq!(decoded, unified_actions);
+    }
+
+    #[test]
+    fn test_new_v23_actions_serde() {
+        let actions = vec![
+            Action::TrimWorkingSet {
+                target_process: Some("game.exe".to_string()),
+            },
+            Action::DiscordRpcSet {
+                app_id: "123456789".to_string(),
+                details: "Playing Game".to_string(),
+                state: "In Mission".to_string(),
+                large_image: Some("logo".to_string()),
+                large_text: Some("Game Logo".to_string()),
+                small_image: Some("status".to_string()),
+                small_text: Some("Online".to_string()),
+                show_elapsed: true,
+                buttons: vec![DiscordRpcButton {
+                    label: "Join".to_string(),
+                    url: "https://example.com".to_string(),
+                }],
+                auto_clear_on_process_exit: true,
+            },
+            Action::DiscordRpcClear,
+            Action::Archive {
+                operation: ArchiveOperation::Pack,
+                format: ArchiveFormat::Zip,
+                source_path: "C:\\source".to_string(),
+                destination_path: "C:\\out.zip".to_string(),
+                compression_level: Some(6),
+                overwrite: true,
+            },
+            Action::FileSystem {
+                operation: FileSystemOperation::CreateFile,
+                path: "C:\\file.txt".to_string(),
+                target_path: None,
+                content: Some("text".to_string()),
+                create_parents: true,
+                overwrite: true,
+            },
+        ];
+
+        let json = serde_json::to_string(&actions).expect("Must serialize");
+        let decoded: Vec<Action> = serde_json::from_str(&json).expect("Must deserialize");
+        assert_eq!(decoded, actions);
     }
 
     #[test]

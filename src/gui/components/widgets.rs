@@ -653,3 +653,24 @@ pub fn wordmark(ui: &mut Ui, prefix: &str, suffix: &str, size: f32, height: f32)
     ui.painter().galley(pos, galley, Color32::WHITE);
     resp
 }
+
+/// Groups vertical checkboxes with tight, compact desktop line spacing (~20px height, 4px vertical gap).
+pub fn checkbox_group<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    let old_h = ui.spacing().interact_size.y;
+    let old_spacing_y = ui.spacing().item_spacing.y;
+    ui.spacing_mut().interact_size.y = 20.0;
+    ui.spacing_mut().item_spacing.y = 4.0;
+    let ret = add_contents(ui);
+    ui.spacing_mut().interact_size.y = old_h;
+    ui.spacing_mut().item_spacing.y = old_spacing_y;
+    ret
+}
+
+/// A compact checkbox that does not inflate to 34px CONTROL_H.
+pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: impl Into<egui::WidgetText>) -> Response {
+    let old_h = ui.spacing().interact_size.y;
+    ui.spacing_mut().interact_size.y = 20.0;
+    let resp = ui.checkbox(checked, text);
+    ui.spacing_mut().interact_size.y = old_h;
+    resp
+}

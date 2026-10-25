@@ -505,7 +505,7 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
 
         doc_table_row(ui, "PROCESS", "Срабатывает при запуске исполняемого файла. Режимы: Exact (точное имя), Wildcard, Regex. Опция Single Instance предотвращает повторный запуск.", t);
         doc_table_row(ui, "WINDOW", "Срабатывает при смене активности окна: фокус получен (Gained Focus), потерян (Lost Focus) или оба события.", t);
-        doc_table_row(ui, "SCHEDULE", "Запуск по таймеру: Interval (каждые N секунд), Daily (ежедневно в заданное время по дням недели) или One-Shot (в точную дату).", t);
+        doc_table_row(ui, "SCHEDULE", "Запуск по таймеру: Interval (каждые N секунд), Daily (ежедневно в заданное время по дням недели), Monthly (ежемесячно в заданный день месяца) или One-Shot (в точную дату).", t);
         doc_table_row(ui, "EVENTS", "Системные события: запуск/закрытие ProcessHandler, блокировка Windows, спящий режим, переключение питания сеть/батарея, простой пользователя.", t);
         doc_table_row(ui, "SYSTEM", "Расширенные системные триггеры: порог ресурсов CPU/RAM, глобальный хоткей, файловый монитор (File Watcher) и локальный Webhook.", t);
 
@@ -563,7 +563,7 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
 
         doc_table_row(ui, "PROCESS", "Triggers when an executable starts. Match modes: Exact, Wildcard, Regex. Single Instance prevents multiple instances.", t);
         doc_table_row(ui, "WINDOW", "Triggers on foreground window changes: focus Gained, focus Lost, or both.", t);
-        doc_table_row(ui, "SCHEDULE", "Time-based executions: Interval (every N seconds), Daily (at specified time on selected days), or One-Shot (exact date).", t);
+        doc_table_row(ui, "SCHEDULE", "Time-based executions: Interval (every N seconds), Daily (at specified time on selected days), Monthly (day of month at specified time), or One-Shot (exact date).", t);
         doc_table_row(ui, "EVENTS", "System OS hooks: App start/stop, session lock/unlock, system sleep/resume, AC/battery power, user idle.", t);
         doc_table_row(ui, "SYSTEM", "Advanced triggers: Resource thresholds (CPU/RAM), global keyboard/mouse hotkeys with Hold mode, File Watcher, and local HTTP Webhooks.", t);
 
@@ -634,7 +634,11 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Воспроизведение Звука", "Воспроизведение звуковых файлов (WAV/MP3/OGG) или генерация тональных сигналов (Beep) с настраиваемой частотой.", t);
         doc_table_row(ui, "Устройство по Умолчанию", "Мгновенное переключение основного аудиовыхода или микрофона по имени устройства.", t);
         doc_table_row(ui, "Window & Display", "Управление окнами (свернуть, прижать, TopMost), выбор целевого монитора, разрешение и Гц.", t);
-        doc_table_row(ui, "Tuning & Firewall", "Изменение приоритета процессов, сброс Working Set RAM и блокировка сетевого трафика.", t);
+        doc_table_row(ui, "Tuning & Firewall", "Изменение приоритета процессов, привязка к ядрам CPU (Affinity) и блокировка сетевого трафика в Windows Firewall.", t);
+        doc_table_row(ui, "Очистка RAM (Trim)", "Принудительный сброс страниц физической памяти (Working Set) процесса обратно в операционную систему.", t);
+        doc_table_row(ui, "Discord Rich Presence", "Трансляция активности в Discord: статус игры/приложения, подробности, таймер, изображения и интерактивные кнопки с автосбросом.", t);
+        doc_table_row(ui, "Архивация (Archive)", "Упаковка и распаковка файлов и директорий во всех популярных форматах: Zip, 7z, Tar, Tar.gz, Rar.", t);
+        doc_table_row(ui, "Файловые Операции", "Создание файлов/папок, копирование, переименование, удаление, запись и дозапись текста с поддержкой токенов контекста.", t);
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Отправка исходящих REST-запросов (GET, POST, PUT, DELETE) с заголовками и телом.", t);
         doc_table_row(ui, "Power & System", "Схемы питания Windows; переход в сон, гибернация, перезагрузка, выключение и блокировка.", t);
         doc_table_row(ui, "Delay & Notification", "Асинхронные паузы между шагами, всплывающие уведомления Windows и воспроизведение звуковых сигналов.", t);
@@ -668,7 +672,11 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Play Sound", "Play local audio files (WAV/MP3/OGG) or generate customizable frequency/duration system beeps.", t);
         doc_table_row(ui, "Default Audio Device", "Switch default system playback audio output or recording microphone by name.", t);
         doc_table_row(ui, "Window & Display", "Window positioning, TopMost on/off, target monitor index selection, resolution & Hz.", t);
-        doc_table_row(ui, "Tuning & Firewall", "Process priority class, RAM memory trim, and Windows Firewall traffic blocking.", t);
+        doc_table_row(ui, "Tuning & Firewall", "Process priority class, CPU core affinity masks, and Windows Firewall traffic blocking.", t);
+        doc_table_row(ui, "Trim RAM (Working Set)", "Forcefully compacts and releases unused process physical memory pages back to the OS.", t);
+        doc_table_row(ui, "Discord Rich Presence", "Broadcast custom Rich Presence to Discord: game activity, state details, timer, image assets, and action buttons with auto-clear.", t);
+        doc_table_row(ui, "Archive (Pack/Unpack)", "Compress or extract files and folders in all popular archive formats: Zip, 7z, Tar, Tar.gz, Rar.", t);
+        doc_table_row(ui, "File System Operations", "Create files/folders, copy/clone, rename/move, delete, write and append text with context tokens.", t);
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Send outbound HTTP requests (GET, POST, PUT, DELETE) with custom headers and body.", t);
         doc_table_row(ui, "Power & System", "Windows power plans; sleep, hibernate, restart, shutdown, and workstation lock.", t);
         doc_table_row(ui, "Delay & Notification", "Non-blocking delay pauses in pipeline, Windows desktop toast notifications, and audio alerts.", t);
@@ -901,6 +909,28 @@ fn render_recipes_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             t,
             false,
         );
+
+        ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Рецепт: Discord Rich Presence для игры или программы",
+            "• Триггер: Process -> game.exe\n\
+             • Шаг 1: Discord Rich Presence -> Application ID: 1234567890, Details: 'В игре {ProcessName}', State: 'Основная кампания', Таймер: Вкл, Auto-clear при выходе\n\
+             • Exit Action: Clear Discord RPC (автоматически сбросит активность при закрытии)",
+            t,
+            false,
+        );
+
+        ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Рецепт: Автоматическая архивация файлов (Archive)",
+            "• Триггер: Schedule -> Monthly (День 1 в 03:00) или File Watcher\n\
+             • Шаг 1: Архивация -> Pack Zip из C:\\MyWork в D:\\Backups\\Work_{Date}.zip\n\
+             • Шаг 2: Notification -> Заголовок: 'Бэкап', Сообщение: 'Архив Work_{Date}.zip успешно создан'",
+            t,
+            false,
+        );
     } else {
         doc_header(ui, "Practical Automation Recipes", t);
 
@@ -982,6 +1012,28 @@ fn render_recipes_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
                — Type text \"Status: Approved\" with organic delay\n\
                — Physical key press Enter\n\
                — Mouse click Side Button 1 (Back / M4) to navigate back",
+            t,
+            false,
+        );
+
+        ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Recipe: Discord Rich Presence Game Status",
+            "• Trigger: Process -> game.exe\n\
+             • Step 1: Discord Rich Presence -> Application ID: 1234567890, Details: 'Playing {ProcessName}', State: 'Main Campaign', Show elapsed: On, Auto-clear on exit\n\
+             • Exit Action: Clear Discord RPC (cleanly removes activity when process terminates)",
+            t,
+            false,
+        );
+
+        ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Recipe: Scheduled Archive Auto-Backup",
+            "• Trigger: Schedule -> Monthly (Day 1 at 03:00) or File Watcher\n\
+             • Step 1: Archive -> Pack Zip from C:\\MyWork to D:\\Backups\\Work_{Date}.zip\n\
+             • Step 2: Notification -> Title: 'Backup', Message: 'Archive Work_{Date}.zip created successfully'",
             t,
             false,
         );

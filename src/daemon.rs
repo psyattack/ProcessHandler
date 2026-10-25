@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod discord_rpc;
 pub mod engine;
 pub mod file_watcher;
 pub mod hotkeys;
