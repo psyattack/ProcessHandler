@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.5.0](https://github.com/psyattack/ProcessHandler/compare/v2.4.0...v2.5.0) - 2026-10-28
+
+### Added
+- HUD Overlay Studio: Added an on-screen overlay visual designer featuring a 1:1 canvas, snap-to-grid alignment, pan and zoom navigation, element rotation, and live screen calibration.
+- Screen Overlays (HUD): Added a dedicated screen overlay action supporting customizable crosshairs, dynamic text with token interpolation, status badges, progress bars, vector shapes, and images.
+- Anti-Capture Protection: Overlay windows support hardware click-through and native Windows anti-capture protection (WDA_EXCLUDEFROMCAPTURE) to keep overlays visible on-screen while invisible to screen recording and streaming tools.
+- Trigger and Condition Catalogs: Added categorized studio modals with instant search for discovering and selecting triggers and rule pre-conditions.
+- Manual Execution Mode: Added a manual trigger option allowing rules to be executed directly on-demand via the interface without requiring background event polling.
+- Live Rule Abort: Added the ability to instantly cancel active long-running rules, loops, and test pipelines directly from the UI.
+- Stealth Mode and Process Masking: Added an optional stealth tray mode to hide the notification icon, alongside PE process spoofing to disguise the background daemon in Windows Task Manager.
+- Network Connectivity Triggers and Conditions: Added network online and offline state transitions to system event triggers and rule pre-conditions.
+- Lua Overlay API: Expanded the embedded Lua scripting engine with dedicated functions (ph.overlay_show, ph.overlay_hide, ph.overlay_toggle, ph.overlay_flash) for programmatic overlay control.
+
+### Changed
+- Updated Rule Inspector and rule cards with direct manual run triggers and real-time active overlay tracking.
+- Improved rule cloning logic to automatically generate fresh, collision-free identifiers for embedded overlay actions.
+- Expanded the in-app interactive guide and documentation with comprehensive Overlay Studio and catalog walkthroughs.
+- Updated English and Russian localization catalogs across all new overlay tools, modal catalogs, and stealth settings.
+
+<details><summary>Detailed Changelog</summary>
+
+### Added
+- **overlay:** add HUD overlay studio, trigger/condition catalogs, and stealth process masking (by @psyattack in a551729)
+
+### Changed
+- **readme:** README updated (by @psyattack in abe8ece)
+
+</details>
+
+
 ## [2.4.0](https://github.com/psyattack/ProcessHandler/compare/v2.3.0...v2.4.0) - 2026-10-25
 
 ### Added
