@@ -66,6 +66,12 @@ pub struct AppConfig {
     pub autorun_configured: bool,
 
     #[serde(default)]
+    pub hide_tray_icon: bool,
+
+    #[serde(default)]
+    pub mask_daemon_process: bool,
+
+    #[serde(default)]
     pub language: crate::i18n::Language,
 
     #[serde(default = "default_check_updates_on_startup")]
@@ -73,6 +79,17 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub theme: AppTheme,
+
+    #[serde(default = "default_config_overlays")]
+    pub overlays: Vec<crate::models::OverlayDefinition>,
+}
+
+pub fn default_config_overlays() -> Vec<crate::models::OverlayDefinition> {
+    vec![
+        crate::models::OverlayDefinition::default_crosshair(),
+        crate::models::OverlayDefinition::default_macro_badge(),
+        crate::models::OverlayDefinition::default_telemetry(),
+    ]
 }
 
 fn default_check_updates_on_startup() -> bool {
@@ -93,17 +110,23 @@ impl Default for AppConfig {
             monitoring_mode: "wmi".into(),
             poll_interval_sec: 2.0,
             tray_icon_path: None,
+            hide_tray_icon: false,
+            mask_daemon_process: false,
             window: None,
             rules: Vec::new(),
             autorun_configured: false,
             language: crate::i18n::Language::English,
             check_updates_on_startup: true,
             theme: AppTheme::Dark,
+            overlays: default_config_overlays(),
         }
     }
 }
 
 impl AppConfig {
+    pub fn load() -> Self {
+        Self::load_from_file(Self::config_path())
+    }
     pub fn config_dir() -> PathBuf {
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
             let dir = PathBuf::from(local).join("ProcessHandler");
@@ -132,28 +155,28 @@ impl AppConfig {
             let mut default_cfg = Self::default();
             if is_app_config {
                 default_cfg.autorun_configured = true;
-                let _ = crate::autorun::set_autorun(crate::autorun::APP_NAME, true);
+                let mask = default_cfg.mask_daemon_process;
+                let _ = default_cfg.save_to_file(path);
+                let _ = crate::autorun::set_autorun_with_mask(crate::autorun::APP_NAME, true, mask);
+            } else {
+                let _ = default_cfg.save_to_file(path);
             }
-            let _ = default_cfg.save_to_file(path);
             return default_cfg;
         }
 
         match fs::read_to_string(path) {
             Ok(content) => match serde_json::from_str::<AppConfig>(&content) {
                 Ok(mut cfg) => {
-                    let mut needs_save = false;
                     if is_app_config && !cfg.autorun_configured {
                         cfg.autorun_configured = true;
+                        let mask = cfg.mask_daemon_process;
+                        let _ = cfg.save_to_file(path);
                         if !crate::autorun::is_autorun_enabled(crate::autorun::APP_NAME) {
-                            let _ = crate::autorun::set_autorun(crate::autorun::APP_NAME, true);
+                            let _ = crate::autorun::set_autorun_with_mask(crate::autorun::APP_NAME, true, mask);
                         }
-                        needs_save = true;
                     }
                     if let Some(ws) = &mut cfg.window {
                         ws.sanitize();
-                    }
-                    if needs_save {
-                        let _ = cfg.save_to_file(path);
                     }
                     cfg
                 }
@@ -196,6 +219,7 @@ mod tests {
         let cfg: AppConfig = serde_json::from_str(json).expect("deserialize");
         assert!(!cfg.autorun_configured);
         assert!(cfg.check_updates_on_startup);
+        assert_eq!(cfg.overlays.len(), 3);
     }
 
     #[test]

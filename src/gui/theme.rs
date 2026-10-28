@@ -161,6 +161,16 @@ pub fn display() -> FontFamily {
     FontFamily::Name("display".into())
 }
 
+/// Archivo Regular (400 weight).
+pub fn font_archivo() -> FontFamily {
+    FontFamily::Name("archivo".into())
+}
+
+/// Archivo Bold (700 weight).
+pub fn font_archivo_bold() -> FontFamily {
+    FontFamily::Name("archivo-bold".into())
+}
+
 /// Inter 500 font for medium body copy.
 pub fn medium() -> FontFamily {
     FontFamily::Name("medium".into())
@@ -202,10 +212,12 @@ pub fn install_fonts(ctx: &egui::Context) {
     let fallback: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let mono_fallback: Vec<String> = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
 
-    let faces: [Face<'_>; 7] = [
+    let faces: [Face<'_>; 9] = [
         ("Inter", INTER, &[(*b"wght", 400.0), (*b"opsz", 14.0)], FontFamily::Proportional),
         ("Inter-Medium", INTER, &[(*b"wght", 500.0), (*b"opsz", 14.0)], medium()),
         ("Inter-SemiBold", INTER, &[(*b"wght", 600.0), (*b"opsz", 14.0)], semibold()),
+        ("Archivo-Regular", ARCHIVO, &[(*b"wght", 400.0), (*b"wdth", 100.0)], font_archivo()),
+        ("Archivo-Bold", ARCHIVO, &[(*b"wght", 700.0), (*b"wdth", 105.0)], font_archivo_bold()),
         ("Archivo-Display", ARCHIVO, &[(*b"wght", 620.0), (*b"wdth", 118.0)], display()),
         ("GeistMono", GEIST_MONO, &[(*b"wght", 400.0)], FontFamily::Monospace),
         ("GeistMono-Medium", GEIST_MONO, &[(*b"wght", 500.0)], mono()),
@@ -229,6 +241,31 @@ pub fn install_fonts(ctx: &egui::Context) {
             stack.push("phosphor".into());
         }
         fonts.families.insert(family, stack);
+    }
+
+    #[cfg(windows)]
+    {
+        let sys_fonts: &[(&str, &str)] = &[
+            ("arial", "C:\\Windows\\Fonts\\arial.ttf"),
+            ("impact", "C:\\Windows\\Fonts\\impact.ttf"),
+            ("segoe ui", "C:\\Windows\\Fonts\\segoeui.ttf"),
+            ("consolas", "C:\\Windows\\Fonts\\consola.ttf"),
+            ("tahoma", "C:\\Windows\\Fonts\\tahoma.ttf"),
+            ("verdana", "C:\\Windows\\Fonts\\verdana.ttf"),
+            ("comic sans ms", "C:\\Windows\\Fonts\\comic.ttf"),
+            ("georgia", "C:\\Windows\\Fonts\\georgia.ttf"),
+            ("trebuchet ms", "C:\\Windows\\Fonts\\trebuc.ttf"),
+            ("courier new", "C:\\Windows\\Fonts\\cour.ttf"),
+        ];
+        for (name, path) in sys_fonts {
+            if let Ok(bytes) = std::fs::read(path) {
+                let font_name = (*name).to_string();
+                fonts.font_data.insert(font_name.clone(), Arc::new(FontData::from_owned(bytes)));
+                let mut stack = vec![font_name.clone()];
+                stack.extend(fallback.iter().cloned());
+                fonts.families.insert(FontFamily::Name(font_name.into()), stack);
+            }
+        }
     }
 
     ctx.set_fonts(fonts);

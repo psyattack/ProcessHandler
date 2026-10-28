@@ -368,6 +368,8 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Квота выполнений", "Максимальное число запусков правила, после которого оно автоматически становится на паузу.", t);
         doc_table_row(ui, "Остановка при ошибке", "Прерывание цепочки действий, если один из шагов завершился аварийно.", t);
         doc_table_row(ui, "Single Instance", "Защита от запуска дубликатов процесса (блокирует создание второго окна приложения).", t);
+        doc_table_row(ui, "Скрытный режим (Stealth)", "Полное скрытие иконки в трее для незаметной фоновой работы сервиса.", t);
+        doc_table_row(ui, "Маскировка (PE Masking)", "Маскировка фонового демона в Диспетчере задач под системную службу (RuntimeBroker.exe).", t);
         doc_table_row(ui, "Test Rule / Step", "Проверка всей цепочки или отдельного шага прямо в редакторе без ожидания триггера.", t);
         doc_table_row(ui, "Backup & Sharing", "Экспорт и импорт правил в формате JSON для резервных копий и переноса настроек.", t);
 
@@ -400,6 +402,8 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Execution Quota", "Auto-disables the rule after completing N executions.", t);
         doc_table_row(ui, "Stop on Error", "Aborts pipeline execution immediately if any action reports a failure.", t);
         doc_table_row(ui, "Single Instance", "Prevents duplicate instances of tracked process from running.", t);
+        doc_table_row(ui, "Stealth Mode", "Option to hide system tray icon completely for unobtrusive background operation.", t);
+        doc_table_row(ui, "PE Masking", "Masks the background daemon process name in Task Manager as a system service (RuntimeBroker.exe).", t);
         doc_table_row(ui, "Test Rule / Step", "Test the full pipeline or single actions directly in the studio without waiting for real triggers.", t);
         doc_table_row(ui, "Backup & Sharing", "Export and import automations as JSON files for easy migration and sharing.", t);
 
@@ -501,22 +505,23 @@ fn render_shortcuts_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
 fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
     if lang == Language::Russian {
         doc_header(ui, "Все Виды Триггеров", t);
-        doc_paragraph(ui, "Триггер определяет, когда именно запускается автоматизация. Доступно 5 основных категорий:", t);
+        doc_paragraph(ui, "Триггер определяет событие, инициирующее автоматизацию. Выбрать нужный триггер можно через встроенную Библиотеку Триггеров с мгновенным поиском по ключевым словам:", t);
 
+        doc_table_row(ui, "MANUAL", "Ручной запуск правила по клику на кнопку в инспекторе или по хоткею (On-Demand) без постоянного фонового слежения.", t);
         doc_table_row(ui, "PROCESS", "Срабатывает при запуске исполняемого файла. Режимы: Exact (точное имя), Wildcard, Regex. Опция Single Instance предотвращает повторный запуск.", t);
         doc_table_row(ui, "WINDOW", "Срабатывает при смене активности окна: фокус получен (Gained Focus), потерян (Lost Focus) или оба события.", t);
-        doc_table_row(ui, "SCHEDULE", "Запуск по таймеру: Interval (каждые N секунд), Daily (ежедневно в заданное время по дням недели), Monthly (ежемесячно в заданный день месяца) или One-Shot (в точную дату).", t);
-        doc_table_row(ui, "EVENTS", "Системные события: запуск/закрытие ProcessHandler, блокировка Windows, спящий режим, переключение питания сеть/батарея, простой пользователя.", t);
-        doc_table_row(ui, "SYSTEM", "Расширенные системные триггеры: порог ресурсов CPU/RAM, глобальный хоткей, файловый монитор (File Watcher) и локальный Webhook.", t);
+        doc_table_row(ui, "SCHEDULE", "Запуск по расписанию: Interval (каждые N сек), Daily (ежедневно в заданное время по дням недели), Monthly (в заданный день месяца) или One-Shot (точная дата и время).", t);
+        doc_table_row(ui, "EVENTS", "Системные события: запуск/закрытие сервиса, блокировка Windows, спящий режим, питание сеть/батарея, простой пользователя, подключение оборудования/USB, монитор вкл/выкл, сеть онлайн/офлайн.", t);
+        doc_table_row(ui, "SYSTEM", "Расширенные триггеры: порог ресурсов CPU/RAM, глобальный хоткей с поддержкой Hold mode, мониторинг файлов/папок (File Watcher) и локальный Webhook API.", t);
 
         ui.add_space(2.0);
         doc_callout(
             ui,
-            "Предварительные Условия Правил (Pre-conditions)",
-            "• Фильтрация запуска: правило сработает только тогда, когда соблюдены все необходимые системные критерии.\n\
-             • Доступные условия: наличие или отсутствие процесса в памяти, фокус конкретного окна, заданный интервал времени (чч:мм) с фильтром по дням недели, системные события (простой / активность пользователя с настраиваемым порогом секунд, блокировка / разблокировка Windows, питание от сети AC / от батареи), пороги ресурсов процесса (CPU % и RAM MB с порогом времени), а также проверка существования папки или файла с фильтром расширений (напр. *.log).\n\
-             • Гибкая логика связывания: условия можно объединять операторами И (AND) и ИЛИ (OR) в любой последовательности.\n\
-             • Пропуск без ошибок: если условия не выполнены в момент срабатывания триггера, выполнение правила пропускается без генерации ошибок в логах.",
+            "Предварительные Условия (Каталог Условий)",
+            "• Интерактивный каталог: быстрый выбор условий через библиотеку с категориями и полнотекстовым поиском.\n\
+             • Доступные проверки: состояние процесса (запущен/закрыт), активность окна (в фокусе/в фоне), диапазон времени и дни недели, системные события (блокировка экрана, сон, питание от сети/аккумулятора, простой пользователя, состояние монитора, подключение оборудования, доступность сети), пороги нагрузки CPU/RAM, а также слежение за папкой или файлом.\n\
+             • Логика связывания: объединение операторами И (AND) и ИЛИ (OR) в любых сочетаниях.\n\
+             • Тихий пропуск: при невыполнении условий запуск правила мягко пропускается без ошибок.",
             t,
             false,
         );
@@ -559,22 +564,23 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         );
     } else {
         doc_header(ui, "Triggers Deep-Dive", t);
-        doc_paragraph(ui, "A trigger defines the precise condition that initiates automation. 5 main categories are supported:", t);
+        doc_paragraph(ui, "A trigger defines the origin event that initiates automation. Choose triggers conveniently from the built-in Trigger Catalog with instant search:", t);
 
+        doc_table_row(ui, "MANUAL", "On-Demand execution triggered manually via the Inspector run button or linked hotkey, without continuous background polling.", t);
         doc_table_row(ui, "PROCESS", "Triggers when an executable starts. Match modes: Exact, Wildcard, Regex. Single Instance prevents multiple instances.", t);
         doc_table_row(ui, "WINDOW", "Triggers on foreground window changes: focus Gained, focus Lost, or both.", t);
-        doc_table_row(ui, "SCHEDULE", "Time-based executions: Interval (every N seconds), Daily (at specified time on selected days), Monthly (day of month at specified time), or One-Shot (exact date).", t);
-        doc_table_row(ui, "EVENTS", "System OS hooks: App start/stop, session lock/unlock, system sleep/resume, AC/battery power, user idle.", t);
+        doc_table_row(ui, "SCHEDULE", "Time-based executions: Interval (every N seconds), Daily (at specified time on selected days), Monthly (day of month at specified time), or One-Shot (exact date & time).", t);
+        doc_table_row(ui, "EVENTS", "System OS hooks: app start/stop, workstation lock/unlock, system sleep/resume, AC/battery power, user idle, USB/device connect, display on/off, network status.", t);
         doc_table_row(ui, "SYSTEM", "Advanced triggers: Resource thresholds (CPU/RAM), global keyboard/mouse hotkeys with Hold mode, File Watcher, and local HTTP Webhooks.", t);
 
         ui.add_space(2.0);
         doc_callout(
             ui,
-            "Rule Pre-conditions",
-            "• Gating Executions: ensure rules execute only when specific environmental criteria are satisfied.\n\
-             • Available Condition Checks: process running or not running, window focused or unfocused, active time window (HH:MM) with day-of-week filters, system events (user idle / active duration, session lock / unlock, AC mains vs Battery power), process resource thresholds (sustained CPU % and RAM MB over time), and file or directory existence / change checks with extension filters (e.g. *.log).\n\
-             • Chainable Logic: seamlessly chain condition items with AND / OR boolean operators.\n\
-             • Silent Skip: when preconditions fail upon trigger activation, the rule gracefully skips without logging errors.",
+            "Rule Pre-conditions (Condition Catalog)",
+            "• Interactive Catalog: browse and select pre-conditions from an organized catalog with instant keyword search.\n\
+             • Environmental Checks: process state (running/closed), active window focus, time windows with days of week, system events (screen lock, sleep/wake, AC/battery, idle duration, display power, device plug & play, network connectivity), sustained CPU/RAM load thresholds, and folder or file presence with extension filters.\n\
+             • Flexible Logic: chain checks with AND / OR operators in any sequence.\n\
+             • Silent Skip: when preconditions are not met, the rule quietly skips without errors.",
             t,
             false,
         );
@@ -641,8 +647,23 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Файловые Операции", "Создание файлов/папок, копирование, переименование, удаление, запись и дозапись текста с поддержкой токенов контекста.", t);
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Отправка исходящих REST-запросов (GET, POST, PUT, DELETE) с заголовками и телом.", t);
         doc_table_row(ui, "Power & System", "Схемы питания Windows; переход в сон, гибернация, перезагрузка, выключение и блокировка.", t);
+        doc_table_row(ui, "Экранный Оверлей (HUD)", "Визуальный оверлей поверх приложений и игр: прицелы (Crosshair), динамический текст с токенами, бейджи, прогресс-бары, изображения и векторные фигуры. Защита от захвата экрана (OBS/Discord), кликабельные действия и перемещение мышью.", t);
         doc_table_row(ui, "Delay & Notification", "Асинхронные паузы между шагами, всплывающие уведомления Windows и воспроизведение звуковых сигналов.", t);
         doc_table_row(ui, "Ветвление (Если / Иначе)", "Динамическая проверка условий на лету с выполнением веток Если (THEN), Иначе Если (ELSE IF) и Иначе (ELSE).", t);
+
+        ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Overlay Studio и Графические Оверлеи",
+            "• Полнофункциональная Студия: модальный редактор с холстом монитора 1:1, панорамированием, масштабированием и привязкой к сетке.\n\
+             • Элементы HUD: кастомные прицелы (Crosshair с центральной точкой), динамический текст со шрифтами Windows и токенами контекста, бейджи, шкалы прогресса, изображения с фиксацией пропорций, векторные фигуры (прямоугольники, круги, стрелки, линии) с произвольным углом поворота.\n\
+             • Интерактивные клики: привязка действий при нажатии на элементы (закрыть оверлей, запустить или переключить правило).\n\
+             • Защита от захвата (Anti-Capture): режим WDA_EXCLUDEFROMCAPTURE гарантирует полную невидимость оверлея в OBS Studio, Discord стримах, скриншотах и видеозахвате.\n\
+             • Режим сквозного клика (Click-Through): прозрачность для ввода мышью или интерактивное перетаскивание (Draggable) карточки по экрану.\n\
+             • Скриптовый контроль (Lua): прямое управление видимостью оверлеев из Lua-скриптов через ph.overlay_show(id), ph.overlay_hide(id), ph.overlay_toggle(id).",
+            t,
+            false,
+        );
 
         ui.add_space(2.0);
         doc_callout(
@@ -679,8 +700,23 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "File System Operations", "Create files/folders, copy/clone, rename/move, delete, write and append text with context tokens.", t);
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Send outbound HTTP requests (GET, POST, PUT, DELETE) with custom headers and body.", t);
         doc_table_row(ui, "Power & System", "Windows power plans; sleep, hibernate, restart, shutdown, and workstation lock.", t);
+        doc_table_row(ui, "Screen Overlay (HUD)", "GPU-accelerated overlay over apps and games: crosshairs, dynamic text with tokens, badges, progress bars, images, and vector shapes. Anti-capture protection (OBS/Discord stream), clickable actions, and draggable positioning.", t);
         doc_table_row(ui, "Delay & Notification", "Non-blocking delay pauses in pipeline, Windows desktop toast notifications, and audio alerts.", t);
         doc_table_row(ui, "Branching (If / Else)", "Evaluate conditions dynamically and branch into Then, Else If, and Else sub-action sequences.", t);
+
+        ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Overlay Studio & On-Screen HUD",
+            "• Visual Canvas Studio: interactive WYSIWYG modal editor with 1:1 monitor canvas, pan/zoom navigation, and snap-to-grid alignment.\n\
+             • HUD Elements: reticles & crosshairs with center dot, dynamic text supporting system fonts and token interpolation, status badges, progress bars, aspect-ratio locked images, and vector shapes (rectangles, circles, arrows, lines) with 360° rotation.\n\
+             • Interactive On-Click: bind clickable elements to trigger rules, toggle automations, or dismiss the overlay.\n\
+             • Anti-Capture Mode: WDA_EXCLUDEFROMCAPTURE flag keeps the overlay completely invisible to OBS Studio, Discord screen share, Nvidia ShadowPlay, and screenshots.\n\
+             • Click-Through & Draggable: switch between transparent click-through mode for gaming and interactive dragging directly on screen.\n\
+             • Lua Scripting API: dynamically show, hide, or toggle overlays programmatically via ph.overlay_show(id), ph.overlay_hide(id), ph.overlay_toggle(id).",
+            t,
+            false,
+        );
 
         ui.add_space(2.0);
         doc_callout(
@@ -931,6 +967,18 @@ fn render_recipes_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             t,
             false,
         );
+
+        ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Рецепт: Игровой HUD и Кастомный Прицел (Overlay)",
+            "• Триггер: Process -> game.exe (или Global Hotkey для переключения)\n\
+             • Шаг 1: Экранный Оверлей -> Показать кастомный прицел (Crosshair) и бейдж статуса в центре экрана\n\
+             • Опции: Сквозной клик (Click-Through), Защита от захвата экрана (скрыт на стриме OBS)\n\
+             • Exit Action: Экранный Оверлей -> Скрыть (автоматически убирает HUD при выходе из игры)",
+            t,
+            false,
+        );
     } else {
         doc_header(ui, "Practical Automation Recipes", t);
 
@@ -1034,6 +1082,18 @@ fn render_recipes_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
             "• Trigger: Schedule -> Monthly (Day 1 at 03:00) or File Watcher\n\
              • Step 1: Archive -> Pack Zip from C:\\MyWork to D:\\Backups\\Work_{Date}.zip\n\
              • Step 2: Notification -> Title: 'Backup', Message: 'Archive Work_{Date}.zip created successfully'",
+            t,
+            false,
+        );
+
+        ui.add_space(2.0);
+        doc_callout(
+            ui,
+            "Recipe: In-Game HUD & Custom Reticle (Overlay)",
+            "• Trigger: Process -> game.exe (or Global Hotkey for on-demand toggle)\n\
+             • Step 1: Screen Overlay -> Show custom crosshair reticle and status badge anchored to screen center\n\
+             • Options: Click-Through enabled, Hide from Capture active (invisible to OBS stream / screenshots)\n\
+             • Exit Action: Screen Overlay -> Hide overlay (automatically cleans up HUD when game closes)",
             t,
             false,
         );

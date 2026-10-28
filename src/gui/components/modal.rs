@@ -255,8 +255,9 @@ impl Modal {
 
         if scrim_alpha > 0 {
             let scrim_id = Id::new(self.id_str).with("scrim");
+            ctx.move_to_top(egui::LayerId::new(Order::Middle, scrim_id));
             egui::Area::new(scrim_id)
-                .order(Order::Foreground)
+                .order(Order::Middle)
                 .fixed_pos(full.min)
                 .show(ctx, |ui| {
                     let (rect, resp) = ui.allocate_exact_size(full.size(), Sense::click());
@@ -330,10 +331,10 @@ impl Modal {
             pos2(modal_rect.right(), body_bottom),
         );
 
-        // 4. Modal Surface Window
+        // 4. Modal Surface Window (Foreground order ensures child ComboBox & popups render on top)
         let window_id = Id::new(self.id_str).with("window");
         egui::Area::new(window_id)
-            .order(Order::Tooltip)
+            .order(Order::Foreground)
             .fixed_pos(modal_rect.min)
             .show(ctx, |ui| {
                 ui.set_width(modal_rect.width());
@@ -441,8 +442,7 @@ mod tests {
         let ctx = egui::Context::default();
 
         // 1. First open: must start from 0.0, NOT 1.0
-        let mut raw_input = egui::RawInput::default();
-        raw_input.time = Some(0.0);
+        let raw_input = egui::RawInput { time: Some(0.0), ..Default::default() };
         let mut out = ctx.run_ui(raw_input, |ui| {
             let modal = Modal::new("test-modal-first-open", true);
             let res = modal.show(ui.ctx(), &Tokens::DARK, |_frame| {});
@@ -453,8 +453,7 @@ mod tests {
         out.textures_delta.clear();
 
         // 2. Advance time until fully open (anim == 1.0)
-        let mut raw_input = egui::RawInput::default();
-        raw_input.time = Some(0.35);
+        let raw_input = egui::RawInput { time: Some(0.35), ..Default::default() };
         let mut out = ctx.run_ui(raw_input, |ui| {
             let modal = Modal::new("test-modal-first-open", true);
             let res = modal.show(ui.ctx(), &Tokens::DARK, |_frame| {});
@@ -465,8 +464,7 @@ mod tests {
         out.textures_delta.clear();
 
         // 3. Close modal and advance time until fully closed (returns None)
-        let mut raw_input = egui::RawInput::default();
-        raw_input.time = Some(0.60);
+        let raw_input = egui::RawInput { time: Some(0.60), ..Default::default() };
         let mut out = ctx.run_ui(raw_input, |ui| {
             let modal = Modal::new("test-modal-first-open", false);
             let res = modal.show(ui.ctx(), &Tokens::DARK, |_frame| {});
@@ -475,8 +473,7 @@ mod tests {
         out.textures_delta.clear();
 
         // 4. Reopen modal: must start from 0.0 again!
-        let mut raw_input = egui::RawInput::default();
-        raw_input.time = Some(1.0);
+        let raw_input = egui::RawInput { time: Some(1.0), ..Default::default() };
         let mut out = ctx.run_ui(raw_input, |ui| {
             let modal = Modal::new("test-modal-first-open", true);
             let res = modal.show(ui.ctx(), &Tokens::DARK, |_frame| {});

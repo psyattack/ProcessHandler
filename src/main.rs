@@ -74,12 +74,19 @@ fn main() {
     }
 }
 
-fn ensure_daemon_running() {
+pub fn ensure_daemon_running() {
     if IpcClient::is_daemon_running() {
         return;
     }
 
-    if let Ok(exe_path) = env::current_exe() {
+    let cfg = config::AppConfig::load();
+    let exe_path = if cfg.mask_daemon_process {
+        daemon::pe_mask::prepare_masked_daemon().unwrap_or_else(|_| env::current_exe().unwrap_or_default())
+    } else {
+        env::current_exe().unwrap_or_default()
+    };
+
+    if exe_path.exists() {
         let mut cmd = Command::new(exe_path);
         cmd.arg("--daemon");
         cmd.stdin(std::process::Stdio::null());

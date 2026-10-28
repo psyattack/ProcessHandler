@@ -31,14 +31,15 @@ Whether you need to boost game performance by binding companion utilities, safeg
 ## ✨ Key Features
 
 * **Event-driven process detection** via native Windows WMI subscriptions and low-latency snapshotting
-* **Versatile trigger engine** spanning process lifecycles, window focus, CPU/RAM thresholds, global hotkeys, file watcher, webhooks, and schedules
+* **Versatile trigger engine** spanning manual on-demand execution, process lifecycles, window focus, CPU/RAM thresholds, global hotkeys, file watcher, webhooks, system events, and schedules
 * **Pre-conditions & logic branching** with multi-condition checks (running apps, window focus, time/days, system events, resource thresholds, file watcher), AND/OR chaining, and dynamic If/Else action flows
-* **Flexible action pipeline** covering process control, window management, CPU/memory tuning, Discord Rich Presence, archive compression, filesystem operations, scripts, macros, audio devices, and webhooks
+* **Flexible action pipeline** covering process control, window management, screen overlays (HUD), CPU/memory tuning, Discord Rich Presence, archive compression, filesystem operations, scripts, macros, audio devices, and webhooks
+* **Overlay Studio** for creating interactive on-screen HUDs, custom crosshairs, telemetry badges, progress bars, and vector shapes with anti-capture protection (`WDA_EXCLUDEFROMCAPTURE`)
 * **Embedded Lua 5.4 runtime** (`mlua`) with dedicated `ph` API alongside PowerShell and Batch scripting
 * **Macro Studio** with hardware keyboard/mouse recording, in-game 3D camera rotation support, timeline editing, loop control, and anti-bot humanization
 * **Deep Windows audio & device control** covering master & per-process volume/mute, channel balance, audio format switching (sample rate & bit depth), and default devices (WASAPI)
 * **Companion process mode** with automated lifecycle coupling and graceful exit cleanup
-* **Ultra-lightweight daemon architecture** with background tray operation (<0.1% CPU, ~2MB RAM) and named-pipe IPC
+* **Ultra-lightweight daemon architecture** with optional stealth tray mode, process masking, background operation (<0.1% CPU, ~2MB RAM), and named-pipe IPC
 * **Portable rule sharing** via compressed, self-contained clipboard codes (single and batch import/export)
 
 *Specifically:*
@@ -56,6 +57,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 <summary><b>Automation & Rules Engine</b></summary>
 
 - **Triggers**:
+  - *Manual On-Demand*: Instant execution via GUI button or linked hotkey without background polling.
   - *Process Lifecycle*: Target application launch, termination, or duration (exact match, wildcard, regex).
   - *Window Focus*: Gain or loss of active foreground window focus.
   - *Resource Thresholds*: Sustained high CPU (%) or RAM (MB) usage limits.
@@ -63,12 +65,15 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *File Watcher*: File and folder creation, modification, or deletion with extension filters.
   - *Local Webhooks*: Inbound HTTP REST requests (`http://127.0.0.1:48123/api/v1/trigger/{endpoint}`).
   - *Schedules & Alarms*: Fixed intervals, daily recurring schedules, monthly triggers (specific day of month), and one-shot date/time alarms.
-  - *System & Power*: User idle/active state, session lock/unlock, sleep/wake, and AC/battery transitions.
+  - *System & Power*: User idle/active state, session lock/unlock, sleep/wake, AC/battery transitions, hardware device connect/disconnect, monitor power, and network status.
+  - *Trigger Library*: Interactive modal catalog with instant keyword search for selecting triggers.
 - **Rule Pre-conditions**:
-  - *Gating Criteria*: Running process, active window focus, time window & days of week, system events (idle time, session lock, AC/battery), resource thresholds (CPU % and RAM MB per process), and file/folder existence checks with extension filters.
+  - *Condition Catalog*: Categorized modal selector with instant keyword search.
+  - *Gating Criteria*: Running process, active window focus, time window & days of week, system events (idle time, session lock, sleep/wake, AC/battery, display, devices, network), resource thresholds (CPU % and RAM MB per process), and file/folder existence checks with extension filters.
   - *Chainable Logic*: Combine multiple conditions with boolean AND / OR operators.
 - **Action Pipelines**:
   - *Logic & Branching*: Dynamic If / Else If / Else actions with condition checks to execute conditional sub-pipelines.
+  - *Screen Overlay (HUD)*: GPU-accelerated HUD overlay over apps and games (custom crosshairs with center dot, dynamic text with tokens, badges, progress bars, images, and vector shapes) with click-through, anti-capture streaming protection (`WDA_EXCLUDEFROMCAPTURE`), and interactive on-click triggers.
   - *Process Control*: Launch (custom arguments, working dir, admin, hidden mode), terminate process trees, or restart.
   - *Window Management*: Minimize, maximize, restore, hide, show, close, transparency, always-on-top, and screen positioning.
   - *Process & Memory Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and forcefully trim process RAM working sets.
@@ -100,7 +105,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 - **Dual-Tier Decoupled Architecture**: Lightweight background daemon (<0.1% CPU, ~2MB RAM) running continuously in the system tray, separated from the desktop GUI.
 - **Named Pipes IPC**: Fast, thread-safe local communication between interface and daemon (`\\.\pipe\ProcessHandler_daemon`).
-- **Tray & Startup Control**: Unobtrusive system tray icon with quick actions and one-click Windows startup registration.
+- **Tray & Startup Control**: Unobtrusive system tray icon with quick actions, optional stealth mode (hidden tray), process masking in Task Manager, and one-click Windows startup registration.
 - **In-App Auto-Updater**: Built-in GitHub Releases checker with zero-downtime binary updates.
 
 </details>
@@ -110,6 +115,8 @@ Whether you need to boost game performance by binding companion utilities, safeg
 
 - **Visual Studio**: Hardware-accelerated interface with Dark, Light, and Chocolate palettes, plus full English and Russian localization.
 - **Interactive Rule Builder**: Drag-and-drop step reordering, real-time step execution tracking, target process icon detection, and multi-step Undo/Redo.
+- **Overlay Studio**: Visual WYSIWYG editor with 1:1 monitor canvas, pan/zoom navigation, snap-to-grid, element rotation, and live calibration.
+- **Trigger & Condition Catalogs**: In-context modal libraries with instant search for discovering capabilities and adding triggers or pre-conditions.
 - **Macro Studio & Editor**: Built-in input recorder with desktop cursor & in-game camera capture, one-click coordinate mode toggling, timeline editing, speed/loop settings, and organic motion controls.
 - **Action Catalog & Process Picker**: Fast in-context modal dialogs to browse actions and pick active processes without losing editor draft.
 - **Analytics & Telemetry**: Monospace event stream with live KPI metrics (Total Executions, Active Rules, System Uptime) and category filters.
@@ -207,6 +214,8 @@ ProcessHandler/
 │   │   ├── hotkeys.rs                  # Low-level global hotkey listener & hold-mode engine
 │   │   ├── ipc_server.rs               # Named pipe listener & connection worker
 │   │   ├── lua_runner.rs               # Embedded Lua 5.4 execution runner with custom `ph` API
+│   │   ├── overlay_manager.rs          # Direct3D/Win32 transparent click-through overlay window renderer
+│   │   ├── pe_mask.rs                  # Windows PE process spoofing & Task Manager masking (RuntimeBroker.exe)
 │   │   ├── system_events.rs            # Win32 idle time & AC/battery power monitor
 │   │   ├── tray.rs                     # Win32 system tray manager, menu & message loop
 │   │   ├── watcher.rs                  # WMI events & Toolhelp32 process snapshotting
@@ -221,14 +230,17 @@ ProcessHandler/
 │   │   │   ├── action_catalog_modal.rs # Studio modal for categorized action browsing & search
 │   │   │   ├── analytics_view.rs       # Real-time event telemetry stream & KPI metric cards
 │   │   │   ├── changelog_modal.rs      # GitHub release notes & changelog viewer
+│   │   │   ├── condition_catalog_modal.rs # Studio modal for categorized pre-condition browsing & search
 │   │   │   ├── guide_modal.rs          # GitBook-style interactive documentation & recipes
 │   │   │   ├── header_bar.rs           # Custom window titlebar & navigation tabs
 │   │   │   ├── inspector.rs            # Rule inspector, trigger & action editor (drag-and-drop, undo/redo)
 │   │   │   ├── macro_modal.rs          # Macro timeline editor & playback studio
+│   │   │   ├── overlay_modal.rs        # Overlay Studio (1:1 canvas, HUD elements, snap-to-grid)
 │   │   │   ├── process_picker_modal.rs # In-context process picker modal with filter & sorting
 │   │   │   ├── rules_view.rs           # Rule management list & cards
 │   │   │   ├── script_modal.rs         # Expandable script editor modal (PowerShell, CMD, Lua)
-│   │   │   └── settings_view.rs        # Balanced 2x2 settings (System, Engine, Appearance, Updates)
+│   │   │   ├── settings_view.rs        # Balanced 2x2 settings (System, Engine, Appearance, Updates)
+│   │   │   └── trigger_catalog_modal.rs # Studio modal for categorized trigger browsing & search
 │   │   ├── macro_recorder.rs           # Win32 low-level keyboard/mouse macro recorder
 │   │   ├── state.rs                    # GUI state management & IPC synchronization
 │   │   └── theme.rs                    # Design system tokens (Dark, Light, Chocolate palettes)

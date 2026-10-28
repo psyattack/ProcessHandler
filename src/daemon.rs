@@ -5,6 +5,8 @@ pub mod file_watcher;
 pub mod hotkeys;
 pub mod ipc_server;
 pub mod lua_runner;
+pub mod overlay_manager;
+pub mod pe_mask;
 pub mod system_events;
 pub mod tray;
 pub mod watcher;
@@ -28,6 +30,9 @@ pub fn run_daemon() {
     };
 
     println!("[DAEMON] Initializing ProcessHandler background daemon...");
+
+    // Pre-initialize overlay manager and install bundled fonts
+    overlay_manager::init();
 
     let config = AppConfig::load_from_file(AppConfig::config_path());
     let engine = Arc::new(Mutex::new(DaemonEngine::new(config.clone())));
@@ -287,7 +292,7 @@ pub fn run_daemon() {
     println!("[DAEMON] Service started. 0.0% CPU, listening on Named Pipe.");
 
     // Run native Win32 Tray on main thread
-    match TrayManager::new(config.tray_icon_path.clone()) {
+    match TrayManager::new(config.tray_icon_path.clone(), config.hide_tray_icon, config.mask_daemon_process) {
         Ok(tray) => {
             tray.run_message_loop();
         }

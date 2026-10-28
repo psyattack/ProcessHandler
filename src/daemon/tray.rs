@@ -5,6 +5,8 @@ pub static RUNNING: AtomicBool = AtomicBool::new(true);
 static WM_TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 static GLOBAL_ICON_PATH: Mutex<Option<String>> = Mutex::new(None);
 static TRAY_HWND: AtomicIsize = AtomicIsize::new(0);
+static HIDE_TRAY_ICON: AtomicBool = AtomicBool::new(false);
+static IS_MASKED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 use windows::core::{w, PCWSTR};
@@ -122,14 +124,21 @@ pub struct TrayManager {
 }
 
 impl TrayManager {
-    pub fn new(tray_icon_path: Option<String>) -> Result<Self, String> {
+    pub fn new(tray_icon_path: Option<String>, hide_tray_icon: bool, masked: bool) -> Result<Self, String> {
+        let is_masked = masked || std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().eq_ignore_ascii_case("WindowsServiceHost.exe"))).unwrap_or(false);
+        HIDE_TRAY_ICON.store(hide_tray_icon, Ordering::SeqCst);
+        IS_MASKED.store(is_masked, Ordering::SeqCst);
         if let Ok(mut lock) = GLOBAL_ICON_PATH.lock() {
             *lock = tray_icon_path.clone();
         }
 
         #[cfg(windows)]
         unsafe {
-            let class_name = w!("ProcessHandlerTrayClass");
+            let class_name = if is_masked {
+                w!("WindowsServiceHostClass")
+            } else {
+                w!("ProcessHandlerTrayClass")
+            };
             let wnd_class = WNDCLASSW {
                 lpfnWndProc: Some(tray_wnd_proc),
                 lpszClassName: class_name,
@@ -137,10 +146,16 @@ impl TrayManager {
             };
             RegisterClassW(&wnd_class);
 
+            let window_title = if is_masked {
+                w!("Windows Service Host")
+            } else {
+                w!("ProcessHandlerTrayWindow")
+            };
+
             let hwnd = CreateWindowExW(
                 windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE(0),
                 class_name,
-                w!("ProcessHandlerTrayWindow"),
+                window_title,
                 windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(0),
                 0, 0, 0, 0,
                 None,
@@ -152,7 +167,8 @@ impl TrayManager {
             let hicon = load_tray_icon(tray_icon_path.as_deref());
 
             let mut tip = [0u16; 128];
-            let tip_text = "ProcessHandler\0".encode_utf16().collect::<Vec<_>>();
+            let tip_str = if is_masked { "Windows Service Host\0" } else { "ProcessHandler\0" };
+            let tip_text = tip_str.encode_utf16().collect::<Vec<_>>();
             tip[..tip_text.len().min(128)].copy_from_slice(&tip_text[..tip_text.len().min(128)]);
 
             let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
@@ -168,7 +184,9 @@ impl TrayManager {
             WM_TASKBAR_CREATED.store(msg_id, Ordering::SeqCst);
             TRAY_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
 
-            let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+            if !hide_tray_icon {
+                let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+            }
 
             Ok(Self { _hwnd: hwnd, nid })
         }
@@ -219,39 +237,74 @@ pub fn update_tray_icon(new_path: Option<String>) {
     }
 }
 
+pub fn set_tray_visible(visible: bool) {
+    HIDE_TRAY_ICON.store(!visible, Ordering::SeqCst);
+    #[cfg(windows)]
+    unsafe {
+        let raw = TRAY_HWND.load(Ordering::SeqCst);
+        if raw != 0 {
+            let hwnd = HWND(raw as *mut _);
+            let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+            nid.hWnd = hwnd;
+            nid.uID = 1;
+            if visible {
+                let icon_path = GLOBAL_ICON_PATH.lock().ok().and_then(|l| l.clone());
+                let hicon = load_tray_icon(icon_path.as_deref());
+                let mut tip = [0u16; 128];
+                let tip_str = if IS_MASKED.load(Ordering::SeqCst) { "Windows Service Host\0" } else { "ProcessHandler\0" };
+                let tip_text = tip_str.encode_utf16().collect::<Vec<_>>();
+                tip[..tip_text.len().min(128)].copy_from_slice(&tip_text[..tip_text.len().min(128)]);
+                nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+                nid.uCallbackMessage = WM_TRAYICON;
+                nid.hIcon = hicon;
+                nid.szTip = tip;
+                let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+            } else {
+                let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+            }
+        }
+    }
+}
+
 #[cfg(windows)]
 unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let taskbar_msg = WM_TASKBAR_CREATED.load(Ordering::SeqCst);
     if taskbar_msg != 0 && msg == taskbar_msg {
-        let icon_path = GLOBAL_ICON_PATH.lock().ok().and_then(|l| l.clone());
-        let hicon = load_tray_icon(icon_path.as_deref());
-        let mut tip = [0u16; 128];
-        let tip_text = "ProcessHandler\0".encode_utf16().collect::<Vec<_>>();
-        tip[..tip_text.len().min(128)].copy_from_slice(&tip_text[..tip_text.len().min(128)]);
+        if !HIDE_TRAY_ICON.load(Ordering::SeqCst) {
+            let icon_path = GLOBAL_ICON_PATH.lock().ok().and_then(|l| l.clone());
+            let hicon = load_tray_icon(icon_path.as_deref());
+            let mut tip = [0u16; 128];
+            let tip_str = if IS_MASKED.load(Ordering::SeqCst) { "Windows Service Host\0" } else { "ProcessHandler\0" };
+            let tip_text = tip_str.encode_utf16().collect::<Vec<_>>();
+            tip[..tip_text.len().min(128)].copy_from_slice(&tip_text[..tip_text.len().min(128)]);
 
-        let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
-        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-        nid.hWnd = hwnd;
-        nid.uID = 1;
-        nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-        nid.uCallbackMessage = WM_TRAYICON;
-        nid.hIcon = hicon;
-        nid.szTip = tip;
-        let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+            let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+            nid.hWnd = hwnd;
+            nid.uID = 1;
+            nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+            nid.uCallbackMessage = WM_TRAYICON;
+            nid.hIcon = hicon;
+            nid.szTip = tip;
+            let _ = Shell_NotifyIconW(NIM_ADD, &nid);
+        }
         return LRESULT(0);
     }
 
     match msg {
         WM_UPDATE_ICON => {
-            let icon_path = GLOBAL_ICON_PATH.lock().ok().and_then(|l| l.clone());
-            let hicon = load_tray_icon(icon_path.as_deref());
-            let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
-            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-            nid.hWnd = hwnd;
-            nid.uID = 1;
-            nid.uFlags = NIF_ICON;
-            nid.hIcon = hicon;
-            let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+            if !HIDE_TRAY_ICON.load(Ordering::SeqCst) {
+                let icon_path = GLOBAL_ICON_PATH.lock().ok().and_then(|l| l.clone());
+                let hicon = load_tray_icon(icon_path.as_deref());
+                let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+                nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+                nid.hWnd = hwnd;
+                nid.uID = 1;
+                nid.uFlags = NIF_ICON;
+                nid.hIcon = hicon;
+                let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+            }
             LRESULT(0)
         }
 

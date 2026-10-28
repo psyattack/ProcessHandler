@@ -98,6 +98,7 @@ pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
 
     if changed {
         crate::daemon::tray::update_tray_icon(cfg.tray_icon_path.clone());
+        crate::daemon::tray::set_tray_visible(!cfg.hide_tray_icon);
         let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::SaveConfig(cfg));
         state.set_toast(loc.toast_config_saved);
         state.sync_with_daemon();
@@ -347,7 +348,47 @@ fn render_general_content(
 
     widgets::hrule(ui);
 
-    // 3. Open Configuration and Storage Folder
+    // 3. Hide Tray Icon Toggle
+    render_setting_row(ui, loc.settings_hide_tray_icon_title, loc.settings_hide_tray_icon_desc, t, |ui| {
+        if widgets::toggle_switch(ui, &mut cfg.hide_tray_icon).changed() {
+            *changed = true;
+        }
+    });
+
+    widgets::hrule(ui);
+
+    // 4. Mask Daemon as System Service Toggle
+    render_setting_row(ui, loc.settings_mask_daemon_title, loc.settings_mask_daemon_desc, t, |ui| {
+        if widgets::toggle_switch(ui, &mut cfg.mask_daemon_process).changed() {
+            *changed = true;
+            let _ = cfg.save_to_file(crate::config::AppConfig::config_path());
+            #[cfg(windows)]
+            {
+                let mask = cfg.mask_daemon_process;
+                let _ = crate::ipc::client::IpcClient::call(&crate::ipc::protocol::IpcRequest::ShutdownDaemon);
+                for _ in 0..30 {
+                    if !crate::ipc::client::IpcClient::is_daemon_running() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if mask {
+                    let _ = crate::daemon::pe_mask::prepare_masked_daemon();
+                } else {
+                    crate::daemon::pe_mask::cleanup_masked_daemon();
+                }
+                crate::ensure_daemon_running();
+                if current_autorun {
+                    let _ = crate::autorun::set_autorun(crate::autorun::APP_NAME, true);
+                }
+            }
+        }
+    });
+
+    widgets::hrule(ui);
+
+    // 5. Open Configuration and Storage Folder
     render_setting_row(ui, loc.settings_config_folder_title, loc.settings_config_folder_desc, t, |ui| {
         if widgets::button(ui, loc.settings_btn_open_folder, Kind::Secondary, 0.0).clicked() {
             let dir = crate::config::AppConfig::config_dir();
@@ -551,6 +592,8 @@ mod tests {
             config: crate::config::AppConfig::default(),
             logs: vec![],
             active_rule_executions: std::collections::HashMap::new(),
+            active_overlay_ids: std::collections::HashSet::new(),
+            active_test_rule_ids: std::collections::HashSet::new(),
             analytics: Default::default(),
         });
 

@@ -11,7 +11,12 @@ pub enum IpcRequest {
     SaveRule(Rule),
     DeleteRule(String),
     ToggleRule { id: String, enabled: bool },
-    TestRunRule(String),
+    TestRunRule {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<Box<Rule>>,
+    },
+    StopRuleExecution(String),
     TestStep { action: Action, context: std::collections::HashMap<String, String> },
     GetProcesses,
     KillProcess { pid: u32, force: bool },
@@ -20,16 +25,23 @@ pub enum IpcRequest {
     ClearLogs,
     ShutdownDaemon,
     ImportRules(Vec<Rule>),
+    SaveOverlay(crate::models::OverlayDefinition),
+    DeleteOverlay(String),
+    ShowOverlayPreview { overlay: crate::models::OverlayDefinition, calibration_mode: bool },
+    HideOverlayPreview(String),
+    GetOverlayPosition(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "payload")]
+#[allow(clippy::large_enum_variant)]
 pub enum IpcResponse {
     Ok,
     Pong,
     State(DaemonState),
     Processes(Vec<ProcessSnapshotItem>),
     TestStepResult(Result<(), String>),
+    OverlayPosition(Option<(f32, f32)>),
     Error(String),
 }
 
@@ -53,6 +65,10 @@ pub struct DaemonState {
     pub logs: Vec<LogItem>,
     #[serde(default)]
     pub active_rule_executions: std::collections::HashMap<String, ActiveRuleExecutionState>,
+    #[serde(default)]
+    pub active_overlay_ids: std::collections::HashSet<String>,
+    #[serde(default)]
+    pub active_test_rule_ids: std::collections::HashSet<String>,
     #[serde(default)]
     pub analytics: AnalyticsSummary,
 }
@@ -81,6 +97,28 @@ mod tests {
     }
 
     #[test]
+    fn test_ipc_overlay_position_serde() {
+        let req = IpcRequest::GetOverlayPosition("test_ov".into());
+        let json_req = serde_json::to_string(&req).unwrap();
+        let dec_req: IpcRequest = serde_json::from_str(&json_req).unwrap();
+        match dec_req {
+            IpcRequest::GetOverlayPosition(id) => assert_eq!(id, "test_ov"),
+            _ => panic!("wrong req variant"),
+        }
+
+        let resp = IpcResponse::OverlayPosition(Some((100.0, 200.0)));
+        let json_resp = serde_json::to_string(&resp).unwrap();
+        let dec_resp: IpcResponse = serde_json::from_str(&json_resp).unwrap();
+        match dec_resp {
+            IpcResponse::OverlayPosition(Some((x, y))) => {
+                assert_eq!(x, 100.0);
+                assert_eq!(y, 200.0);
+            }
+            _ => panic!("wrong resp variant"),
+        }
+    }
+
+    #[test]
     fn test_ipc_import_rules_request_serde() {
         let req = IpcRequest::ImportRules(vec![Rule {
             id: "r_test".into(),
@@ -99,5 +137,30 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("ImportRules"));
         assert!(json.contains("Imported Rule"));
+    }
+
+    #[test]
+    fn test_ipc_test_run_and_stop_serde() {
+        let req = IpcRequest::TestRunRule {
+            id: "rule_1".into(),
+            rule: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let dec: IpcRequest = serde_json::from_str(&json).unwrap();
+        match dec {
+            IpcRequest::TestRunRule { id, rule } => {
+                assert_eq!(id, "rule_1");
+                assert!(rule.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+
+        let stop_req = IpcRequest::StopRuleExecution("rule_1".into());
+        let json_stop = serde_json::to_string(&stop_req).unwrap();
+        let dec_stop: IpcRequest = serde_json::from_str(&json_stop).unwrap();
+        match dec_stop {
+            IpcRequest::StopRuleExecution(id) => assert_eq!(id, "rule_1"),
+            _ => panic!("wrong variant"),
+        }
     }
 }

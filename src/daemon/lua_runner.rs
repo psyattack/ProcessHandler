@@ -61,6 +61,48 @@ impl LuaRunner {
         }).map_err(|e| e.to_string())?;
         ph_table.set("run_cmd", cmd_fn).map_err(|e| e.to_string())?;
 
+        // 7. ph.overlay_show(id)
+        let ov_show = lua.create_function(|_, id: String| {
+            let config = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+            let overlay = config.overlays.iter().find(|o| o.id == id).cloned().unwrap_or_else(|| match id.as_str() {
+                "overlay_crosshair" => crate::models::OverlayDefinition::default_crosshair(),
+                "overlay_telemetry" => crate::models::OverlayDefinition::default_telemetry(),
+                "overlay_macro_badge" => crate::models::OverlayDefinition::default_macro_badge(),
+                _ => crate::models::OverlayDefinition::default_new_overlay(),
+            });
+            crate::daemon::overlay_manager::show_overlay(&overlay, false, None);
+            Ok(())
+        }).map_err(|e| e.to_string())?;
+        ph_table.set("overlay_show", ov_show).map_err(|e| e.to_string())?;
+
+        // 8. ph.overlay_hide(id)
+        let ov_hide = lua.create_function(|_, id: String| {
+            crate::daemon::overlay_manager::hide_overlay(&id);
+            Ok(())
+        }).map_err(|e| e.to_string())?;
+        ph_table.set("overlay_hide", ov_hide).map_err(|e| e.to_string())?;
+
+        // 9. ph.overlay_toggle(id)
+        let ov_toggle = lua.create_function(|_, id: String| {
+            let config = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+            let overlay = config.overlays.iter().find(|o| o.id == id).cloned().unwrap_or_else(|| match id.as_str() {
+                "overlay_crosshair" => crate::models::OverlayDefinition::default_crosshair(),
+                "overlay_telemetry" => crate::models::OverlayDefinition::default_telemetry(),
+                "overlay_macro_badge" => crate::models::OverlayDefinition::default_macro_badge(),
+                _ => crate::models::OverlayDefinition::default_new_overlay(),
+            });
+            crate::daemon::overlay_manager::toggle_overlay(&overlay, None);
+            Ok(())
+        }).map_err(|e| e.to_string())?;
+        ph_table.set("overlay_toggle", ov_toggle).map_err(|e| e.to_string())?;
+
+        // 10. ph.overlay_set_text(id, text)
+        let ov_set_text = lua.create_function(|_, (id, text): (String, String)| {
+            crate::daemon::overlay_manager::update_overlay_text(&id, &text);
+            Ok(())
+        }).map_err(|e| e.to_string())?;
+        ph_table.set("overlay_set_text", ov_set_text).map_err(|e| e.to_string())?;
+
         lua.globals().set("ph", ph_table).map_err(|e| e.to_string())?;
 
         // Execute chunk and capture return value if any

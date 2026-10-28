@@ -11,6 +11,7 @@ pub struct SystemEventsWatcher {
     last_idle_state: bool,
     idle_threshold_ms: u32,
     last_power_is_ac: Option<bool>,
+    last_network_is_connected: Option<bool>,
 }
 
 impl SystemEventsWatcher {
@@ -19,6 +20,7 @@ impl SystemEventsWatcher {
             last_idle_state: false,
             idle_threshold_ms: 300_000, // default 5 minutes
             last_power_is_ac: None,
+            last_network_is_connected: None,
         }
     }
 }
@@ -75,10 +77,44 @@ impl SystemEventsWatcher {
                     _ => {}
                 }
             }
+
+            // 3. Check Network connection state
+            let is_net = is_network_connected();
+            match self.last_network_is_connected {
+                Some(prev) if prev != is_net => {
+                    self.last_network_is_connected = Some(is_net);
+                    if is_net {
+                        events.push(SystemEventType::NetworkConnected);
+                    } else {
+                        events.push(SystemEventType::NetworkDisconnected);
+                    }
+                }
+                None => {
+                    self.last_network_is_connected = Some(is_net);
+                }
+                _ => {}
+            }
         }
 
         events
     }
+}
+
+pub fn is_network_connected() -> bool {
+    #[cfg(windows)]
+    unsafe {
+        use windows::core::s;
+        use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+        if let Ok(h) = LoadLibraryA(s!("wininet.dll")) {
+            if let Some(proc) = GetProcAddress(h, s!("InternetGetConnectedState")) {
+                type FnInternetGetConnectedState = unsafe extern "system" fn(*mut u32, u32) -> i32;
+                let func: FnInternetGetConnectedState = std::mem::transmute(proc);
+                let mut flags = 0u32;
+                return func(&mut flags, 0) != 0;
+            }
+        }
+    }
+    true
 }
 
 pub fn get_user_idle_seconds() -> Option<u64> {

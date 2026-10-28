@@ -67,6 +67,41 @@ pub struct ActionCatalogModalState {
     pub ifelse_target: Option<IfElseCatalogTarget>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct TriggerCatalogState {
+    pub selected_category: usize,
+    pub search_query: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ConditionCatalogState {
+    pub selected_category: usize,
+    pub search_query: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ColorPickerTarget {
+    CardBg,
+    CardBorder,
+    ElementPrimary(usize),
+    ElementSecondary(usize),
+}
+
+#[derive(Debug, Clone)]
+pub struct OverlayStudioState {
+    pub overlay: crate::models::OverlayDefinition,
+    pub is_calibrating: bool,
+    pub selected_element_idx: Option<usize>,
+    pub action_target_idx: Option<usize>,
+    pub is_exit_pipeline: bool,
+    pub active_color_target: Option<ColorPickerTarget>,
+    pub snap_to_grid: bool,
+    pub card_lock_aspect: bool,
+    pub canvas_pan: egui::Vec2,
+    pub canvas_zoom: Option<f32>,
+    pub last_synced_pos: Option<(f32, f32)>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SettingsTab {
     #[default]
@@ -96,8 +131,14 @@ pub struct GuiState {
     pub last_script_editor: Option<ExpandedScriptEditorState>,
     pub macro_editor: Option<MacroEditorModalState>,
     pub last_macro_editor: Option<MacroEditorModalState>,
+    pub overlay_studio: Option<OverlayStudioState>,
+    pub last_overlay_studio: Option<OverlayStudioState>,
     pub action_catalog: Option<ActionCatalogModalState>,
     pub last_action_catalog: Option<ActionCatalogModalState>,
+    pub trigger_catalog: Option<TriggerCatalogState>,
+    pub last_trigger_catalog: Option<TriggerCatalogState>,
+    pub condition_catalog: Option<ConditionCatalogState>,
+    pub last_condition_catalog: Option<ConditionCatalogState>,
     pub language: crate::i18n::Language,
     pub theme: crate::config::AppTheme,
     pub last_sync: Instant,
@@ -117,6 +158,8 @@ pub struct GuiState {
     pub undo_stack: Vec<Rule>,
     pub redo_stack: Vec<Rule>,
     pub settings_tab: SettingsTab,
+    pub active_test_overlays: std::collections::HashSet<String>,
+    pub active_test_runs: std::collections::HashSet<String>,
     update_event_tx: std::sync::mpsc::Sender<crate::updater::UpdateEvent>,
     update_event_rx: std::sync::mpsc::Receiver<crate::updater::UpdateEvent>,
 }
@@ -145,8 +188,14 @@ impl GuiState {
             last_script_editor: None,
             macro_editor: None,
             last_macro_editor: None,
+            overlay_studio: None,
+            last_overlay_studio: None,
             action_catalog: None,
             last_action_catalog: None,
+            trigger_catalog: None,
+            last_trigger_catalog: None,
+            condition_catalog: None,
+            last_condition_catalog: None,
             language: config.language,
             theme: config.theme,
             last_sync: Instant::now() - std::time::Duration::from_secs(10),
@@ -166,6 +215,8 @@ impl GuiState {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             settings_tab: SettingsTab::General,
+            active_test_overlays: std::collections::HashSet::new(),
+            active_test_runs: std::collections::HashSet::new(),
             update_event_tx,
             update_event_rx,
         }
@@ -234,6 +285,89 @@ impl GuiState {
         crate::gui::macro_recorder::set_studio_active(false);
     }
 
+    pub fn open_overlay_studio(&mut self, overlay_id: &str) {
+        let config = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+        let overlay = config.overlays.iter().find(|o| o.id == overlay_id).cloned().unwrap_or_else(|| {
+            match overlay_id {
+                "overlay_crosshair" => crate::models::OverlayDefinition::default_crosshair(),
+                "overlay_telemetry" => crate::models::OverlayDefinition::default_telemetry(),
+                "overlay_macro_badge" => crate::models::OverlayDefinition::default_macro_badge(),
+                _ => crate::models::OverlayDefinition::default_new_overlay(),
+            }
+        });
+        let studio = OverlayStudioState {
+            overlay,
+            is_calibrating: false,
+            selected_element_idx: None,
+            action_target_idx: None,
+            is_exit_pipeline: false,
+            active_color_target: None,
+            snap_to_grid: false,
+            card_lock_aspect: false,
+            canvas_pan: egui::Vec2::ZERO,
+            canvas_zoom: None,
+            last_synced_pos: None,
+        };
+        self.overlay_studio = Some(studio.clone());
+        self.last_overlay_studio = Some(studio);
+    }
+
+    pub fn open_overlay_studio_for_action(&mut self, action_idx: usize, is_exit: bool) {
+        if let Some(rule) = &self.editing_rule {
+            let actions = if is_exit { &rule.on_exit_actions } else { &rule.actions };
+            if let Some(crate::models::Action::Overlay { overlay_id, custom_overlay, .. }) = actions.get(action_idx) {
+                let overlay = if let Some(cust) = custom_overlay {
+                    *cust.clone()
+                } else {
+                    let config = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+                    config.overlays.iter().find(|o| o.id == *overlay_id).cloned().unwrap_or_else(|| {
+                        match overlay_id.as_str() {
+                            "overlay_crosshair" => crate::models::OverlayDefinition::default_crosshair(),
+                            "overlay_telemetry" => crate::models::OverlayDefinition::default_telemetry(),
+                            "overlay_macro_badge" => crate::models::OverlayDefinition::default_macro_badge(),
+                            _ => crate::models::OverlayDefinition::default_new_overlay(),
+                        }
+                    })
+                };
+                let studio = OverlayStudioState {
+                    overlay,
+                    is_calibrating: false,
+                    selected_element_idx: None,
+                    action_target_idx: Some(action_idx),
+                    is_exit_pipeline: is_exit,
+                    active_color_target: None,
+                    snap_to_grid: false,
+                    card_lock_aspect: false,
+                    canvas_pan: egui::Vec2::ZERO,
+                    canvas_zoom: None,
+                    last_synced_pos: None,
+                };
+                self.overlay_studio = Some(studio.clone());
+                self.last_overlay_studio = Some(studio);
+            }
+        }
+    }
+
+    pub fn close_overlay_studio(&mut self) {
+        if let Some(studio) = &self.overlay_studio {
+            let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::HideOverlayPreview(studio.overlay.id.clone()));
+            if let Some(action_idx) = studio.action_target_idx {
+                if let Some(rule) = &mut self.editing_rule {
+                    let actions = if studio.is_exit_pipeline {
+                        &mut rule.on_exit_actions
+                    } else {
+                        &mut rule.actions
+                    };
+                    if let Some(crate::models::Action::Overlay { custom_overlay, overlay_id, .. }) = actions.get_mut(action_idx) {
+                        *custom_overlay = Some(Box::new(studio.overlay.clone()));
+                        *overlay_id = studio.overlay.id.clone();
+                    }
+                }
+            }
+        }
+        self.overlay_studio = None;
+    }
+
     pub fn open_action_catalog(&mut self, is_exit_pipeline: bool, insert_idx: Option<usize>) {
         let catalog = ActionCatalogModalState {
             is_exit_pipeline,
@@ -260,6 +394,42 @@ impl GuiState {
 
     pub fn close_action_catalog(&mut self) {
         self.action_catalog = None;
+    }
+
+    pub fn open_trigger_catalog(&mut self) {
+        let catalog = TriggerCatalogState::default();
+        self.trigger_catalog = Some(catalog.clone());
+        self.last_trigger_catalog = Some(catalog);
+    }
+
+    pub fn close_trigger_catalog(&mut self) {
+        self.trigger_catalog = None;
+    }
+
+    pub fn set_trigger_from_catalog(&mut self, trigger: Option<crate::models::Trigger>) {
+        self.push_undo_snapshot();
+        if let Some(rule) = &mut self.editing_rule {
+            rule.trigger = trigger;
+        }
+        self.close_trigger_catalog();
+    }
+
+    pub fn open_condition_catalog(&mut self) {
+        let catalog = ConditionCatalogState::default();
+        self.condition_catalog = Some(catalog.clone());
+        self.last_condition_catalog = Some(catalog);
+    }
+
+    pub fn close_condition_catalog(&mut self) {
+        self.condition_catalog = None;
+    }
+
+    pub fn add_condition_from_catalog(&mut self, condition: crate::models::RuleCondition) {
+        self.push_undo_snapshot();
+        if let Some(rule) = &mut self.editing_rule {
+            rule.conditions.push(crate::models::RuleConditionItem::new(condition));
+        }
+        self.close_condition_catalog();
     }
 
     pub fn add_action_from_catalog(
@@ -331,6 +501,9 @@ impl GuiState {
     }
 
     pub fn is_any_rule_executing(&self) -> bool {
+        if !self.active_test_runs.is_empty() {
+            return true;
+        }
         self.daemon_state
             .as_ref()
             .map(|s| !s.active_rule_executions.is_empty())
@@ -346,6 +519,8 @@ impl GuiState {
 
         match IpcClient::call(&IpcRequest::GetState) {
             Ok(IpcResponse::State(state)) => {
+                self.active_test_runs.retain(|id| state.active_test_rule_ids.contains(id));
+                self.active_test_runs.extend(state.active_test_rule_ids.iter().cloned());
                 self.daemon_state = Some(state);
                 self.is_daemon_connected = true;
             }
@@ -452,11 +627,7 @@ impl GuiState {
             max_executions: None,
             execution_count: 0,
             stop_on_error: true,
-            trigger: Some(crate::models::Trigger::Process {
-                process_name: String::new(),
-                match_mode: crate::models::ProcessMatchMode::Exact,
-                single_instance: false,
-            }),
+            trigger: Some(crate::models::Trigger::Manual),
             actions: Vec::new(),
             on_exit_actions: Vec::new(),
             custom_icon_path: None,
@@ -524,8 +695,108 @@ impl GuiState {
         }
     }
 
+    pub fn extract_action_overlay_ids(action: &crate::models::Action, out: &mut Vec<String>) {
+        match action {
+            crate::models::Action::Overlay { overlay_id, custom_overlay, .. } => {
+                out.push(overlay_id.clone());
+                if let Some(cust) = custom_overlay {
+                    out.push(cust.id.clone());
+                }
+            }
+            crate::models::Action::IfElse { then_actions, else_if_branches, else_actions, .. } => {
+                for a in then_actions {
+                    Self::extract_action_overlay_ids(a, out);
+                }
+                for b in else_if_branches {
+                    for a in &b.actions {
+                        Self::extract_action_overlay_ids(a, out);
+                    }
+                }
+                for a in else_actions {
+                    Self::extract_action_overlay_ids(a, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn extract_rule_overlay_ids(rule: &Rule) -> Vec<String> {
+        let mut ids = Vec::new();
+        for a in &rule.actions {
+            Self::extract_action_overlay_ids(a, &mut ids);
+        }
+        for a in &rule.on_exit_actions {
+            Self::extract_action_overlay_ids(a, &mut ids);
+        }
+        ids
+    }
+
+    pub fn get_rule_execution_state(&self, rule: &Rule) -> Option<crate::ipc::ActiveRuleExecutionState> {
+        if self.active_test_runs.contains(&rule.id) {
+            let daemon_exec = self.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
+            return Some(daemon_exec.unwrap_or(crate::ipc::ActiveRuleExecutionState {
+                active_count: 1,
+                current_step: 0,
+                total_steps: rule.actions.len().max(1),
+                is_exit: false,
+            }));
+        }
+
+        self.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied().or_else(|| {
+            let has_active_overlay = rule.actions.iter().enumerate().find_map(|(idx, a)| match a {
+                crate::models::Action::Overlay { overlay_id, custom_overlay, .. } => {
+                    let ov_id = custom_overlay.as_ref().map(|o| o.id.as_str()).unwrap_or(overlay_id.as_str());
+                    if self.daemon_state.as_ref().is_some_and(|d| d.active_overlay_ids.contains(ov_id))
+                        || self.active_test_overlays.contains(ov_id)
+                    {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            });
+            has_active_overlay.map(|step_idx| crate::ipc::ActiveRuleExecutionState {
+                active_count: 1,
+                current_step: step_idx,
+                total_steps: rule.actions.len(),
+                is_exit: false,
+            })
+        })
+    }
+
+    pub fn hide_rule_overlays(rule: &Rule) {
+        for id in Self::extract_rule_overlay_ids(rule) {
+            let _ = IpcClient::call(&IpcRequest::HideOverlayPreview(id));
+        }
+    }
+
+    pub fn cleanup_on_exit(&mut self) {
+        if let Some(studio) = &self.overlay_studio {
+            let _ = IpcClient::call(&IpcRequest::HideOverlayPreview(studio.overlay.id.clone()));
+        }
+        if let Some(rule) = &self.editing_rule {
+            Self::hide_rule_overlays(rule);
+        }
+        if let Some(rule) = &self.builder_draft {
+            Self::hide_rule_overlays(rule);
+        }
+        for id in self.active_test_overlays.drain() {
+            let _ = IpcClient::call(&IpcRequest::HideOverlayPreview(id));
+        }
+    }
+
     pub fn close_editor(&mut self) {
         self.close_action_catalog();
+        if let Some(studio) = &self.overlay_studio {
+            let _ = IpcClient::call(&IpcRequest::HideOverlayPreview(studio.overlay.id.clone()));
+        }
+        if let Some(rule) = &self.editing_rule {
+            Self::hide_rule_overlays(rule);
+        }
+        for id in self.active_test_overlays.drain() {
+            let _ = IpcClient::call(&IpcRequest::HideOverlayPreview(id));
+        }
         if self.is_creating_new_rule {
             self.builder_draft = self.editing_rule.take();
         } else {
@@ -551,10 +822,13 @@ impl GuiState {
     pub fn is_modal_open(&self) -> bool {
         self.expanded_script_editor.is_some()
             || self.action_catalog.is_some()
+            || self.trigger_catalog.is_some()
+            || self.condition_catalog.is_some()
             || self.picker_target.is_some()
             || (self.show_changelog_modal && self.available_update.is_some())
             || self.show_guide_modal
             || self.macro_editor.is_some()
+            || self.overlay_studio.is_some()
     }
 
     pub fn apply_selected_process(&mut self, proc_name: &str) {
@@ -689,6 +963,41 @@ impl GuiState {
         if rule.name.trim().is_empty() {
             rule.name = self.loc().rules_default_new_name.to_string();
         }
+        let mut seen_ids = std::collections::HashSet::new();
+        fn deduplicate_overlay_ids(actions: &mut [crate::models::Action], seen: &mut std::collections::HashSet<String>) {
+            for action in actions.iter_mut() {
+                match action {
+                    crate::models::Action::Overlay { overlay_id, custom_overlay, .. } => {
+                        if !seen.insert(overlay_id.clone()) {
+                            static DEDUP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                            let count = DEDUP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let fresh_id = format!(
+                                "overlay_{:x}_{:x}",
+                                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos(),
+                                count
+                            );
+                            *overlay_id = fresh_id.clone();
+                            if let Some(ref mut cust) = custom_overlay {
+                                cust.id = fresh_id;
+                            }
+                        } else if let Some(ref mut cust) = custom_overlay {
+                            cust.id = overlay_id.clone();
+                        }
+                    }
+                    crate::models::Action::IfElse { then_actions, else_if_branches, else_actions, .. } => {
+                        deduplicate_overlay_ids(then_actions, seen);
+                        for b in else_if_branches {
+                            deduplicate_overlay_ids(&mut b.actions, seen);
+                        }
+                        deduplicate_overlay_ids(else_actions, seen);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        deduplicate_overlay_ids(&mut rule.actions, &mut seen_ids);
+        deduplicate_overlay_ids(&mut rule.on_exit_actions, &mut seen_ids);
+
         let _ = IpcClient::call(&IpcRequest::SaveRule(rule));
         self.editing_rule = None;
         self.is_creating_new_rule = false;
@@ -698,6 +1007,14 @@ impl GuiState {
     }
 
     pub fn delete_rule(&mut self, id: &str) {
+        if let Some(rule) = self.daemon_state.as_ref().and_then(|s| s.config.rules.iter().find(|r| r.id == id)) {
+            Self::hide_rule_overlays(rule);
+        }
+        if let Some(rule) = &self.editing_rule {
+            if rule.id == id {
+                Self::hide_rule_overlays(rule);
+            }
+        }
         let _ = IpcClient::call(&IpcRequest::DeleteRule(id.to_string()));
         if self.selected_rule_id.as_deref() == Some(id) {
             self.selected_rule_id = None;
@@ -731,8 +1048,46 @@ impl GuiState {
     }
 
     pub fn test_run_rule(&mut self, id: &str) {
-        let _ = IpcClient::call(&IpcRequest::TestRunRule(id.to_string()));
+        self.active_test_runs.insert(id.to_string());
+        if let Some(rule) = self.daemon_state.as_ref().and_then(|s| s.config.rules.iter().find(|r| r.id == id)) {
+            for id in Self::extract_rule_overlay_ids(rule) {
+                self.active_test_overlays.insert(id);
+            }
+        }
+        let mut rule_override = None;
+        if let Some(rule) = &self.editing_rule {
+            if rule.id == id {
+                for id in Self::extract_rule_overlay_ids(rule) {
+                    self.active_test_overlays.insert(id);
+                }
+                rule_override = Some(Box::new(rule.clone()));
+            }
+        }
+        let _ = IpcClient::call(&IpcRequest::TestRunRule {
+            id: id.to_string(),
+            rule: rule_override,
+        });
         self.set_toast(self.loc().toast_test_execution);
+        self.last_sync = Instant::now() - std::time::Duration::from_secs(1);
+        self.sync_with_daemon();
+    }
+
+    pub fn stop_rule_execution(&mut self, id: &str) {
+        self.active_test_runs.remove(id);
+        if let Some(rule) = self.daemon_state.as_ref().and_then(|s| s.config.rules.iter().find(|r| r.id == id)) {
+            for ov_id in Self::extract_rule_overlay_ids(rule) {
+                self.active_test_overlays.remove(&ov_id);
+            }
+        }
+        if let Some(rule) = &self.editing_rule {
+            if rule.id == id {
+                for ov_id in Self::extract_rule_overlay_ids(rule) {
+                    self.active_test_overlays.remove(&ov_id);
+                }
+            }
+        }
+        let _ = IpcClient::call(&IpcRequest::StopRuleExecution(id.to_string()));
+        self.last_sync = Instant::now() - std::time::Duration::from_secs(1);
         self.sync_with_daemon();
     }
 
@@ -954,6 +1309,12 @@ mod tests {
         state.open_macro_editor(0, false);
         assert!(state.is_modal_open());
         state.close_macro_editor();
+        assert!(!state.is_modal_open());
+
+        // Overlay studio
+        state.open_overlay_studio("overlay_crosshair");
+        assert!(state.is_modal_open());
+        state.close_overlay_studio();
         assert!(!state.is_modal_open());
     }
 

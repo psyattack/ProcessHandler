@@ -178,7 +178,7 @@ fn render_rule_card(
         .corner_radius(CornerRadius::ZERO)
         .inner_margin(egui::Margin::symmetric(16, 14));
 
-    let exec_opt = state.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
+    let exec_opt = state.get_rule_execution_state(rule);
 
     frame.show(ui, |ui| {
         ui.vertical(|ui| {
@@ -188,11 +188,16 @@ fn render_rule_card(
             ui.horizontal(|ui| {
                 widgets::eyebrow(ui, &format!("{:02}", idx + 1), loc.rules_badge_automation);
                 ui.add_space(8.0);
-                widgets::badge(
-                    ui,
-                    if rule.is_enabled { loc.rules_badge_active } else { loc.rules_badge_paused },
-                    if rule.is_enabled { t.good } else { t.muted },
-                );
+                let is_manual = rule.trigger.as_ref().is_none_or(|t| matches!(t, crate::models::Trigger::Manual));
+                if is_manual {
+                    widgets::badge(ui, loc.rules_badge_manual, t.accent_ink);
+                } else {
+                    widgets::badge(
+                        ui,
+                        if rule.is_enabled { loc.rules_badge_active } else { loc.rules_badge_paused },
+                        if rule.is_enabled { t.good } else { t.muted },
+                    );
+                }
                 ui.add_space(6.0);
                 widgets::badge(ui, &format!("{:.1}{}", rule.cooldown_seconds, loc.rules_badge_cooldown_suffix), t.accent_ink);
 
@@ -232,10 +237,24 @@ fn render_rule_card(
                         state.delete_rule(&rule.id);
                     }
 
-                    // 2. Toggle Pause / Resume (always visible, directly to the left of Delete)
-                    let toggle_label = if rule.is_enabled { loc.rules_btn_pause } else { loc.rules_btn_resume };
-                    if widgets::button(ui, toggle_label, Kind::Secondary, 0.0).clicked() {
-                        state.toggle_rule(&rule.id, !rule.is_enabled);
+                    // 2. Action button: "RUN" / "STOP" for manual rules or test runs, Pause / Resume for automatic rules
+                    let is_test_running = state.active_test_runs.contains(&rule.id);
+                    if is_manual || is_test_running {
+                        let is_running = exec_opt.is_some() || is_test_running;
+                        let btn_label = if is_running { loc.rules_btn_stop } else { loc.rules_btn_run_manual };
+                        let btn_kind = if is_running { Kind::Danger } else { Kind::Primary };
+                        if widgets::button(ui, btn_label, btn_kind, 0.0).clicked() {
+                            if is_running {
+                                state.stop_rule_execution(&rule.id);
+                            } else {
+                                state.test_run_rule(&rule.id);
+                            }
+                        }
+                    } else {
+                        let toggle_label = if rule.is_enabled { loc.rules_btn_pause } else { loc.rules_btn_resume };
+                        if widgets::button(ui, toggle_label, Kind::Secondary, 0.0).clicked() {
+                            state.toggle_rule(&rule.id, !rule.is_enabled);
+                        }
                     }
 
                     // 3. More icon button (located to the left of Pause / Resume)
@@ -248,9 +267,12 @@ fn render_rule_card(
                     let k = ui.ctx().animate_bool_with_time_and_easing(anim_id, is_expanded, 0.20, egui::emath::easing::cubic_out);
                     if k > 0.001 {
                         let btn_spacing = 6.0;
+                        let is_running = exec_opt.is_some() || is_test_running;
+                        let test_label = if is_running { loc.rules_btn_stop } else { loc.rules_btn_test_run };
+                        let test_kind = if is_running { Kind::Danger } else { Kind::Secondary };
                         let w_edit = widgets::button_width(ui, loc.rules_btn_edit, 0.0);
                         let w_clone = widgets::button_width(ui, loc.rules_btn_clone, 0.0);
-                        let w_test = widgets::button_width(ui, loc.rules_btn_test_run, 0.0);
+                        let w_test = widgets::button_width(ui, test_label, 0.0);
                         let w_share = widgets::button_width(ui, loc.rules_btn_copy_single, 0.0);
                         let full_w = w_edit + w_clone + w_test + w_share + 3.0 * btn_spacing;
                         let anim_w = (full_w * k).min(full_w);
@@ -276,12 +298,16 @@ fn render_rule_card(
                                     state.clone_rule(rule);
                                 }
 
-                                // Test Run
-                                if widgets::button(ui, loc.rules_btn_test_run, Kind::Secondary, 0.0)
+                                // Test Run / Stop
+                                if widgets::button(ui, test_label, test_kind, 0.0)
                                     .on_hover_text(loc.rules_btn_test_run_tip)
                                     .clicked()
                                 {
-                                    state.test_run_rule(&rule.id);
+                                    if is_running {
+                                        state.stop_rule_execution(&rule.id);
+                                    } else {
+                                        state.test_run_rule(&rule.id);
+                                    }
                                 }
 
                                 // Share / Copy Single Rule
@@ -540,6 +566,14 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
                 crate::models::FileSystemOperation::AppendText => format!("APPEND {}", fname),
             }
         }
+        Action::Overlay { operation, .. } => {
+            match operation {
+                crate::models::OverlayOperation::Toggle => "TOGGLE OVERLAY".to_string(),
+                crate::models::OverlayOperation::Flash => "FLASH OVERLAY".to_string(),
+                crate::models::OverlayOperation::Show => "SHOW OVERLAY".to_string(),
+                crate::models::OverlayOperation::Hide => "HIDE OVERLAY".to_string(),
+            }
+        }
     }
 }
 
@@ -631,7 +665,7 @@ fn render_pipeline_summary(
                     crate::models::ScheduleType::AppShutdown => loc.rules_summary_trigger_shutdown.to_string(),
                 }
             }
-            None => loc.rules_summary_trigger_none.to_string(),
+            Some(crate::models::Trigger::Manual) | None => loc.rules_summary_trigger_manual.to_string(),
         };
 
         widgets::badge(ui, &trigger_text, t.faint);

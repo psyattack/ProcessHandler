@@ -12,14 +12,17 @@ use theme::{Tokens, apply_theme};
 use views::action_catalog_modal::render_action_catalog_modal;
 use views::analytics_view::render_analytics_view;
 use views::changelog_modal::render_changelog_modal;
+use views::condition_catalog_modal::render_condition_catalog_modal;
 use views::guide_modal::render_guide_modal;
 use views::header_bar::render_header_bar;
 use views::inspector::render_inspector_drawer;
 use views::macro_modal::render_macro_modal;
+use views::overlay_modal::render_overlay_modal;
 use views::process_picker_modal::render_process_picker_modal;
 use views::rules_view::render_rules_view;
 use views::script_modal::render_script_editor_canvas;
 use views::settings_view::render_settings_view;
+use views::trigger_catalog_modal::render_trigger_catalog_modal;
 use crate::config::{AppConfig, WindowState};
 
 pub struct ProcessHandlerApp {
@@ -223,6 +226,12 @@ impl App for ProcessHandlerApp {
         // 4. Sliding Inspector Drawer (slides in from right with cubic easing)
         render_inspector_drawer(&ctx, &mut self.state);
 
+        // 4.1. Trigger Catalog Modal (library for selecting rule trigger)
+        render_trigger_catalog_modal(&ctx, &mut self.state);
+
+        // 4.2. Pre-condition Catalog Modal (library for selecting pre-conditions)
+        render_condition_catalog_modal(&ctx, &mut self.state);
+
         // 5. Action Catalog Modal (library for selecting rule actions)
         render_action_catalog_modal(&ctx, &mut self.state);
 
@@ -234,6 +243,9 @@ impl App for ProcessHandlerApp {
 
         // 8. Centered Interactive Macro Studio Modal (record / edit keystrokes & mouse)
         render_macro_modal(&ctx, &mut self.state);
+
+        // 8.1. Centered Interactive Overlay Studio Modal (visual WYSIWYG overlay designer)
+        render_overlay_modal(&ctx, &mut self.state);
 
         // 9. Centered Changelog & Release Notes Modal
         render_changelog_modal(&ctx, &mut self.state);
@@ -289,6 +301,7 @@ impl App for ProcessHandlerApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.state.cleanup_on_exit();
         if let Some(ws) = &self.last_window_state {
             persist_window_state(ws);
         }
@@ -297,6 +310,7 @@ impl App for ProcessHandlerApp {
 
 impl Drop for ProcessHandlerApp {
     fn drop(&mut self) {
+        self.state.cleanup_on_exit();
         if let Some(ws) = &self.last_window_state {
             persist_window_state(ws);
         }

@@ -57,6 +57,10 @@ pub enum ActionCompletionEvent {
         rule_id: String,
         icon_path: String,
     },
+    IncrementExecutionCount {
+        rule_id: String,
+        max_executions: Option<u64>,
+    },
 }
 
 pub struct DaemonEngine {
@@ -68,6 +72,8 @@ pub struct DaemonEngine {
     pub rule_last_triggered: HashMap<String, Instant>,
     pub active_rule_pids: HashMap<String, HashSet<u32>>,
     pub active_executions: HashMap<u64, ActiveExecutionItem>,
+    pub rule_overlay_map: HashMap<String, Vec<String>>,
+    pub active_test_recurring_rules: HashMap<String, (tokio::task::AbortHandle, u64)>,
     pub analytics: AnalyticsSummary,
     pub last_foreground_pid: Option<u32>,
     pub hotkey_handle: Option<crate::daemon::hotkeys::HotkeyHandle>,
@@ -110,6 +116,8 @@ impl DaemonEngine {
             rule_last_triggered: HashMap::new(),
             active_rule_pids: HashMap::new(),
             active_executions: HashMap::new(),
+            rule_overlay_map: HashMap::new(),
+            active_test_recurring_rules: HashMap::new(),
             analytics: AnalyticsSummary::default(),
             last_foreground_pid: None,
             hotkey_handle: None,
@@ -121,12 +129,79 @@ impl DaemonEngine {
     }
 
     pub fn is_rule_executing(&self, rule_id: &str) -> bool {
-        self.active_executions.values().any(|e| e.rule_id == rule_id)
+        if self.active_executions.values().any(|e| e.rule_id == rule_id)
             || self.execution_abort_handles.values().any(|(r_id, _)| r_id == rule_id)
+            || self.active_test_recurring_rules.contains_key(rule_id)
             || self.active_bound_processes.iter().any(|bp| bp.rule_id == rule_id)
+        {
+            return true;
+        }
+
+        let active_ovs = crate::daemon::overlay_manager::get_active_overlay_ids();
+        if !active_ovs.is_empty() {
+            if let Some(rule) = self.config.rules.iter().find(|r| r.id == rule_id) {
+                return rule.actions.iter().any(|a| match a {
+                    Action::Overlay { overlay_id, custom_overlay, .. } => {
+                        let id = custom_overlay.as_ref().map(|o| o.id.as_str()).unwrap_or(overlay_id.as_str());
+                        active_ovs.contains(id)
+                    }
+                    _ => false,
+                });
+            }
+        }
+
+        false
+    }
+
+    pub fn extract_rule_overlay_ids(rule: &Rule) -> Vec<String> {
+        let mut ids = Vec::new();
+        fn collect_action_overlays(action: &crate::models::Action, ids: &mut Vec<String>) {
+            match action {
+                crate::models::Action::Overlay { overlay_id, custom_overlay, .. } => {
+                    let id = custom_overlay.as_ref().map(|o| o.id.clone()).unwrap_or_else(|| overlay_id.clone());
+                    ids.push(id);
+                }
+                crate::models::Action::IfElse { then_actions, else_if_branches, else_actions, .. } => {
+                    for a in then_actions {
+                        collect_action_overlays(a, ids);
+                    }
+                    for b in else_if_branches {
+                        for a in &b.actions {
+                            collect_action_overlays(a, ids);
+                        }
+                    }
+                    for a in else_actions {
+                        collect_action_overlays(a, ids);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for a in &rule.actions {
+            collect_action_overlays(a, &mut ids);
+        }
+        for a in &rule.on_exit_actions {
+            collect_action_overlays(a, &mut ids);
+        }
+        ids
+    }
+
+    pub fn hide_rule_overlays(rule: &Rule) {
+        for id in Self::extract_rule_overlay_ids(rule) {
+            crate::daemon::overlay_manager::hide_overlay(&id);
+        }
     }
 
     pub fn stop_rule_execution(&mut self, rule_id: &str) {
+        // 1. Abort any active recurring test loop
+        if let Some((abort_handle, exec_id)) = self.active_test_recurring_rules.remove(rule_id) {
+            abort_handle.abort();
+            self.active_executions.remove(&exec_id);
+            self.execution_abort_handles.remove(&exec_id);
+            self.log("INFO", "RULE", &format!("Stopped recurring test run of rule: {}", rule_id));
+        }
+
+        // 2. Abort all execution handles matching rule_id
         let to_abort: Vec<u64> = self.execution_abort_handles
             .iter()
             .filter_map(|(&id, (r_id, _))| if r_id == rule_id { Some(id) } else { None })
@@ -146,6 +221,35 @@ impl DaemonEngine {
             .collect();
         for id in to_remove_active {
             self.active_executions.remove(&id);
+        }
+
+        // 3. Pause/disable rule if it was enabled in config so background tick_schedule will not keep firing
+        let mut disabled_in_config = false;
+        if let Some(rule) = self.config.rules.iter_mut().find(|r| r.id == rule_id) {
+            if rule.is_enabled {
+                rule.is_enabled = false;
+                disabled_in_config = true;
+            }
+            Self::hide_rule_overlays(rule);
+        }
+        if disabled_in_config {
+            let _ = self.config.save_to_file(AppConfig::config_path());
+            if let Some(h) = &self.hotkey_handle {
+                h.reload(&self.config.rules);
+            }
+            self.log("INFO", "RULE", &format!("Paused rule '{}' upon user stop", rule_id));
+        }
+
+        // 4. Hide any tracked overlays associated with this rule (including draft rules)
+        if let Some(ids) = self.rule_overlay_map.remove(rule_id) {
+            for id in ids {
+                crate::daemon::overlay_manager::hide_overlay(&id);
+            }
+        }
+
+        // 5. Hide any active overlays associated with this rule from config
+        if let Some(rule) = self.config.rules.iter().find(|r| r.id == rule_id) {
+            Self::hide_rule_overlays(rule);
         }
 
         crate::daemon::actions::release_all_simulated_inputs();
@@ -176,9 +280,14 @@ impl DaemonEngine {
                         item.is_exit = is_exit;
                     }
                 }
-                ActionCompletionEvent::RuleExecutionFinished { execution_id, .. } => {
+                ActionCompletionEvent::RuleExecutionFinished { execution_id, _rule_id } => {
                     self.active_executions.remove(&execution_id);
                     self.execution_abort_handles.remove(&execution_id);
+                    if let Some((_, e_id)) = self.active_test_recurring_rules.get(&_rule_id) {
+                        if *e_id == execution_id {
+                            self.active_test_recurring_rules.remove(&_rule_id);
+                        }
+                    }
                 }
                 ActionCompletionEvent::SetRuleCustomIcon { rule_id, icon_path } => {
                     let mut updated_name = None;
@@ -191,6 +300,28 @@ impl DaemonEngine {
                     if let Some(name) = updated_name {
                         let _ = self.config.save_to_file(AppConfig::config_path());
                         self.log("INFO", "RULE", &format!("Set custom icon for rule '{}' from process: {}", name, icon_path));
+                    }
+                }
+                ActionCompletionEvent::IncrementExecutionCount { rule_id, max_executions } => {
+                    self.analytics.total_executions += 1;
+                    let mut quota_msg = None;
+                    if let Some(r) = self.config.rules.iter_mut().find(|r| r.id == rule_id) {
+                        r.execution_count += 1;
+                        r.last_executed_at = Some(chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+                        if let Some(limit) = max_executions {
+                            if r.execution_count >= limit {
+                                r.is_enabled = false;
+                                quota_msg = Some(format!(
+                                    "Rule '{}' completed quota ({}/{}) and has been auto-paused.",
+                                    r.name, r.execution_count, limit
+                                ));
+                            }
+                        }
+                        let _ = self.config.save_to_file(AppConfig::config_path());
+                    }
+                    if let Some(msg) = quota_msg {
+                        self.stop_rule_execution(&rule_id);
+                        self.log("INFO", "RULE", &msg);
                     }
                 }
             }
@@ -302,6 +433,12 @@ impl DaemonEngine {
                     }
                     crate::models::SystemEventType::SessionUnlock => {
                         !crate::daemon::system_events::is_session_locked()
+                    }
+                    crate::models::SystemEventType::NetworkConnected => {
+                        crate::daemon::system_events::is_network_connected()
+                    }
+                    crate::models::SystemEventType::NetworkDisconnected => {
+                        !crate::daemon::system_events::is_network_connected()
                     }
                     crate::models::SystemEventType::SystemSleep => false,
                     crate::models::SystemEventType::SystemResume => true,
@@ -560,6 +697,9 @@ impl DaemonEngine {
             if !rule.is_enabled {
                 continue;
             }
+            if self.active_test_recurring_rules.contains_key(&rule.id) {
+                continue;
+            }
 
             if let Some(Trigger::SystemEvent { event_type, .. }) = &rule.trigger {
                 if *event_type == event {
@@ -577,6 +717,9 @@ impl DaemonEngine {
 
         for rule in &rules {
             if !rule.is_enabled {
+                continue;
+            }
+            if self.active_test_recurring_rules.contains_key(&rule.id) {
                 continue;
             }
 
@@ -869,7 +1012,12 @@ impl DaemonEngine {
             }
         }
 
-        if context_name != "MANUAL_TEST" && !rule.conditions.is_empty() && !Self::evaluate_rule_conditions(&rule.conditions) {
+        if !rule.conditions.is_empty() && !Self::evaluate_rule_conditions(&rule.conditions) {
+            self.log(
+                "WARN",
+                "RULE",
+                &format!("Rule '{}' triggered by {}, but conditions were not met. Skipping.", rule.name, context_name),
+            );
             return None;
         }
 
@@ -898,6 +1046,11 @@ impl DaemonEngine {
 
         if rule.actions.is_empty() {
             return None;
+        }
+
+        let ov_ids = Self::extract_rule_overlay_ids(rule);
+        if !ov_ids.is_empty() {
+            self.rule_overlay_map.insert(rule.id.clone(), ov_ids);
         }
 
         let mut ctx = HashMap::new();
@@ -1147,6 +1300,251 @@ impl DaemonEngine {
         }
     }
 
+    pub async fn emulate_rule_trigger(
+        &mut self,
+        rule: &Rule,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        self.drain_action_events();
+
+        if self.is_rule_executing(&rule.id) {
+            self.stop_rule_execution(&rule.id);
+        }
+
+        let ov_ids = Self::extract_rule_overlay_ids(rule);
+        if !ov_ids.is_empty() {
+            self.rule_overlay_map.insert(rule.id.clone(), ov_ids);
+        }
+
+        if let Some(limit) = rule.max_executions {
+            if rule.execution_count >= limit {
+                self.log(
+                    "WARN",
+                    "RULE",
+                    &format!("Rule '{}' reached execution limit ({}/{}). Pausing.", rule.name, rule.execution_count, limit),
+                );
+                return None;
+            }
+        }
+
+        if !rule.conditions.is_empty() && !Self::evaluate_rule_conditions(&rule.conditions) {
+            self.log(
+                "WARN",
+                "RULE",
+                &format!("Rule '{}' test/run skipped: conditions were not met.", rule.name),
+            );
+            return None;
+        }
+
+        if rule.actions.is_empty() {
+            return None;
+        }
+
+        // Clear cooldown so manual/test run triggers immediately
+        self.rule_last_triggered.remove(&rule.id);
+
+        match &rule.trigger {
+            Some(Trigger::Schedule { schedule_type: ScheduleType::Interval, interval_sec, .. }) if *interval_sec > 0 => {
+                let interval_duration = tokio::time::Duration::from_secs(*interval_sec);
+                let context_name = format!("Schedule Interval {}s", interval_sec);
+                self.spawn_recurring_execution(rule, interval_duration, &context_name)
+            }
+            Some(Trigger::GlobalHotkey { hold_mode: true, repeat_while_held: true, .. }) => {
+                let interval_duration = tokio::time::Duration::from_millis(100);
+                self.spawn_recurring_execution(rule, interval_duration, "Global Hotkey (Loop)")
+            }
+            Some(Trigger::Process { process_name, match_mode, .. }) => {
+                let pid = ProcessWatcher::snapshot_process_map()
+                    .into_iter()
+                    .find(|(_, name)| Self::matches_process(process_name, name, *match_mode))
+                    .map(|(p, _)| p)
+                    .unwrap_or(0);
+                self.try_execute_rule_with_context(rule, process_name, pid, HashMap::new()).await
+            }
+            Some(Trigger::WindowFocus { process_name, .. }) => {
+                let pid = ProcessWatcher::snapshot_process_map()
+                    .into_iter()
+                    .find(|(_, name)| Self::matches_process(process_name, name, ProcessMatchMode::Exact))
+                    .map(|(p, _)| p)
+                    .unwrap_or(0);
+                self.try_execute_rule_with_context(rule, process_name, pid, HashMap::new()).await
+            }
+            Some(Trigger::ResourceThreshold { process_name, .. }) => {
+                let pid = ProcessWatcher::snapshot_process_map()
+                    .into_iter()
+                    .find(|(_, name)| Self::matches_process(process_name, name, ProcessMatchMode::Exact))
+                    .map(|(p, _)| p)
+                    .unwrap_or(0);
+                self.try_execute_rule_with_context(rule, process_name, pid, HashMap::new()).await
+            }
+            Some(Trigger::SystemEvent { event_type, .. }) => {
+                let ctx_name = format!("System Event ({:?})", event_type);
+                self.try_execute_rule_with_context(rule, &ctx_name, 0, HashMap::new()).await
+            }
+            Some(Trigger::FileWatcher { folder_path, .. }) => {
+                let ctx_name = format!("File Watcher ({})", folder_path);
+                self.try_execute_rule_with_context(rule, &ctx_name, 0, HashMap::new()).await
+            }
+            Some(Trigger::Webhook { endpoint_path }) => {
+                let ctx_name = format!("Webhook ({})", endpoint_path);
+                self.try_execute_rule_with_context(rule, &ctx_name, 0, HashMap::new()).await
+            }
+            Some(Trigger::Schedule { schedule_type, .. }) => {
+                let ctx_name = format!("{:?} Schedule", schedule_type);
+                self.try_execute_rule_with_context(rule, &ctx_name, 0, HashMap::new()).await
+            }
+            _ => {
+                self.try_execute_rule_with_context(rule, "Manual Run", 0, HashMap::new()).await
+            }
+        }
+    }
+
+    fn spawn_recurring_execution(
+        &mut self,
+        rule: &Rule,
+        interval_duration: tokio::time::Duration,
+        context_name: &str,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        self.rule_last_triggered.insert(rule.id.clone(), Instant::now());
+        self.log("TRIGGER", "RULE", &format!("Rule '{}' recurring execution started ({})", rule.name, context_name));
+
+        let actions = rule.actions.clone();
+        let conditions = rule.conditions.clone();
+        let rule_name = rule.name.clone();
+        let rule_id = rule.id.clone();
+        let stop_on_error = rule.stop_on_error;
+        let context_name = context_name.to_string();
+        let tx = self.action_tx.clone();
+        let max_executions = rule.max_executions;
+        let mut current_runs = rule.execution_count;
+
+        static EXECUTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let execution_id = EXECUTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let total_steps = actions.len();
+
+        let _ = tx.send(ActionCompletionEvent::RuleExecutionStarted {
+            execution_id,
+            rule_id: rule_id.clone(),
+            step_index: 0,
+            total_steps,
+            is_exit: false,
+        });
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let spawn_rule_id = rule_id.clone();
+            let join_handle = handle.spawn(async move {
+                struct ExecGuard {
+                    id: u64,
+                    r_id: String,
+                    tx: mpsc::UnboundedSender<ActionCompletionEvent>,
+                }
+                impl Drop for ExecGuard {
+                    fn drop(&mut self) {
+                        crate::daemon::actions::release_all_simulated_inputs();
+                        let _ = self.tx.send(ActionCompletionEvent::RuleExecutionFinished {
+                            execution_id: self.id,
+                            _rule_id: self.r_id.clone(),
+                        });
+                    }
+                }
+                let _guard = ExecGuard { id: execution_id, r_id: spawn_rule_id.clone(), tx: tx.clone() };
+
+                loop {
+                    // Check conditions on each cycle
+                    if !conditions.is_empty() && !DaemonEngine::evaluate_rule_conditions(&conditions) {
+                        let _ = tx.send(ActionCompletionEvent::Log {
+                            level: "WARN".to_string(),
+                            category: "RULE".to_string(),
+                            message: format!("Rule '{}' triggered by {}, but conditions were not met. Skipping cycle.", rule_name, context_name),
+                        });
+                    } else {
+                        let mut ctx = HashMap::new();
+                        ctx.insert("ProcessName".into(), context_name.clone());
+                        ctx.insert("ProcessId".into(), "0".into());
+                        ctx.insert("Timestamp".into(), chrono::Local::now().to_rfc3339());
+
+                        #[cfg(windows)]
+                        {
+                            use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+                            let hwnd = unsafe { GetForegroundWindow() };
+                            if !hwnd.0.is_null() {
+                                let mut buf = [0u16; 512];
+                                let len = unsafe { GetWindowTextW(hwnd, &mut buf) };
+                                if len > 0 {
+                                    let title = String::from_utf16_lossy(&buf[..len as usize]);
+                                    ctx.insert("WindowTitle".into(), title);
+                                }
+                            }
+                        }
+
+                        let mut had_error = false;
+                        for (step_idx, action) in actions.iter().enumerate() {
+                            let _ = tx.send(ActionCompletionEvent::RuleExecutionStep {
+                                execution_id,
+                                _rule_id: spawn_rule_id.clone(),
+                                step_index: step_idx,
+                                total_steps,
+                                is_exit: false,
+                            });
+
+                            match ActionRunner::execute_with_output(action, &ctx).await {
+                                Ok(out_opt) => {
+                                    if let Some(out) = out_opt {
+                                        ctx.insert("PrevOutput".to_string(), out.clone());
+                                        ctx.insert(format!("Step{}.Output", step_idx + 1), out);
+                                    }
+                                }
+                                Err(err) => {
+                                    let _ = tx.send(ActionCompletionEvent::Log {
+                                        level: "ERROR".to_string(),
+                                        category: "ACTION".to_string(),
+                                        message: format!("Action failed in '{}': {}", rule_name, err),
+                                    });
+                                    if stop_on_error {
+                                        let _ = tx.send(ActionCompletionEvent::Log {
+                                            level: "WARN".to_string(),
+                                            category: "RULE".to_string(),
+                                            message: format!("Pipeline stopped for rule '{}' at step {} due to error", rule_name, step_idx + 1),
+                                        });
+                                        had_error = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if had_error {
+                            break;
+                        }
+
+                        current_runs += 1;
+                        let _ = tx.send(ActionCompletionEvent::IncrementExecutionCount {
+                            rule_id: spawn_rule_id.clone(),
+                            max_executions,
+                        });
+
+                        if let Some(limit) = max_executions {
+                            if current_runs >= limit {
+                                break;
+                            }
+                        }
+                    }
+
+                    tokio::time::sleep(interval_duration).await;
+                }
+            });
+
+            self.execution_abort_handles.insert(execution_id, (rule_id.clone(), join_handle.abort_handle()));
+            self.active_test_recurring_rules.insert(rule_id.clone(), (join_handle.abort_handle(), execution_id));
+            Some(join_handle)
+        } else {
+            let _ = tx.send(ActionCompletionEvent::RuleExecutionFinished {
+                execution_id,
+                _rule_id: rule_id,
+            });
+            None
+        }
+    }
+
     pub async fn handle_request(&mut self, req: IpcRequest) -> IpcResponse {
         self.drain_action_events();
         match req {
@@ -1166,6 +1564,7 @@ impl DaemonEngine {
                 if tray_changed {
                     crate::daemon::tray::update_tray_icon(new_tray_path);
                 }
+                crate::daemon::tray::set_tray_visible(!self.config.hide_tray_icon);
                 if let Some(h) = &self.hotkey_handle {
                     h.reload(&self.config.rules);
                 }
@@ -1188,6 +1587,9 @@ impl DaemonEngine {
 
             IpcRequest::DeleteRule(id) => {
                 self.stop_rule_execution(&id);
+                if let Some(rule) = self.config.rules.iter().find(|r| r.id == id) {
+                    Self::hide_rule_overlays(rule);
+                }
                 self.config.rules.retain(|r| r.id != id);
                 let _ = self.config.save_to_file(AppConfig::config_path());
                 if let Some(h) = &self.hotkey_handle {
@@ -1210,13 +1612,21 @@ impl DaemonEngine {
                 IpcResponse::Ok
             }
 
-            IpcRequest::TestRunRule(id) => {
-                if let Some(rule) = self.config.rules.iter().find(|r| r.id == id).cloned() {
-                    let _ = self.try_execute_rule(&rule, "MANUAL_TEST", 0).await;
-                    IpcResponse::Ok
+            IpcRequest::TestRunRule { id, rule } => {
+                let target_rule = if let Some(r) = rule {
+                    *r
+                } else if let Some(r) = self.config.rules.iter().find(|r| r.id == id).cloned() {
+                    r
                 } else {
-                    IpcResponse::Error("Rule not found".into())
-                }
+                    return IpcResponse::Error("Rule not found".into());
+                };
+                let _ = self.emulate_rule_trigger(&target_rule).await;
+                IpcResponse::Ok
+            }
+
+            IpcRequest::StopRuleExecution(id) => {
+                self.stop_rule_execution(&id);
+                IpcResponse::Ok
             }
 
             IpcRequest::GetProcesses => {
@@ -1296,8 +1706,41 @@ impl DaemonEngine {
                 IpcResponse::TestStepResult(res)
             }
 
+            IpcRequest::SaveOverlay(overlay) => {
+                if let Some(existing) = self.config.overlays.iter_mut().find(|o| o.id == overlay.id) {
+                    *existing = overlay;
+                } else {
+                    self.config.overlays.push(overlay);
+                }
+                let _ = self.config.save_to_file(AppConfig::config_path());
+                IpcResponse::Ok
+            }
+
+            IpcRequest::DeleteOverlay(id) => {
+                crate::daemon::overlay_manager::hide_overlay(&id);
+                self.config.overlays.retain(|o| o.id != id);
+                let _ = self.config.save_to_file(AppConfig::config_path());
+                IpcResponse::Ok
+            }
+
+            IpcRequest::ShowOverlayPreview { overlay, calibration_mode } => {
+                crate::daemon::overlay_manager::show_overlay(&overlay, calibration_mode, None);
+                IpcResponse::Ok
+            }
+
+            IpcRequest::HideOverlayPreview(id) => {
+                crate::daemon::overlay_manager::hide_overlay(&id);
+                IpcResponse::Ok
+            }
+
+            IpcRequest::GetOverlayPosition(id) => {
+                let pos = crate::daemon::overlay_manager::get_calibrated_position(&id);
+                IpcResponse::OverlayPosition(pos)
+            }
+
             IpcRequest::ShutdownDaemon => {
                 crate::daemon::actions::release_all_simulated_inputs();
+                crate::daemon::overlay_manager::hide_all();
                 self.execute_shutdown_rules().await;
                 crate::daemon::actions::release_all_simulated_inputs();
                 std::process::exit(0);
@@ -1374,6 +1817,85 @@ impl DaemonEngine {
             }
         }
 
+        // Track rules with active showing overlays
+        let active_overlay_ids = crate::daemon::overlay_manager::get_active_overlay_ids();
+        if !active_overlay_ids.is_empty() {
+            for rule in &self.config.rules {
+                if !active_rule_executions.contains_key(&rule.id) {
+                    let overlay_step = rule.actions.iter().enumerate().find_map(|(idx, a)| {
+                        match a {
+                            Action::Overlay { overlay_id, custom_overlay, .. } => {
+                                let id = custom_overlay.as_ref().map(|o| o.id.as_str()).unwrap_or(overlay_id.as_str());
+                                if active_overlay_ids.contains(id) {
+                                    Some(idx)
+                                } else {
+                                    None
+                                }
+                            }
+                            Action::IfElse { then_actions, else_if_branches, else_actions, .. } => {
+                                let in_then = then_actions.iter().any(|sub| match sub {
+                                    Action::Overlay { overlay_id, custom_overlay, .. } => {
+                                        let id = custom_overlay.as_ref().map(|o| o.id.as_str()).unwrap_or(overlay_id.as_str());
+                                        active_overlay_ids.contains(id)
+                                    }
+                                    _ => false,
+                                });
+                                let in_elseif = else_if_branches.iter().any(|b| b.actions.iter().any(|sub| match sub {
+                                    Action::Overlay { overlay_id, custom_overlay, .. } => {
+                                        let id = custom_overlay.as_ref().map(|o| o.id.as_str()).unwrap_or(overlay_id.as_str());
+                                        active_overlay_ids.contains(id)
+                                    }
+                                    _ => false,
+                                }));
+                                let in_else = else_actions.iter().any(|sub| match sub {
+                                    Action::Overlay { overlay_id, custom_overlay, .. } => {
+                                        let id = custom_overlay.as_ref().map(|o| o.id.as_str()).unwrap_or(overlay_id.as_str());
+                                        active_overlay_ids.contains(id)
+                                    }
+                                    _ => false,
+                                });
+                                if in_then || in_elseif || in_else {
+                                    Some(idx)
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    });
+
+                    if let Some(step_idx) = overlay_step {
+                        active_rule_executions.insert(
+                            rule.id.clone(),
+                            crate::ipc::ActiveRuleExecutionState {
+                                active_count: 1,
+                                current_step: step_idx,
+                                total_steps: rule.actions.len(),
+                                is_exit: false,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        // Track rules in active recurring test execution (e.g. interval triggers)
+        for r_id in self.active_test_recurring_rules.keys() {
+            if !active_rule_executions.contains_key(r_id) {
+                let total_steps = self.config.rules.iter().find(|r| &r.id == r_id)
+                    .map(|r| r.actions.len().max(1))
+                    .unwrap_or(1);
+                active_rule_executions.insert(r_id.clone(), crate::ipc::ActiveRuleExecutionState {
+                    active_count: 1,
+                    current_step: 0,
+                    total_steps,
+                    is_exit: false,
+                });
+            }
+        }
+
+        let active_test_rule_ids = self.active_test_recurring_rules.keys().cloned().collect();
+
         DaemonState {
             autorun_enabled,
             uptime_secs: self.start_time.elapsed().as_secs(),
@@ -1384,6 +1906,8 @@ impl DaemonEngine {
             config: self.config.clone(),
             logs: self.logs.clone(),
             active_rule_executions,
+            active_overlay_ids,
+            active_test_rule_ids,
             analytics: self.analytics.clone(),
         }
     }
@@ -2128,6 +2652,84 @@ mod tests {
         assert!(res.is_err(), "Aborted task must return join error");
     }
 
+    #[tokio::test]
+    async fn test_overlay_rule_execution_tracking_and_stop() {
+        crate::daemon::overlay_manager::init();
+        let overlay_id = "test_overlay_tracking_id".to_string();
+        let rule = Rule {
+            id: "overlay_rule".into(),
+            name: "Overlay Rule".into(),
+            description: String::new(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: None,
+            actions: vec![
+                Action::PlaySound { file_path: "".into(), play_beep: false, beep_frequency: None, beep_duration_ms: None },
+                Action::Overlay {
+                    overlay_id: overlay_id.clone(),
+                    custom_overlay: None,
+                    operation: crate::models::OverlayOperation::Toggle,
+                    override_text: None,
+                    duration_ms: None,
+                },
+            ],
+            on_exit_actions: Vec::new(),
+            execution_count: 0,
+            custom_icon_path: None,
+            auto_process_icon: false,
+            ..Default::default()
+        };
+
+        let config = AppConfig {
+            rules: vec![rule],
+            ..Default::default()
+        };
+
+        let mut engine = DaemonEngine::new(config);
+
+        // Initially overlay is not active
+        let state0 = engine.get_current_state();
+        assert!(!state0.active_rule_executions.contains_key("overlay_rule"));
+        assert!(!engine.is_rule_executing("overlay_rule"));
+
+        // Simulate overlay becoming active in overlay_manager
+        crate::daemon::overlay_manager::show_overlay(
+            &crate::models::OverlayDefinition {
+                id: overlay_id.clone(),
+                ..Default::default()
+            },
+            false,
+            None,
+        );
+
+        // Allow background thread to process Show command
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Overlay is active in overlay_manager
+        let active_ovs = crate::daemon::overlay_manager::get_active_overlay_ids();
+        assert!(active_ovs.contains(&overlay_id));
+
+        // Rule MUST report as executing, pointing to step 1 (the Action::Overlay step)
+        assert!(engine.is_rule_executing("overlay_rule"));
+        let state1 = engine.get_current_state();
+        assert!(state1.active_rule_executions.contains_key("overlay_rule"));
+        let exec = &state1.active_rule_executions["overlay_rule"];
+        assert_eq!(exec.current_step, 1);
+        assert_eq!(exec.total_steps, 2);
+        assert!(state1.active_overlay_ids.contains(&overlay_id));
+
+        // Stopping the rule MUST hide the overlay
+        engine.stop_rule_execution("overlay_rule");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let active_ovs_after = crate::daemon::overlay_manager::get_active_overlay_ids();
+        assert!(!active_ovs_after.contains(&overlay_id));
+        assert!(!engine.is_rule_executing("overlay_rule"));
+
+        let state_after = engine.get_current_state();
+        assert!(!state_after.active_rule_executions.contains_key("overlay_rule"));
+    }
+
     #[test]
     fn test_condition_evaluation_logic() {
         let temp_dir = std::env::temp_dir();
@@ -2223,10 +2825,63 @@ mod tests {
         let handle = engine.try_execute_rule(&rule, "AUTO_TRIGGER", 0).await;
         assert!(handle.is_none(), "Rule execution must be skipped when preconditions are not met");
 
-        // MANUAL_TEST bypasses preconditions so users can test steps directly
+        // Preconditions gate rule execution consistently, including in manual/test runs
         let manual_handle = engine.try_execute_rule(&rule, "MANUAL_TEST", 0).await;
-        assert!(manual_handle.is_some(), "Manual test should execute");
-        let _ = manual_handle.unwrap().await;
+        assert!(manual_handle.is_none(), "Manual test must also respect preconditions");
+
+        let test_run_handle = engine.emulate_rule_trigger(&rule).await;
+        assert!(test_run_handle.is_none(), "Test run emulation must skip when conditions fail");
+
+        // When conditions are met (e.g. creating the file):
+        let _ = std::fs::write(&non_existing_path, b"ok");
+        let satisfied_handle = engine.emulate_rule_trigger(&rule).await;
+        assert!(satisfied_handle.is_some(), "Test run emulation must execute when conditions are met");
+        let _ = satisfied_handle.unwrap().await;
+        let _ = std::fs::remove_file(&non_existing_path);
+    }
+
+    #[tokio::test]
+    async fn test_emulate_rule_trigger_interval() {
+        let config = AppConfig::default();
+        let rule = Rule {
+            id: "interval_test_rule".into(),
+            name: "Interval Emulation Rule".into(),
+            description: "".into(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: Some(Trigger::Schedule {
+                schedule_type: ScheduleType::Interval,
+                interval_sec: 1,
+                daily_time: None,
+                days_of_week: Vec::new(),
+                day_of_month: None,
+                delay_sec: 0,
+                target_datetime: None,
+            }),
+            actions: vec![
+                Action::Delay { seconds: 0.05 },
+            ],
+            ..Default::default()
+        };
+
+        let mut engine = DaemonEngine::new(config);
+        let handle = engine.emulate_rule_trigger(&rule).await;
+        assert!(handle.is_some(), "Interval rule emulation must spawn a task");
+        assert!(engine.is_rule_executing(&rule.id), "Rule must be tracked as executing");
+        assert!(engine.active_test_recurring_rules.contains_key(&rule.id));
+
+        let state = engine.get_current_state();
+        assert!(state.active_test_rule_ids.contains(&rule.id));
+        assert!(state.active_rule_executions.contains_key(&rule.id));
+
+        // Stopping execution cleanly terminates the loop
+        engine.stop_rule_execution(&rule.id);
+        assert!(!engine.is_rule_executing(&rule.id), "Rule must not be executing after stop");
+        assert!(!engine.active_test_recurring_rules.contains_key(&rule.id));
+
+        let state_after = engine.get_current_state();
+        assert!(!state_after.active_test_rule_ids.contains(&rule.id));
+        assert!(!state_after.active_rule_executions.contains_key(&rule.id));
     }
 
     #[tokio::test]

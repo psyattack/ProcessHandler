@@ -26,7 +26,7 @@ struct CatalogItem {
     constructor: fn() -> Action,
 }
 
-const CATALOG_ITEMS: [CatalogItem; 23] = [
+const CATALOG_ITEMS: [CatalogItem; 24] = [
     // 1. Process Management
     CatalogItem {
         category_idx: 1,
@@ -230,6 +230,34 @@ const CATALOG_ITEMS: [CatalogItem; 23] = [
         constructor: || Action::Notification {
             title: String::new(),
             message: String::new(),
+        },
+    },
+    CatalogItem {
+        category_idx: 3,
+        badge: "OVERLAY",
+        title: |loc| loc.catalog_title_overlay,
+        description: |loc| loc.catalog_desc_overlay,
+        glyph: egui_phosphor::regular::FRAME_CORNERS,
+        tint: |t| t.accent_ink,
+        keywords: &[
+            "overlay", "hud", "crosshair", "reticle", "widget", "onscreen", "display", "gui", "badge",
+            "оверлей", "прицел", "хад", "виджет", "экран", "бейдж", "индикатор",
+        ],
+        constructor: || {
+            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let unique_id = format!("overlay_{:x}_{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos(), count);
+            let def = crate::models::OverlayDefinition {
+                id: unique_id.clone(),
+                ..Default::default()
+            };
+            Action::Overlay {
+                overlay_id: unique_id,
+                custom_overlay: Some(Box::new(def)),
+                operation: crate::models::OverlayOperation::Toggle,
+                override_text: None,
+                duration_ms: None,
+            }
         },
     },
     CatalogItem {

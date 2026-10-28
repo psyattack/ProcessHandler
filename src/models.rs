@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "$trigger_type", rename_all = "snake_case")]
 pub enum Trigger {
+    #[serde(rename = "manual")]
+    Manual,
     #[serde(rename = "process")]
     Process {
         process_name: String,
@@ -526,6 +528,17 @@ pub enum Action {
         #[serde(default = "default_true")]
         overwrite: bool,
     },
+    #[serde(rename = "overlay")]
+    Overlay {
+        overlay_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_overlay: Option<Box<OverlayDefinition>>,
+        operation: OverlayOperation,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        override_text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        duration_ms: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -838,7 +851,7 @@ impl Default for Rule {
             max_executions: None,
             execution_count: 0,
             stop_on_error: true,
-            trigger: None,
+            trigger: Some(Trigger::Manual),
             conditions: Vec::new(),
             actions: Vec::new(),
             on_exit_actions: Vec::new(),
@@ -846,6 +859,46 @@ impl Default for Rule {
             auto_process_icon: false,
             last_executed_at: None,
         }
+    }
+}
+
+impl Action {
+    pub fn refresh_overlay_ids(&mut self) {
+        match self {
+            Action::Overlay { overlay_id, custom_overlay, .. } => {
+                static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let fresh_id = format!(
+                    "overlay_{:x}_{:x}",
+                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos(),
+                    count
+                );
+                *overlay_id = fresh_id.clone();
+                if let Some(def) = custom_overlay.as_deref_mut() {
+                    def.id = fresh_id;
+                }
+            }
+            Action::IfElse { then_actions, else_if_branches, else_actions, .. } => {
+                for a in then_actions {
+                    a.refresh_overlay_ids();
+                }
+                for b in else_if_branches {
+                    for a in &mut b.actions {
+                        a.refresh_overlay_ids();
+                    }
+                }
+                for a in else_actions {
+                    a.refresh_overlay_ids();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn duplicate_with_fresh_ids(&self) -> Self {
+        let mut cloned = self.clone();
+        cloned.refresh_overlay_ids();
+        cloned
     }
 }
 
@@ -869,6 +922,15 @@ impl Rule {
         cloned.stop_on_error = self.stop_on_error;
         cloned.custom_icon_path = self.custom_icon_path.clone();
         cloned.auto_process_icon = self.auto_process_icon;
+
+        // Ensure cloned overlay actions get their own fresh unique IDs so they don't collide with original rule
+        for action in cloned.actions.iter_mut() {
+            action.refresh_overlay_ids();
+        }
+        for action in cloned.on_exit_actions.iter_mut() {
+            action.refresh_overlay_ids();
+        }
+
         cloned
     }
 
@@ -909,9 +971,11 @@ impl Rule {
                 Action::DiscordRpcClear => egui_phosphor::regular::X_CIRCLE,
                 Action::Archive { .. } => egui_phosphor::regular::ARCHIVE,
                 Action::FileSystem { .. } => egui_phosphor::regular::FOLDER,
+                Action::Overlay { .. } => egui_phosphor::regular::FRAME_CORNERS,
             }
         } else if let Some(trigger) = &self.trigger {
             match trigger {
+                Trigger::Manual => egui_phosphor::regular::PLAY,
                 Trigger::Process { .. } => egui_phosphor::regular::CPU,
                 Trigger::WindowFocus { .. } => egui_phosphor::regular::EYE,
                 Trigger::ResourceThreshold { .. } => egui_phosphor::regular::CHART_LINE,
@@ -976,6 +1040,602 @@ pub struct AnalyticsSummary {
     pub total_executions: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayOperation {
+    #[default]
+    Show,
+    Hide,
+    Toggle,
+    Flash,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayAnchor {
+    #[default]
+    ScreenCenter,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Custom,
+    WindowRelative,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OverlayRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Default for OverlayRect {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            width: 260.0,
+            height: 70.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OverlayStyle {
+    #[serde(default = "default_overlay_bg")]
+    pub bg_color: [u8; 4],
+    #[serde(default = "default_overlay_border")]
+    pub border_color: [u8; 4],
+    #[serde(default = "default_border_width")]
+    pub border_width: f32,
+    #[serde(default = "default_corner_radius")]
+    pub corner_radius: f32,
+    #[serde(default)]
+    pub glow: bool,
+}
+
+pub fn default_overlay_bg() -> [u8; 4] {
+    [16, 17, 22, 220]
+}
+
+pub fn default_overlay_border() -> [u8; 4] {
+    [255, 255, 255, 30]
+}
+
+pub fn default_border_width() -> f32 {
+    1.0
+}
+
+pub fn default_corner_radius() -> f32 {
+    8.0
+}
+
+impl Default for OverlayStyle {
+    fn default() -> Self {
+        Self {
+            bg_color: default_overlay_bg(),
+            border_color: default_overlay_border(),
+            border_width: default_border_width(),
+            corner_radius: default_corner_radius(),
+            glow: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ShapeKind {
+    #[default]
+    Rectangle,
+    Circle,
+    Arrow,
+    Line,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CrosshairStyle {
+    #[default]
+    Cross,
+    Dot,
+    Circle,
+    TShaped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "payload")]
+pub enum OverlayClickAction {
+    TriggerRule { rule_id: String },
+    ToggleRule { rule_id: String },
+    CloseOverlay,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OverlayElement {
+    Text {
+        #[serde(default)]
+        id: String,
+        text: String,
+        #[serde(default = "default_font_size")]
+        font_size: f32,
+        #[serde(default = "default_white_color")]
+        color: [u8; 4],
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        height: Option<f32>,
+        #[serde(default)]
+        lock_aspect: bool,
+        #[serde(default)]
+        bold: bool,
+        #[serde(default = "default_font_family")]
+        font_family: String,
+        #[serde(default)]
+        rotation: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_click: Option<OverlayClickAction>,
+    },
+    Image {
+        #[serde(default)]
+        id: String,
+        path: String,
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_image_size")]
+        width: f32,
+        #[serde(default = "default_image_size")]
+        height: f32,
+        #[serde(default = "default_opacity_one")]
+        opacity: f32,
+        #[serde(default = "default_true")]
+        lock_aspect: bool,
+        #[serde(default)]
+        rotation: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_click: Option<OverlayClickAction>,
+    },
+    Crosshair {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        style: CrosshairStyle,
+        #[serde(default = "default_crosshair_size")]
+        size: f32,
+        #[serde(default = "default_crosshair_color")]
+        color: [u8; 4],
+        #[serde(default = "default_true")]
+        center_dot: bool,
+        #[serde(default = "default_crosshair_thickness")]
+        thickness: f32,
+        #[serde(default = "default_crosshair_gap")]
+        gap: f32,
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default)]
+        rotation: f32,
+    },
+    ProgressBar {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        label: String,
+        #[serde(default)]
+        progress: f32,
+        #[serde(default = "default_accent_color")]
+        fill_color: [u8; 4],
+        #[serde(default = "default_dark_color")]
+        bg_color: [u8; 4],
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_progress_width")]
+        width: f32,
+        #[serde(default = "default_progress_height")]
+        height: f32,
+        #[serde(default)]
+        rotation: f32,
+    },
+    Badge {
+        #[serde(default)]
+        id: String,
+        text: String,
+        #[serde(default = "default_accent_color")]
+        color: [u8; 4],
+        #[serde(default = "default_badge_bg")]
+        bg_color: [u8; 4],
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default)]
+        rotation: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_click: Option<OverlayClickAction>,
+    },
+    Shape {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        shape_type: ShapeKind,
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_shape_size")]
+        width: f32,
+        #[serde(default = "default_shape_size")]
+        height: f32,
+        #[serde(default = "default_shape_thickness")]
+        thickness: f32,
+        #[serde(default = "default_shape_color")]
+        color: [u8; 4],
+        #[serde(default)]
+        filled: bool,
+        #[serde(default = "default_shape_fill_color")]
+        fill_color: [u8; 4],
+        #[serde(default = "default_shape_corner_radius")]
+        corner_radius: f32,
+        #[serde(default = "default_true")]
+        lock_aspect: bool,
+        #[serde(default)]
+        rotation: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_click: Option<OverlayClickAction>,
+    },
+}
+
+impl OverlayElement {
+    pub fn rotation(&self) -> f32 {
+        match self {
+            OverlayElement::Text { rotation, .. }
+            | OverlayElement::Crosshair { rotation, .. }
+            | OverlayElement::Image { rotation, .. }
+            | OverlayElement::Shape { rotation, .. }
+            | OverlayElement::ProgressBar { rotation, .. }
+            | OverlayElement::Badge { rotation, .. } => *rotation,
+        }
+    }
+
+    pub fn rotation_mut(&mut self) -> &mut f32 {
+        match self {
+            OverlayElement::Text { rotation, .. }
+            | OverlayElement::Crosshair { rotation, .. }
+            | OverlayElement::Image { rotation, .. }
+            | OverlayElement::Shape { rotation, .. }
+            | OverlayElement::ProgressBar { rotation, .. }
+            | OverlayElement::Badge { rotation, .. } => rotation,
+        }
+    }
+
+    pub fn x(&self) -> f32 {
+        match self {
+            OverlayElement::Text { x, .. }
+            | OverlayElement::Crosshair { x, .. }
+            | OverlayElement::Image { x, .. }
+            | OverlayElement::Shape { x, .. }
+            | OverlayElement::ProgressBar { x, .. }
+            | OverlayElement::Badge { x, .. } => *x,
+        }
+    }
+
+    pub fn y(&self) -> f32 {
+        match self {
+            OverlayElement::Text { y, .. }
+            | OverlayElement::Crosshair { y, .. }
+            | OverlayElement::Image { y, .. }
+            | OverlayElement::Shape { y, .. }
+            | OverlayElement::ProgressBar { y, .. }
+            | OverlayElement::Badge { y, .. } => *y,
+        }
+    }
+
+    pub fn x_mut(&mut self) -> &mut f32 {
+        match self {
+            OverlayElement::Text { x, .. }
+            | OverlayElement::Crosshair { x, .. }
+            | OverlayElement::Image { x, .. }
+            | OverlayElement::Shape { x, .. }
+            | OverlayElement::ProgressBar { x, .. }
+            | OverlayElement::Badge { x, .. } => x,
+        }
+    }
+
+    pub fn y_mut(&mut self) -> &mut f32 {
+        match self {
+            OverlayElement::Text { y, .. }
+            | OverlayElement::Crosshair { y, .. }
+            | OverlayElement::Image { y, .. }
+            | OverlayElement::Shape { y, .. }
+            | OverlayElement::ProgressBar { y, .. }
+            | OverlayElement::Badge { y, .. } => y,
+        }
+    }
+}
+
+pub fn default_shape_size() -> f32 {
+    48.0
+}
+pub fn default_shape_thickness() -> f32 {
+    2.0
+}
+pub fn default_shape_color() -> [u8; 4] {
+    [80, 160, 255, 255]
+}
+pub fn default_shape_fill_color() -> [u8; 4] {
+    [80, 160, 255, 60]
+}
+pub fn default_shape_corner_radius() -> f32 {
+    4.0
+}
+
+pub fn default_font_family() -> String {
+    "Segoe UI".to_string()
+}
+pub fn default_font_size() -> f32 {
+    13.0
+}
+pub fn default_white_color() -> [u8; 4] {
+    [240, 242, 248, 255]
+}
+pub fn default_image_size() -> f32 {
+    32.0
+}
+pub fn default_opacity_one() -> f32 {
+    1.0
+}
+pub fn default_crosshair_size() -> f32 {
+    14.0
+}
+pub fn default_crosshair_color() -> [u8; 4] {
+    [0, 255, 136, 255]
+}
+pub fn default_crosshair_thickness() -> f32 {
+    2.0
+}
+pub fn default_crosshair_gap() -> f32 {
+    4.0
+}
+pub fn default_accent_color() -> [u8; 4] {
+    [70, 160, 255, 255]
+}
+pub fn default_dark_color() -> [u8; 4] {
+    [30, 32, 40, 220]
+}
+pub fn default_badge_bg() -> [u8; 4] {
+    [70, 160, 255, 45]
+}
+pub fn default_progress_width() -> f32 {
+    180.0
+}
+pub fn default_progress_height() -> f32 {
+    8.0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OverlayDefinition {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub rect: OverlayRect,
+    #[serde(default)]
+    pub anchor: OverlayAnchor,
+    #[serde(default)]
+    pub click_through: bool,
+    #[serde(default)]
+    pub draggable: bool,
+    #[serde(default = "default_opacity_one")]
+    pub opacity: f32,
+    #[serde(default)]
+    pub style: OverlayStyle,
+    #[serde(default)]
+    pub elements: Vec<OverlayElement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_hide_seconds: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_process: Option<String>,
+    #[serde(default)]
+    pub hide_from_capture: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_in_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fade_out_ms: Option<u32>,
+}
+
+impl Default for OverlayDefinition {
+    fn default() -> Self {
+        Self::default_new_overlay()
+    }
+}
+
+impl OverlayDefinition {
+    pub fn default_new_overlay() -> Self {
+        Self {
+            id: "overlay_custom".to_string(),
+            name: "Custom Overlay".to_string(),
+            rect: OverlayRect { x: 0.0, y: 0.0, width: 440.0, height: 200.0 },
+            anchor: OverlayAnchor::ScreenCenter,
+            click_through: false,
+            draggable: false,
+            opacity: 0.95,
+            style: OverlayStyle {
+                bg_color: [14, 15, 20, 230],
+                border_color: [80, 160, 255, 120],
+                border_width: 1.0,
+                corner_radius: 8.0,
+                glow: true,
+            },
+            elements: vec![],
+            auto_hide_seconds: None,
+            target_process: None,
+            hide_from_capture: false,
+            fade_in_ms: None,
+            fade_out_ms: None,
+        }
+    }
+
+    pub fn default_crosshair() -> Self {
+        Self {
+            id: "overlay_crosshair".to_string(),
+            name: "Gaming Crosshair".to_string(),
+            rect: OverlayRect { x: 0.0, y: 0.0, width: 48.0, height: 48.0 },
+            anchor: OverlayAnchor::ScreenCenter,
+            click_through: true,
+            draggable: false,
+            opacity: 1.0,
+            style: OverlayStyle {
+                bg_color: [0, 0, 0, 0],
+                border_color: [0, 0, 0, 0],
+                border_width: 0.0,
+                corner_radius: 0.0,
+                glow: false,
+            },
+            elements: vec![
+                OverlayElement::Crosshair {
+                    id: "cross_1".to_string(),
+                    style: CrosshairStyle::Cross,
+                    size: 14.0,
+                    color: [0, 255, 136, 255],
+                    center_dot: true,
+                    thickness: 2.0,
+                    gap: 4.0,
+                    x: 24.0,
+                    y: 24.0,
+                    rotation: 0.0,
+                }
+            ],
+            auto_hide_seconds: None,
+            target_process: None,
+            hide_from_capture: false,
+            fade_in_ms: None,
+            fade_out_ms: None,
+        }
+    }
+
+    pub fn default_macro_badge() -> Self {
+        Self {
+            id: "overlay_macro_badge".to_string(),
+            name: "Macro Status Badge".to_string(),
+            rect: OverlayRect { x: 24.0, y: 24.0, width: 220.0, height: 44.0 },
+            anchor: OverlayAnchor::TopRight,
+            click_through: false,
+            draggable: false,
+            opacity: 0.95,
+            style: OverlayStyle {
+                bg_color: [14, 15, 20, 230],
+                border_color: [80, 160, 255, 120],
+                border_width: 1.0,
+                corner_radius: 6.0,
+                glow: true,
+            },
+            elements: vec![
+                OverlayElement::Text {
+                    id: "txt_badge".to_string(),
+                    text: "MACRO ACTIVE".to_string(),
+                    font_size: 13.0,
+                    color: [80, 160, 255, 255],
+                    x: 14.0,
+                    y: 12.0,
+                    width: None,
+                    height: None,
+                    lock_aspect: true,
+                    bold: true,
+                    font_family: "Segoe UI".to_string(),
+                    rotation: 0.0,
+                    on_click: None,
+                },
+                OverlayElement::Text {
+                    id: "txt_hint".to_string(),
+                    text: "[HOLD]".to_string(),
+                    font_size: 11.5,
+                    color: [160, 170, 190, 255],
+                    x: 140.0,
+                    y: 13.0,
+                    width: None,
+                    height: None,
+                    lock_aspect: true,
+                    bold: true,
+                    font_family: "Segoe UI".to_string(),
+                    rotation: 0.0,
+                    on_click: None,
+                }
+            ],
+            auto_hide_seconds: None,
+            target_process: None,
+            hide_from_capture: false,
+            fade_in_ms: None,
+            fade_out_ms: None,
+        }
+    }
+
+    pub fn default_telemetry() -> Self {
+        Self {
+            id: "overlay_telemetry".to_string(),
+            name: "Process Telemetry HUD".to_string(),
+            rect: OverlayRect { x: 24.0, y: 80.0, width: 260.0, height: 74.0 },
+            anchor: OverlayAnchor::TopRight,
+            click_through: false,
+            draggable: false,
+            opacity: 0.9,
+            style: OverlayStyle {
+                bg_color: [16, 17, 24, 220],
+                border_color: [255, 255, 255, 30],
+                border_width: 1.0,
+                corner_radius: 6.0,
+                glow: false,
+            },
+            elements: vec![
+                OverlayElement::Text {
+                    id: "proc_title".to_string(),
+                    text: "{ProcessName}".to_string(),
+                    font_size: 13.0,
+                    color: [255, 255, 255, 255],
+                    x: 14.0,
+                    y: 12.0,
+                    width: None,
+                    height: None,
+                    lock_aspect: true,
+                    bold: true,
+                    font_family: "Segoe UI".to_string(),
+                    rotation: 0.0,
+                    on_click: None,
+                },
+                OverlayElement::Text {
+                    id: "proc_stats".to_string(),
+                    text: "Time: {Time} | Active".to_string(),
+                    font_size: 11.5,
+                    color: [140, 150, 170, 255],
+                    x: 14.0,
+                    y: 38.0,
+                    width: None,
+                    height: None,
+                    lock_aspect: true,
+                    bold: false,
+                    font_family: "Segoe UI".to_string(),
+                    rotation: 0.0,
+                    on_click: None,
+                }
+            ],
+            auto_hide_seconds: None,
+            target_process: None,
+            hide_from_capture: false,
+            fade_in_ms: None,
+            fade_out_ms: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1031,6 +1691,28 @@ mod tests {
     }
 
     #[test]
+    fn test_action_duplicate_with_fresh_ids() {
+        let overlay_act = Action::Overlay {
+            overlay_id: "overlay_initial_123".to_string(),
+            custom_overlay: Some(Box::new(OverlayDefinition {
+                id: "overlay_initial_123".to_string(),
+                ..Default::default()
+            })),
+            operation: OverlayOperation::Toggle,
+            override_text: None,
+            duration_ms: None,
+        };
+
+        let duplicated = overlay_act.duplicate_with_fresh_ids();
+        if let Action::Overlay { overlay_id, custom_overlay, .. } = duplicated {
+            assert_ne!(overlay_id, "overlay_initial_123");
+            assert_eq!(custom_overlay.as_ref().map(|o| o.id.as_str()), Some(overlay_id.as_str()));
+        } else {
+            panic!("Expected Action::Overlay");
+        }
+    }
+
+    #[test]
     fn test_rule_default_icon_glyph_per_action_and_trigger() {
         let mut rule = Rule {
             id: "r1".into(),
@@ -1052,6 +1734,10 @@ mod tests {
 
         // Fallback when empty
         assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::GEAR);
+
+        // Manual trigger icon
+        rule.trigger = Some(Trigger::Manual);
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::PLAY);
 
         // Action icons
         rule.actions = vec![Action::StartProcess {
@@ -1343,6 +2029,21 @@ mod tests {
     }
 
     #[test]
+    fn test_manual_trigger_serde() {
+        let trigger = Trigger::Manual;
+        let serialized = serde_json::to_string(&trigger).unwrap();
+        assert_eq!(serialized, r#"{"$trigger_type":"manual"}"#);
+        let deserialized: Trigger = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, Trigger::Manual);
+
+        let rule = Rule {
+            trigger: Some(Trigger::Manual),
+            ..Default::default()
+        };
+        assert_eq!(rule.default_icon_glyph(), egui_phosphor::regular::PLAY);
+    }
+
+    #[test]
     fn test_global_hotkey_hold_mode_and_repeat_serde() {
         // Test optional field default: json without repeat_while_held defaults to false
         let json = r#"{"$trigger_type":"hotkey","key_combination":"Ctrl+Shift+H","hold_mode":true}"#;
@@ -1398,5 +2099,69 @@ mod tests {
         let serialized = serde_json::to_string(&file_cond).unwrap();
         let deserialized: RuleCondition = serde_json::from_str(&serialized).unwrap();
         assert_eq!(file_cond, deserialized);
+    }
+
+    #[test]
+    fn test_overlay_models_and_action_serde() {
+        let action = Action::Overlay {
+            overlay_id: "overlay_crosshair".to_string(),
+            custom_overlay: None,
+            operation: OverlayOperation::Toggle,
+            override_text: Some("Aim Active".to_string()),
+            duration_ms: Some(3000),
+        };
+        let json = serde_json::to_string(&action).expect("Serialize Action::Overlay");
+        let decoded: Action = serde_json::from_str(&json).expect("Deserialize Action::Overlay");
+        assert_eq!(decoded, action);
+
+        // Test with custom embedded overlay
+        let custom_action = Action::Overlay {
+            overlay_id: "custom_rule_hud".to_string(),
+            custom_overlay: Some(Box::new(OverlayDefinition::default_crosshair())),
+            operation: OverlayOperation::Show,
+            override_text: None,
+            duration_ms: None,
+        };
+        let custom_json = serde_json::to_string(&custom_action).unwrap();
+        let custom_decoded: Action = serde_json::from_str(&custom_json).unwrap();
+        assert_eq!(custom_decoded, custom_action);
+
+        let overlay = OverlayDefinition::default_crosshair();
+        let json_ov = serde_json::to_string(&overlay).expect("Serialize OverlayDefinition");
+        let decoded_ov: OverlayDefinition = serde_json::from_str(&json_ov).expect("Deserialize OverlayDefinition");
+        assert_eq!(decoded_ov, overlay);
+
+        let macro_ov = OverlayDefinition::default_macro_badge();
+        let json_macro = serde_json::to_string(&macro_ov).unwrap();
+        let decoded_macro: OverlayDefinition = serde_json::from_str(&json_macro).unwrap();
+        assert_eq!(decoded_macro, macro_ov);
+
+        // Test Image element defaults: lock_aspect defaults to true
+        let raw_img_json = r#"{"type": "image", "path": "test.png"}"#;
+        let img_elem: OverlayElement = serde_json::from_str(raw_img_json).unwrap();
+        if let OverlayElement::Image { lock_aspect, .. } = img_elem {
+            assert!(lock_aspect, "lock_aspect must default to true");
+        } else {
+            panic!("Expected Image element");
+        }
+
+        // Test fade_in_ms and fade_out_ms serde
+        let mut fade_overlay = OverlayDefinition::default_crosshair();
+        fade_overlay.fade_in_ms = Some(250);
+        fade_overlay.fade_out_ms = Some(350);
+        let fade_json = serde_json::to_string(&fade_overlay).unwrap();
+        assert!(fade_json.contains("\"fade_in_ms\":250"));
+        assert!(fade_json.contains("\"fade_out_ms\":350"));
+        let decoded_fade: OverlayDefinition = serde_json::from_str(&fade_json).unwrap();
+        assert_eq!(decoded_fade.fade_in_ms, Some(250));
+        assert_eq!(decoded_fade.fade_out_ms, Some(350));
+
+        // When omitted, both must default to None and click_through to false
+        let raw_no_fade = r#"{"id":"test","name":"Test"}"#;
+        let decoded_no_fade: OverlayDefinition = serde_json::from_str(raw_no_fade).unwrap();
+        assert_eq!(decoded_no_fade.fade_in_ms, None);
+        assert_eq!(decoded_no_fade.fade_out_ms, None);
+        assert!(!decoded_no_fade.click_through, "click_through must default to false");
+        assert!(!OverlayDefinition::default_new_overlay().click_through, "new overlay click_through must be false by default");
     }
 }

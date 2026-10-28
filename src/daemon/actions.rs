@@ -638,6 +638,70 @@ impl ActionRunner {
                 execute_file_system(*operation, &p, target.as_deref(), body.as_deref(), *create_parents, *overwrite)?;
                 Ok(())
             }
+
+            Action::Overlay {
+                overlay_id,
+                custom_overlay,
+                operation,
+                override_text,
+                duration_ms,
+            } => {
+                let id = Self::interpolate_tokens(overlay_id, context);
+                let text = override_text.as_ref().map(|t| Self::interpolate_tokens(t, context));
+
+                let config = crate::config::AppConfig::load_from_file(crate::config::AppConfig::config_path());
+                let mut found_overlay = custom_overlay.as_deref().cloned().or_else(|| {
+                    config.overlays.iter().find(|o| o.id == id).cloned()
+                });
+
+                if let Some(ref mut def) = found_overlay {
+                    if !id.is_empty() && def.id != id {
+                        def.id = id.clone();
+                    }
+                }
+
+                match operation {
+                    crate::models::OverlayOperation::Show => {
+                        if let Some(mut overlay) = found_overlay {
+                            if let Some(custom_t) = text.clone() {
+                                overlay.name = custom_t;
+                            }
+                            crate::daemon::overlay_manager::show_overlay(&overlay, false, text);
+                        } else {
+                            let def = match id.as_str() {
+                                "overlay_crosshair" => crate::models::OverlayDefinition::default_crosshair(),
+                                "overlay_telemetry" => crate::models::OverlayDefinition::default_telemetry(),
+                                "overlay_macro_badge" => crate::models::OverlayDefinition::default_macro_badge(),
+                                _ => crate::models::OverlayDefinition::default_new_overlay(),
+                            };
+                            crate::daemon::overlay_manager::show_overlay(&def, false, text);
+                        }
+                    }
+                    crate::models::OverlayOperation::Hide => {
+                        crate::daemon::overlay_manager::hide_overlay(&id);
+                    }
+                    crate::models::OverlayOperation::Toggle => {
+                        let overlay = found_overlay.unwrap_or_else(|| match id.as_str() {
+                            "overlay_crosshair" => crate::models::OverlayDefinition::default_crosshair(),
+                            "overlay_telemetry" => crate::models::OverlayDefinition::default_telemetry(),
+                            "overlay_macro_badge" => crate::models::OverlayDefinition::default_macro_badge(),
+                            _ => crate::models::OverlayDefinition::default_new_overlay(),
+                        });
+                        crate::daemon::overlay_manager::toggle_overlay(&overlay, text);
+                    }
+                    crate::models::OverlayOperation::Flash => {
+                        let dur = duration_ms.unwrap_or(3000);
+                        let overlay = found_overlay.unwrap_or_else(|| match id.as_str() {
+                            "overlay_crosshair" => crate::models::OverlayDefinition::default_crosshair(),
+                            "overlay_telemetry" => crate::models::OverlayDefinition::default_telemetry(),
+                            "overlay_macro_badge" => crate::models::OverlayDefinition::default_macro_badge(),
+                            _ => crate::models::OverlayDefinition::default_new_overlay(),
+                        });
+                        crate::daemon::overlay_manager::flash_overlay(&overlay, dur, text);
+                    }
+                }
+                Ok(())
+            }
         }
     }
 

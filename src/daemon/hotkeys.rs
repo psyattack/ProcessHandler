@@ -221,14 +221,16 @@ mod tests {
     #[test]
     fn test_monitored_hotkey_hold_loop_and_is_held() {
         let handle = HotkeyHandle { _private: () };
-        let mut rule = Rule::default();
-        rule.id = "test_loop_rule".to_string();
-        rule.is_enabled = true;
-        rule.trigger = Some(Trigger::GlobalHotkey {
-            key_combination: "M4".to_string(),
-            hold_mode: true,
-            repeat_while_held: true,
-        });
+        let rule = Rule {
+            id: "test_loop_rule".to_string(),
+            is_enabled: true,
+            trigger: Some(Trigger::GlobalHotkey {
+                key_combination: "M4".to_string(),
+                hold_mode: true,
+                repeat_while_held: true,
+            }),
+            ..Default::default()
+        };
 
         handle.reload(&[rule]);
 
