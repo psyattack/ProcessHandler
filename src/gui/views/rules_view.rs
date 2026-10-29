@@ -535,9 +535,12 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
             let count_suffix = if conditions.len() > 1 { format!("+{}", conditions.len() - 1) } else { String::new() };
             format!("IF {}{} [{} | {}]", cond_summary, count_suffix, then_actions.len(), else_actions.len())
         }
-        Action::TrimWorkingSet { target_process } => {
+        Action::TrimWorkingSet { target_process, soft_limit_mb, .. } => {
             let proc = target_process.as_deref().unwrap_or("ACTIVE");
-            format!("RAM {}", proc)
+            match soft_limit_mb {
+                Some(mb) => format!("RAM {} ({} MB)", proc, mb),
+                None => format!("RAM {}", proc),
+            }
         }
         Action::DiscordRpcSet { details, .. } => {
             if details.is_empty() {

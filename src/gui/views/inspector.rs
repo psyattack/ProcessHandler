@@ -482,8 +482,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                 .on_hover_text(loc.inspector_icon_auto_process_tip);
 
                             // Execution Quota (separate line)
-                            ui.horizontal_wrapped(|ui| {
-                                ui.spacing_mut().item_spacing.x = 8.0;
+                            widgets::checkbox_row(ui, |ui| {
                                 let mut has_quota = rule.max_executions.is_some();
                                 if ui.checkbox(&mut has_quota, loc.inspector_field_max_executions).changed() {
                                     rule.max_executions = if has_quota { Some(10) } else { None };
@@ -658,7 +657,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                 ui.add_space(4.0);
                                 widgets::hud(ui, "EVENT TYPE", t.muted);
                                 widgets::checkbox_group(ui, |ui| {
-                                    ui.horizontal_wrapped(|ui| {
+                                    widgets::checkbox_row(ui, |ui| {
                                         if ui.checkbox(on_focus_gained, "Gained Focus").changed()
                                             && !*on_focus_gained && !*on_focus_lost
                                         {
@@ -836,7 +835,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                 });
 
                                 ui.add_space(6.0);
-                                ui.horizontal_wrapped(|ui| {
+                                widgets::checkbox_row(ui, |ui| {
                                     let mut has_cpu = cpu_percent.is_some();
                                     if ui.checkbox(&mut has_cpu, "CPU >").changed() {
                                         *cpu_percent = if has_cpu { Some(80.0) } else { None };
@@ -1317,9 +1316,12 @@ fn action_summary_preview(action: &Action) -> String {
                 format!("If {} [{} cond, then: {}, elif: {}, else: {}]", glyph, count, then_actions.len(), else_if_branches.len(), else_actions.len())
             }
         }
-        Action::TrimWorkingSet { target_process } => {
+        Action::TrimWorkingSet { target_process, soft_limit_mb, .. } => {
             let proc = target_process.as_deref().unwrap_or("Active Process");
-            format!("Trim Working Set: {}", proc)
+            match soft_limit_mb {
+                Some(mb) => format!("Trim Working Set: {} (limit {} MB)", proc, mb),
+                None => format!("Trim Working Set: {}", proc),
+            }
         }
         Action::DiscordRpcSet { details, state, .. } => {
             if details.is_empty() && state.is_empty() {
@@ -2430,7 +2432,7 @@ fn render_action_parameter_fields(
 
                     Action::Display { width, height, refresh_rate, monitor_index } => {
                         widgets::hud(ui, "MONITOR", t.muted);
-                        ui.horizontal(|ui| {
+                        widgets::checkbox_row(ui, |ui| {
                             let mut has_mon = monitor_index.is_some();
                             if ui.checkbox(&mut has_mon, "Target Specific Monitor").changed() {
                                 *monitor_index = if has_mon { Some(1) } else { None };
@@ -2453,7 +2455,7 @@ fn render_action_parameter_fields(
 
                         ui.add_space(4.0);
                         widgets::hud(ui, "REFRESH RATE", t.muted);
-                        ui.horizontal(|ui| {
+                        widgets::checkbox_row(ui, |ui| {
                             let mut has_hz = refresh_rate.is_some();
                             if ui.checkbox(&mut has_hz, "Set Refresh Rate").changed() {
                                 *refresh_rate = if has_hz { Some(144) } else { None };
@@ -2941,7 +2943,11 @@ fn render_action_parameter_fields(
             }
         }
 
-        Action::TrimWorkingSet { target_process } => {
+        Action::TrimWorkingSet {
+            target_process,
+            soft_limit_mb,
+            skip_if_focused,
+        } => {
             let mut proc_str = target_process.clone().unwrap_or_default();
             widgets::hud(ui, loc.inspector_field_target_process, t.muted);
             ui.horizontal(|ui| {
@@ -2961,6 +2967,22 @@ fn render_action_parameter_fields(
                         *target_process = if proc_str.trim().is_empty() { None } else { Some(proc_str) };
                     }
                 });
+            });
+            ui.add_space(4.0);
+            widgets::checkbox_group(ui, |ui| {
+                widgets::checkbox_row(ui, |ui| {
+                    let mut has_limit = soft_limit_mb.is_some();
+                    if ui.checkbox(&mut has_limit, loc.inspector_trim_enable_soft_limit).changed() {
+                        *soft_limit_mb = if has_limit { Some(256) } else { None };
+                    }
+                    if let Some(mb) = soft_limit_mb {
+                        let mut mb_val = *mb;
+                        if ui.add(egui::DragValue::new(&mut mb_val).range(2..=65536).suffix(" MB")).changed() {
+                            *soft_limit_mb = Some(mb_val);
+                        }
+                    }
+                });
+                ui.checkbox(skip_if_focused, loc.inspector_trim_skip_focused);
             });
         }
 
@@ -3998,7 +4020,7 @@ fn render_single_condition_editor(
             });
 
             ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
+            widgets::checkbox_row(ui, |ui| {
                 let mut has_cpu = cpu_percent.is_some();
                 if ui.checkbox(&mut has_cpu, loc.inspector_cond_res_cpu).changed() {
                     *cpu_percent = if has_cpu { Some(80.0) } else { None };

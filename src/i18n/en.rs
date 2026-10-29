@@ -817,6 +817,8 @@ pub static STRINGS: Strings = Strings {
     catalog_title_trim_working_set: "Trim Memory",
     catalog_desc_trim_working_set: "Forcefully releases unused physical memory pages from process working set back to OS",
     inspector_trim_target_hint: "Leave empty for target process",
+    inspector_trim_enable_soft_limit: "Soft Working Set Limit",
+    inspector_trim_skip_focused: "Skip if process window is currently focused",
 
     inspector_badge_discord_rpc_set: "DISCORD RPC",
     inspector_badge_discord_rpc_clear: "CLEAR RPC",

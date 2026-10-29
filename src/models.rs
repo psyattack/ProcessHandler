@@ -478,6 +478,12 @@ pub enum Action {
     TrimWorkingSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_process: Option<String>,
+        
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        soft_limit_mb: Option<u64>,
+        
+        #[serde(default)]
+        skip_if_focused: bool,
     },
     #[serde(rename = "discord_rpc_set")]
     DiscordRpcSet {
@@ -1988,6 +1994,8 @@ mod tests {
         let actions = vec![
             Action::TrimWorkingSet {
                 target_process: Some("game.exe".to_string()),
+                soft_limit_mb: Some(256),
+                skip_if_focused: true,
             },
             Action::DiscordRpcSet {
                 app_id: "123456789".to_string(),
@@ -2026,6 +2034,38 @@ mod tests {
         let json = serde_json::to_string(&actions).expect("Must serialize");
         let decoded: Vec<Action> = serde_json::from_str(&json).expect("Must deserialize");
         assert_eq!(decoded, actions);
+    }
+
+    #[test]
+    fn test_trim_working_set_serde_options_and_backcompat() {
+        // Backwards compatibility: legacy JSON without soft_limit_mb and skip_if_focused
+        let legacy_json = r#"{"$action_type":"trim_working_set","target_process":"notepad.exe"}"#;
+        let action: Action = serde_json::from_str(legacy_json).expect("Must deserialize legacy format");
+        assert_eq!(
+            action,
+            Action::TrimWorkingSet {
+                target_process: Some("notepad.exe".to_string()),
+                soft_limit_mb: None,
+                skip_if_focused: false,
+            }
+        );
+
+        // Serialization with None soft_limit_mb omits it
+        let serialized = serde_json::to_string(&action).expect("Must serialize");
+        assert!(!serialized.contains("soft_limit_mb"));
+        assert!(serialized.contains(r#""skip_if_focused":false"#));
+
+        // Full roundtrip with soft_limit_mb and skip_if_focused: true
+        let full_action = Action::TrimWorkingSet {
+            target_process: Some("game.exe".to_string()),
+            soft_limit_mb: Some(512),
+            skip_if_focused: true,
+        };
+        let full_json = serde_json::to_string(&full_action).expect("Must serialize");
+        assert!(full_json.contains(r#""soft_limit_mb":512"#));
+        assert!(full_json.contains(r#""skip_if_focused":true"#));
+        let full_decoded: Action = serde_json::from_str(&full_json).expect("Must deserialize");
+        assert_eq!(full_decoded, full_action);
     }
 
     #[test]

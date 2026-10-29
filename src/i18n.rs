@@ -834,6 +834,8 @@ pub struct Strings {
     pub catalog_title_trim_working_set: &'static str,
     pub catalog_desc_trim_working_set: &'static str,
     pub inspector_trim_target_hint: &'static str,
+    pub inspector_trim_enable_soft_limit: &'static str,
+    pub inspector_trim_skip_focused: &'static str,
 
     pub inspector_badge_discord_rpc_set: &'static str,
     pub inspector_badge_discord_rpc_clear: &'static str,

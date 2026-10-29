@@ -817,6 +817,8 @@ pub static STRINGS: Strings = Strings {
     catalog_title_trim_working_set: "Очистка памяти",
     catalog_desc_trim_working_set: "Принудительно сбрасывает неиспользуемые физические страницы памяти процесса обратно в ОС",
     inspector_trim_target_hint: "Оставьте пустым для целевого процесса",
+    inspector_trim_enable_soft_limit: "Мягкий лимит памяти",
+    inspector_trim_skip_focused: "Пропускать, если окно процесса активно",
 
     inspector_badge_discord_rpc_set: "DISCORD RPC",
     inspector_badge_discord_rpc_clear: "СБРОС RPC",

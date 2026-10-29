@@ -22,7 +22,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::System::ProcessStatus::EmptyWorkingSet;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    SendMessageW, PostMessageW, EnumWindows, GetWindowThreadProcessId, ShowWindow, SetWindowPos,
+    SendMessageW, PostMessageW, EnumWindows, GetForegroundWindow, GetWindowThreadProcessId, ShowWindow, SetWindowPos,
     GetWindowLongW, SetWindowLongW, SetLayeredWindowAttributes, SetCursorPos, GetCursorPos,
     GetWindow, GW_OWNER, IsWindowVisible, GetWindowTextLengthW, GetWindowTextW,
     HWND_BROADCAST, HWND_TOPMOST, HWND_NOTOPMOST,
@@ -555,12 +555,16 @@ impl ActionRunner {
                 Ok(())
             }
 
-            Action::TrimWorkingSet { target_process } => {
+            Action::TrimWorkingSet {
+                target_process,
+                soft_limit_mb,
+                skip_if_focused,
+            } => {
                 let default_proc = String::new();
                 let interp = target_process.as_ref().map(|p| Self::interpolate_tokens(p, context));
                 let proc_name = interp.as_deref().or_else(|| context.get("ProcessName").map(|s| s.as_str())).unwrap_or(&default_proc);
                 let target_pid = context.get("ProcessId").and_then(|p| p.parse::<u32>().ok());
-                trim_working_set(proc_name, target_pid)?;
+                trim_working_set(proc_name, target_pid, *soft_limit_mb, *skip_if_focused)?;
                 Ok(())
             }
 
@@ -1127,11 +1131,39 @@ fn tune_process(
     Ok(())
 }
 
-pub fn trim_working_set(target_process: &str, target_pid: Option<u32>) -> Result<(), String> {
+#[cfg(windows)]
+pub fn get_foreground_window_pid() -> Option<u32> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return None;
+        }
+        let mut fg_pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut fg_pid));
+        if fg_pid != 0 {
+            Some(fg_pid)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn get_foreground_window_pid() -> Option<u32> {
+    None
+}
+
+pub fn trim_working_set(
+    target_process: &str,
+    target_pid: Option<u32>,
+    soft_limit_mb: Option<u64>,
+    skip_if_focused: bool,
+) -> Result<(), String> {
     #[cfg(windows)]
     {
         use windows::Win32::Foundation::CloseHandle;
         use windows::Win32::System::ProcessStatus::EmptyWorkingSet;
+        use windows::Win32::System::Memory::{SetProcessWorkingSetSizeEx, SETPROCESSWORKINGSETSIZEEX_FLAGS};
         use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_QUERY_LIMITED_INFORMATION};
 
         let mut pids: Vec<u32> = Vec::new();
@@ -1150,18 +1182,56 @@ pub fn trim_working_set(target_process: &str, target_pid: Option<u32>) -> Result
                 }
             }
         }
+        if pids.is_empty() && target_process.is_empty() {
+            if let Some(fg_pid) = get_foreground_window_pid() {
+                if fg_pid != std::process::id() {
+                    pids.push(fg_pid);
+                }
+            }
+        }
         if pids.is_empty() {
             return Err(format!("Process '{}' not found for trimming working set", target_process));
         }
 
+        if skip_if_focused {
+            if let Some(fg_pid) = get_foreground_window_pid() {
+                if pids.contains(&fg_pid) {
+                    return Ok(());
+                }
+            }
+        }
+
         for pid in pids {
+            if skip_if_focused {
+                if let Some(fg_pid) = get_foreground_window_pid() {
+                    if pid == fg_pid {
+                        continue;
+                    }
+                }
+            }
+
             unsafe {
                 if let Ok(handle) = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-                    let _ = EmptyWorkingSet(handle);
+                    if let Some(mb) = soft_limit_mb {
+                        let max_bytes = (mb as usize).saturating_mul(1024 * 1024).max(2 * 1024 * 1024);
+                        let min_bytes = 1024 * 1024;
+                        let _ = SetProcessWorkingSetSizeEx(
+                            handle,
+                            min_bytes,
+                            max_bytes,
+                            SETPROCESSWORKINGSETSIZEEX_FLAGS(0),
+                        );
+                    } else {
+                        let _ = EmptyWorkingSet(handle);
+                    }
                     let _ = CloseHandle(handle);
                 }
             }
         }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (target_process, target_pid, soft_limit_mb, skip_if_focused);
     }
     Ok(())
 }
@@ -2863,5 +2933,57 @@ mod tests {
         assert!(!copy_target.exists());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_trim_working_set_execution() {
+        let current_pid = std::process::id();
+        let mut ctx = std::collections::HashMap::new();
+        ctx.insert("ProcessId".to_string(), current_pid.to_string());
+
+        // 1. Full empty working set
+        let act_empty = crate::models::Action::TrimWorkingSet {
+            target_process: None,
+            soft_limit_mb: None,
+            skip_if_focused: false,
+        };
+        let res_empty = ActionRunner::execute(&act_empty, &ctx).await;
+        assert!(res_empty.is_ok(), "Empty working set should succeed on current process: {:?}", res_empty);
+
+        // 2. Soft working set limit
+        let act_soft = crate::models::Action::TrimWorkingSet {
+            target_process: None,
+            soft_limit_mb: Some(128),
+            skip_if_focused: false,
+        };
+        let res_soft = ActionRunner::execute(&act_soft, &ctx).await;
+        assert!(res_soft.is_ok(), "Soft limit working set should succeed on current process: {:?}", res_soft);
+
+        // 3. Skip if focused flag
+        let act_skip_focused = crate::models::Action::TrimWorkingSet {
+            target_process: None,
+            soft_limit_mb: Some(64),
+            skip_if_focused: true,
+        };
+        let res_skip = ActionRunner::execute(&act_skip_focused, &ctx).await;
+        assert!(res_skip.is_ok(), "Skip if focused should succeed: {:?}", res_skip);
+
+        // 4. Non-existent process returns error
+        let act_non_existent = crate::models::Action::TrimWorkingSet {
+            target_process: Some("non_existent_process_12345xyz.exe".to_string()),
+            soft_limit_mb: None,
+            skip_if_focused: false,
+        };
+        let empty_ctx = std::collections::HashMap::new();
+        let res_err = ActionRunner::execute(&act_non_existent, &empty_ctx).await;
+        assert!(res_err.is_err(), "Non-existent process must return error");
+    }
+
+    #[test]
+    fn test_get_foreground_window_pid_no_panic() {
+        let fg_pid = get_foreground_window_pid();
+        if let Some(pid) = fg_pid {
+            assert!(pid > 0);
+        }
     }
 }

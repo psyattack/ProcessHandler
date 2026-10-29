@@ -509,7 +509,12 @@ pub fn glyph_button_size(ui: &mut Ui, glyph: Glyph, size: f32, tip: &str) -> Res
 
 /// Small outlined square button with a drawn glyph; supports active state.
 pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -> Response {
-    glyph_button_custom(ui, glyph, theme::CONTROL_H, active, tip)
+    let size = if ui.spacing().interact_size.y < theme::CONTROL_H {
+        ui.spacing().interact_size.y
+    } else {
+        theme::CONTROL_H
+    };
+    glyph_button_custom(ui, glyph, size, active, tip)
 }
 
 /// Small outlined square button with custom size and active state.
@@ -673,4 +678,28 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: impl Into<egui::WidgetTex
     let resp = ui.checkbox(checked, text);
     ui.spacing_mut().interact_size.y = old_h;
     resp
+}
+
+/// A horizontal row for a checkbox with trailing inline controls (e.g. DragValue, buttons, notes),
+/// guaranteeing that the checkbox and all trailing controls are vertically centered on the exact same line.
+pub fn checkbox_row<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    let old_interact_h = ui.spacing().interact_size.y;
+    let old_spacing_x = ui.spacing().item_spacing.x;
+    let old_padding = ui.spacing().button_padding;
+
+    ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
+    ui.spacing_mut().interact_size.y = 20.0;
+    ui.spacing_mut().item_spacing.x = 8.0;
+
+    let row_h = 24.0;
+    let ret = ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), row_h),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| add_contents(ui),
+    ).inner;
+
+    ui.spacing_mut().button_padding = old_padding;
+    ui.spacing_mut().interact_size.y = old_interact_h;
+    ui.spacing_mut().item_spacing.x = old_spacing_x;
+    ret
 }

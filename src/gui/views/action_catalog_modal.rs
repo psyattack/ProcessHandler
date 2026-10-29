@@ -118,6 +118,8 @@ const CATALOG_ITEMS: [CatalogItem; 24] = [
         ],
         constructor: || Action::TrimWorkingSet {
             target_process: None,
+            soft_limit_mb: None,
+            skip_if_focused: false,
         },
     },
 
