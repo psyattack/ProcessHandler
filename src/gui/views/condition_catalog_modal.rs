@@ -215,8 +215,6 @@ pub fn render_condition_catalog_modal(ctx: &egui::Context, state: &mut GuiState)
         .min_size(vec2(720.0, 500.0))
         .max_size(vec2(840.0, 640.0))
         .header_height(46.0)
-        .toolbar_height(46.0)
-        .toolbar_sunken(true)
         .show(ctx, &t, |frame| {
             // ---------------- 1. HEADER ----------------
             frame.header(|ui, close_req| {
@@ -233,73 +231,30 @@ pub fn render_condition_catalog_modal(ctx: &egui::Context, state: &mut GuiState)
                 });
             });
 
-            // ---------------- 2. SEARCH BAR ----------------
-            frame.toolbar(|ui, _close_req| {
-                ui.horizontal_centered(|ui| {
-                    ui.add_space(18.0);
-                    ui.label(
-                        RichText::new(egui_phosphor::regular::MAGNIFYING_GLASS)
-                            .family(theme::phosphor())
-                            .size(15.0)
-                            .color(t.muted),
-                    );
-                    ui.add_space(6.0);
-
-                    let has_query = !modal_state.search_query.is_empty();
-                    let extra_w = if has_query { 40.0 } else { 14.0 };
-                    let input_w = (ui.available_width() - extra_w).max(100.0);
-
-                    let _search_resp = ui.add_sized(
-                        vec2(input_w, 28.0),
-                        egui::TextEdit::singleline(&mut modal_state.search_query)
-                            .hint_text(
-                                RichText::new(loc.catalog_condition_search_hint)
-                                    .family(theme::medium())
-                                    .size(12.5)
-                                    .color(t.faint),
-                            )
-                            .font(FontId::new(13.0, theme::medium()))
-                            .text_color(t.ink)
-                            .margin(Margin::symmetric(8, 5)),
-                    );
-
-                    if has_query {
-                        ui.add_space(4.0);
-                        let (btn_rect, mut btn_resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
-                        let is_h = btn_resp.hovered();
-                        if is_h {
-                            ui.painter().rect_filled(btn_rect, CornerRadius::same(2), t.bg);
-                        }
-                        ui.painter().text(
-                            btn_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            egui_phosphor::regular::X,
-                            FontId::new(13.0, theme::phosphor()),
-                            if is_h { t.ink } else { t.muted },
-                        );
-                        btn_resp = btn_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-                        if btn_resp.clicked() {
-                            modal_state.search_query.clear();
-                        }
-                    }
-                });
-            });
-
-            // ---------------- 3. BODY (CATEGORIES + CONDITION CARDS) ----------------
+            // ---------------- 2. BODY (CATEGORIES + CONDITION CARDS) ----------------
             frame.body(|ui| {
                 let body_rect = ui.max_rect();
                 let sidebar_w = 195.0;
-                let sidebar_rect = Rect::from_min_size(body_rect.min, vec2(sidebar_w, body_rect.height()));
+                let sidebar_rect = Rect::from_min_size(
+                    pos2(body_rect.min.x, body_rect.top() + 1.0),
+                    vec2(sidebar_w, body_rect.height() - 2.0),
+                );
                 let cards_rect = Rect::from_min_max(
-                    pos2(sidebar_rect.right() + 1.0, body_rect.top()),
-                    body_rect.max,
+                    pos2(sidebar_rect.right() + 1.0, body_rect.top() + 1.0),
+                    pos2(body_rect.right() - 1.0, body_rect.bottom() - 1.0),
                 );
 
                 // Body background surfaces & divider
                 let p = ui.painter();
                 p.rect_filled(sidebar_rect, CornerRadius::ZERO, t.bg);
                 p.rect_filled(cards_rect, CornerRadius::ZERO, t.sunken);
-                p.vline(sidebar_rect.right(), body_rect.y_range(), t.hairline());
+
+                // Seamless 1px geometric vertical divider without line-cap protrusion (DPI-independent)
+                let v_divider = Rect::from_min_max(
+                    pos2(sidebar_rect.right(), body_rect.top() + 1.0),
+                    pos2(sidebar_rect.right() + 1.0, body_rect.bottom() - 1.0),
+                );
+                p.rect_filled(v_divider, CornerRadius::ZERO, t.hairline().color);
 
                 // Left: Categories List
                 ui.scope_builder(egui::UiBuilder::new().max_rect(sidebar_rect), |ui| {
@@ -325,77 +280,42 @@ pub fn render_condition_catalog_modal(ctx: &egui::Context, state: &mut GuiState)
 
                             for (cat_idx, cat_name, icon, count) in categories {
                                 let is_active = modal_state.selected_category == cat_idx;
-                                let row_w = ui.available_width();
-                                let (row_rect, mut row_resp) = ui.allocate_exact_size(vec2(row_w, 34.0), Sense::click());
-                                let is_h = row_resp.hovered();
-                                let p = ui.painter();
+                                let bg = if is_active { t.accent_ink.gamma_multiply(0.12) } else { Color32::TRANSPARENT };
+                                let fg = if is_active { t.accent_ink } else { t.muted };
 
-                                let bg_color = if is_active {
-                                    t.accent_ink.gamma_multiply(0.12)
-                                } else if is_h {
-                                    t.sunken
-                                } else {
-                                    Color32::TRANSPARENT
-                                };
-                                if bg_color != Color32::TRANSPARENT {
-                                    p.rect_filled(row_rect, CornerRadius::same(2), bg_color);
+                                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+                                if resp.hovered() && !is_active {
+                                    ui.painter().rect_filled(rect, CornerRadius::same(4), t.sunken);
                                 }
-
-                                // Active indicator line on the left
                                 if is_active {
-                                    p.rect_filled(
-                                        Rect::from_min_size(row_rect.left_top(), vec2(3.0, row_rect.height())),
-                                        CornerRadius::same(1),
-                                        t.accent_ink,
-                                    );
+                                    ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
                                 }
 
-                                let icon_color = if is_active {
-                                    t.accent_ink
-                                } else if is_h {
-                                    t.ink
-                                } else {
-                                    t.muted
-                                };
-                                let text_color = if is_active {
-                                    t.accent_ink
-                                } else if is_h {
-                                    t.ink
-                                } else {
-                                    t.muted
-                                };
-
-                                // Category icon
-                                p.text(
-                                    pos2(row_rect.left() + 10.0, row_rect.center().y),
+                                ui.painter().text(
+                                    pos2(rect.left() + 10.0, rect.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     icon,
-                                    FontId::new(15.0, theme::phosphor()),
-                                    icon_color,
+                                    FontId::new(14.0, theme::phosphor()),
+                                    fg,
                                 );
 
-                                // Category label
-                                p.text(
-                                    pos2(row_rect.left() + 32.0, row_rect.center().y),
+                                ui.painter().text(
+                                    pos2(rect.left() + 32.0, rect.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     cat_name,
-                                    FontId::new(12.5, theme::medium()),
-                                    text_color,
+                                    FontId::new(12.5, theme::semibold()),
+                                    fg,
                                 );
 
-                                // Count badge
-                                let count_str = count.to_string();
-                                let badge_color = if is_active { t.accent_ink } else { t.faint };
-                                p.text(
-                                    pos2(row_rect.right() - 8.0, row_rect.center().y),
+                                ui.painter().text(
+                                    pos2(rect.right() - 8.0, rect.center().y),
                                     egui::Align2::RIGHT_CENTER,
-                                    count_str,
+                                    format!("{count}"),
                                     FontId::new(11.0, theme::mono()),
-                                    badge_color,
+                                    t.faint,
                                 );
 
-                                row_resp = row_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-                                if row_resp.clicked() {
+                                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                     modal_state.selected_category = cat_idx;
                                 }
                             }
@@ -426,140 +346,119 @@ pub fn render_condition_catalog_modal(ctx: &egui::Context, state: &mut GuiState)
 
                 // Right: Condition Cards List
                 ui.scope_builder(egui::UiBuilder::new().max_rect(cards_rect), |ui| {
-                    egui::Frame::new()
-                        .inner_margin(Margin::symmetric(14, 10))
+                    ui.add_space(10.0);
+
+                    // Search box placed directly above cards scroll area
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.add_space(10.0);
+                        let search_w = (ui.available_width() - 10.0).max(60.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(search_w, 32.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                widgets::catalog_search_box(ui, &mut modal_state.search_query, loc.catalog_condition_search_hint);
+                            },
+                        );
+                    });
+                    ui.add_space(6.0);
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("condition_catalog_cards_scroll")
+                        .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            egui::ScrollArea::vertical()
-                                .id_salt("condition_catalog_cards_scroll")
-                                .auto_shrink([false, false])
-                                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                                .show(ui, |ui| {
-                                    ui.set_width(ui.available_width());
-                                    if filtered_items.is_empty() {
-                                        ui.vertical_centered(|ui| {
-                                            ui.add_space(70.0);
-                                            ui.label(
-                                                RichText::new(egui_phosphor::regular::MAGNIFYING_GLASS)
-                                                    .family(theme::phosphor())
-                                                    .size(36.0)
-                                                    .color(t.faint),
-                                            );
-                                            ui.add_space(8.0);
-                                            ui.label(
-                                                RichText::new(loc.catalog_no_matches)
-                                                    .family(theme::medium())
-                                                    .size(13.0)
-                                                    .color(t.muted),
-                                            );
-                                        });
-                                    } else {
-                                        ui.spacing_mut().item_spacing.y = 8.0;
-                                        for item in &filtered_items {
-                                            let card_w = ui.available_width();
-                                            let card_h = 60.0;
-                                            let (rect, mut resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
+                            if filtered_items.is_empty() {
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(60.0);
+                                    ui.label(
+                                        RichText::new(egui_phosphor::regular::MAGNIFYING_GLASS)
+                                            .family(theme::phosphor())
+                                            .size(32.0)
+                                            .color(t.faint),
+                                    );
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        RichText::new(loc.catalog_no_matches)
+                                            .family(theme::medium())
+                                            .size(13.0)
+                                            .color(t.muted),
+                                    );
+                                });
+                            } else {
+                                let total_w = ui.available_width() - 20.0;
+                                let col_count = 2;
+                                let gap = 10.0;
+                                let card_w = ((total_w - gap) / (col_count as f32)).max(160.0);
+                                let card_h = 68.0;
+
+                                for chunk in filtered_items.chunks(col_count) {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 0.0;
+                                        ui.add_space(10.0);
+                                        for (idx, item) in chunk.iter().enumerate() {
+                                            if idx > 0 {
+                                                ui.add_space(gap);
+                                            }
+                                            let (rect, resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
                                             let is_hovered = resp.hovered();
-                                            let p = ui.painter();
 
-                                            let fill_color = t.bg;
-                                            let border_stroke = if is_hovered {
-                                                Stroke::new(1.2, t.accent_ink)
-                                            } else {
-                                                Stroke::new(1.0, t.line_strong)
-                                            };
-                                            p.rect_filled(rect, CornerRadius::same(2), fill_color);
-                                            p.rect_stroke(rect, CornerRadius::same(2), border_stroke, egui::StrokeKind::Inside);
+                                            let bg_col = if is_hovered { t.sunken } else { t.bg };
+                                            let stroke_col = if is_hovered { t.accent_ink } else { t.line };
 
+                                            ui.painter().rect_filled(rect, CornerRadius::same(6), bg_col);
+                                            ui.painter().rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, stroke_col), egui::StrokeKind::Inside);
+
+                                            // Icon Chip on Left
+                                            let chip_rect = Rect::from_center_size(
+                                                pos2(rect.left() + 26.0, rect.center().y),
+                                                vec2(34.0, 34.0),
+                                            );
                                             let item_tint = (item.tint)(&t);
-
-                                            // Left Icon Box: 38x38
-                                            let icon_box = Rect::from_center_size(
-                                                pos2(rect.left() + 28.0, rect.center().y),
-                                                vec2(38.0, 38.0),
-                                            );
-                                            p.rect_filled(icon_box, CornerRadius::same(2), item_tint.gamma_multiply(0.12));
-                                            p.rect_stroke(
-                                                icon_box,
-                                                CornerRadius::same(2),
-                                                Stroke::new(1.0, item_tint.gamma_multiply(0.35)),
-                                                egui::StrokeKind::Inside,
-                                            );
-                                            p.text(
-                                                icon_box.center(),
+                                            ui.painter().rect_filled(chip_rect, CornerRadius::same(6), item_tint.gamma_multiply(0.18));
+                                            ui.painter().text(
+                                                chip_rect.center(),
                                                 egui::Align2::CENTER_CENTER,
                                                 item.glyph,
                                                 FontId::new(18.0, theme::phosphor()),
                                                 item_tint,
                                             );
 
-                                            // Center Text column
-                                            let text_left = icon_box.right() + 12.0;
+                                            // Text content on Right (vertically centered relative to card & icon chip)
+                                            let text_left = rect.left() + 52.0;
                                             let title_text = (item.title)(loc);
-                                            let title_color = if is_hovered { t.accent_ink } else { t.ink };
+                                            let desc_text = (item.description)(loc);
+                                            let desc_w = (rect.right() - text_left - 10.0).max(40.0);
 
-                                            // Title
-                                            let title_galley = p.layout_no_wrap(
+                                            let title_galley = ui.painter().layout_no_wrap(
                                                 title_text.to_string(),
                                                 FontId::new(13.0, theme::semibold()),
-                                                title_color,
+                                                t.ink,
                                             );
-                                            let title_w = title_galley.size().x;
-                                            let title_y = rect.top() + 12.0;
-                                            p.galley(pos2(text_left, title_y), title_galley, title_color);
-
-                                            // Category badge tag next to title
-                                            let badge_x = text_left + title_w + 8.0;
-                                            let badge_galley = widgets::caps(ui, item.badge, 9.0, theme::mono(), 0.8, item_tint);
-                                            let badge_w = badge_galley.size().x + 8.0;
-                                            let badge_rect = Rect::from_min_size(
-                                                pos2(badge_x, title_y + 1.0),
-                                                vec2(badge_w, 15.0),
-                                            );
-                                            p.rect_filled(badge_rect, CornerRadius::same(2), item_tint.gamma_multiply(0.12));
-                                            p.galley_with_override_text_color(
-                                                pos2(badge_rect.left() + 4.0, badge_rect.top() + 1.5),
-                                                badge_galley,
-                                                item_tint,
-                                            );
-
-                                            // Description row with safe width truncation
-                                            let desc_text = (item.description)(loc);
-                                            let right_reserve = 36.0;
-                                            let max_desc_w = (rect.right() - right_reserve - text_left).max(50.0);
-                                            let mut desc_job = egui::text::LayoutJob::single_section(
+                                            let desc_galley = ui.painter().layout(
                                                 desc_text.to_string(),
-                                                egui::TextFormat {
-                                                    font_id: FontId::new(11.5, theme::medium()),
-                                                    color: t.muted,
-                                                    ..Default::default()
-                                                },
-                                            );
-                                            desc_job.wrap = egui::text::TextWrapping::truncate_at_width(max_desc_w);
-                                            let desc_galley = p.layout_job(desc_job);
-                                            p.galley(pos2(text_left, rect.top() + 33.0), desc_galley, t.muted);
-
-                                            // Right Action indicator: Plus on hover, Caret right when idle
-                                            let right_icon = if is_hovered {
-                                                egui_phosphor::regular::PLUS
-                                            } else {
-                                                egui_phosphor::regular::CARET_RIGHT
-                                            };
-                                            let right_icon_color = if is_hovered { t.accent_ink } else { t.faint };
-                                            p.text(
-                                                pos2(rect.right() - 18.0, rect.center().y),
-                                                egui::Align2::CENTER_CENTER,
-                                                right_icon,
-                                                FontId::new(15.0, theme::phosphor()),
-                                                right_icon_color,
+                                                FontId::new(11.0, theme::medium()),
+                                                t.muted,
+                                                desc_w,
                                             );
 
-                                            resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-                                            if resp.clicked() {
+                                            let title_h = title_galley.size().y;
+                                            let desc_h = desc_galley.size().y;
+                                            let text_spacing = 3.0;
+                                            let total_text_h = title_h + text_spacing + desc_h;
+                                            let text_start_y = (rect.center().y - total_text_h * 0.5).round();
+
+                                            ui.painter().galley(pos2(text_left, text_start_y), title_galley, t.ink);
+                                            ui.painter().galley(pos2(text_left, text_start_y + title_h + text_spacing), desc_galley, t.muted);
+
+                                            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                                 chosen_condition = Some((item.constructor)());
                                             }
                                         }
-                                    }
-                                });
+                                    });
+                                    ui.add_space(6.0);
+                                }
+                            }
+                            ui.add_space(10.0);
                         });
                 });
             });

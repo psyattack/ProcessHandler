@@ -23,7 +23,7 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "r
 flate2 = "1.0"
 base64 = "0.22"
 arboard = "3"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "ico"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "ico", "bmp", "webp"] }
 mlua = { version = "0.12.2", features = ["lua54", "vendored"] }
 zip = { version = "2.2.2", default-features = false, features = ["deflate"] }
 
@@ -47,6 +47,7 @@ windows = { version = "0.62", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
     "Win32_UI_Input",
@@ -58,4 +59,6 @@ windows = { version = "0.62", features = [
     "Win32_System_Variant",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
 ] }

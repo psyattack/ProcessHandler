@@ -247,15 +247,24 @@ pub fn install_fonts(ctx: &egui::Context) {
     {
         let sys_fonts: &[(&str, &str)] = &[
             ("arial", "C:\\Windows\\Fonts\\arial.ttf"),
+            ("arial-bold", "C:\\Windows\\Fonts\\arialbd.ttf"),
             ("impact", "C:\\Windows\\Fonts\\impact.ttf"),
             ("segoe ui", "C:\\Windows\\Fonts\\segoeui.ttf"),
+            ("segoe ui-bold", "C:\\Windows\\Fonts\\segoeuib.ttf"),
             ("consolas", "C:\\Windows\\Fonts\\consola.ttf"),
+            ("consolas-bold", "C:\\Windows\\Fonts\\consolab.ttf"),
             ("tahoma", "C:\\Windows\\Fonts\\tahoma.ttf"),
+            ("tahoma-bold", "C:\\Windows\\Fonts\\tahomabd.ttf"),
             ("verdana", "C:\\Windows\\Fonts\\verdana.ttf"),
+            ("verdana-bold", "C:\\Windows\\Fonts\\verdanab.ttf"),
             ("comic sans ms", "C:\\Windows\\Fonts\\comic.ttf"),
+            ("comic sans ms-bold", "C:\\Windows\\Fonts\\comicbd.ttf"),
             ("georgia", "C:\\Windows\\Fonts\\georgia.ttf"),
+            ("georgia-bold", "C:\\Windows\\Fonts\\georgiab.ttf"),
             ("trebuchet ms", "C:\\Windows\\Fonts\\trebuc.ttf"),
+            ("trebuchet ms-bold", "C:\\Windows\\Fonts\\trebucbd.ttf"),
             ("courier new", "C:\\Windows\\Fonts\\cour.ttf"),
+            ("courier new-bold", "C:\\Windows\\Fonts\\courbd.ttf"),
         ];
         for (name, path) in sys_fonts {
             if let Ok(bytes) = std::fs::read(path) {

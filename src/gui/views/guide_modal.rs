@@ -78,7 +78,6 @@ pub fn render_guide_modal(ctx: &egui::Context, state: &mut GuiState) {
         .max_size(vec2(1120.0, 780.0))
         .header_height(48.0)
         .header_sunken(true)
-        .accent_bar(t.accent_ink)
         .show(ctx, &t, |frame| {
             // --- 1. HEADER ZONE ---
             frame.header(|ui, close_req| {
@@ -112,7 +111,11 @@ pub fn render_guide_modal(ctx: &egui::Context, state: &mut GuiState) {
                 );
 
                 // Divider line between sidebar and content
-                ui.painter().vline(sidebar_rect.right(), body_rect.y_range(), t.hairline());
+                let v_divider = Rect::from_min_max(
+                    pos2(sidebar_rect.right(), body_rect.top() + 1.0),
+                    pos2(sidebar_rect.right() + 1.0, body_rect.bottom() - 1.0),
+                );
+                ui.painter().rect_filled(v_divider, CornerRadius::ZERO, t.hairline().color);
 
                 // Left Sidebar (Table of Contents)
                 ui.scope_builder(egui::UiBuilder::new().max_rect(sidebar_rect), |ui| {
@@ -128,49 +131,35 @@ pub fn render_guide_modal(ctx: &egui::Context, state: &mut GuiState) {
 
                             let topics = GuideTopic::all();
                             for (idx, topic) in topics.iter().enumerate() {
-                                let is_selected = state.guide_selected_topic == idx;
+                                let is_active = state.guide_selected_topic == idx;
                                 let title = topic.title(lang);
                                 let glyph = topic.glyph();
 
+                                let bg = if is_active { t.accent_ink.gamma_multiply(0.12) } else { egui::Color32::TRANSPARENT };
+                                let fg = if is_active { t.accent_ink } else { t.muted };
+
                                 let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
-                                let hovered = resp.hovered();
-
-                                let bg_color = if is_selected {
-                                    t.accent_ink.gamma_multiply(0.12)
-                                } else if hovered {
-                                    t.sunken
-                                } else {
-                                    egui::Color32::TRANSPARENT
-                                };
-                                if bg_color != egui::Color32::TRANSPARENT {
-                                    ui.painter().rect_filled(rect, CornerRadius::same(2), bg_color);
+                                if resp.hovered() && !is_active {
+                                    ui.painter().rect_filled(rect, CornerRadius::same(4), t.sunken);
                                 }
-
-                                if is_selected {
-                                    ui.painter().rect_filled(
-                                        Rect::from_min_size(rect.left_top(), vec2(3.0, rect.height())),
-                                        CornerRadius::same(1),
-                                        t.accent_ink,
-                                    );
+                                if is_active {
+                                    ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
                                 }
-
-                                let icon_color = if is_selected { t.accent_ink } else if hovered { t.ink } else { t.muted };
-                                let text_color = if is_selected { t.ink_strong } else if hovered { t.ink } else { t.muted };
 
                                 ui.painter().text(
-                                    rect.left_center() + vec2(10.0, 0.0),
+                                    pos2(rect.left() + 10.0, rect.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     glyph,
                                     egui::FontId::new(14.0, theme::phosphor()),
-                                    icon_color,
+                                    fg,
                                 );
 
                                 ui.painter().text(
-                                    rect.left_center() + vec2(32.0, 0.0),
+                                    pos2(rect.left() + 32.0, rect.center().y),
                                     egui::Align2::LEFT_CENTER,
                                     title,
-                                    egui::FontId::new(12.0, if is_selected { theme::semibold() } else { theme::medium() }),
-                                    text_color,
+                                    egui::FontId::new(12.5, theme::semibold()),
+                                    fg,
                                 );
 
                                 if resp.clicked() {

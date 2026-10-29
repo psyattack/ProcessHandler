@@ -236,7 +236,6 @@ pub fn render_macro_modal(ctx: &egui::Context, state: &mut GuiState) {
         .footer_sunken(true)
         .close_on_escape(!is_recording && !crate::gui::macro_recorder::is_macro_test_running())
         .close_on_scrim(!is_recording)
-        .accent_bar(t.accent_ink)
         .show(ctx, &t, |frame| {
             // --- HEADER ---
             frame.header(|ui, close_req| {

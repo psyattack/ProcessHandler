@@ -46,6 +46,18 @@ fn main() {
 
     let is_gui_flag = args.iter().any(|a| a == "--gui" || a == "-g");
 
+    if let Some(pos) = args.iter().position(|a| a == "--overlay-window" || a == "-o") {
+        let overlay_id = args.get(pos + 1).cloned().unwrap_or_default();
+        let calibration = args.iter().any(|a| a == "--calibration");
+        let duration_ms = args.iter().position(|a| a == "--duration").and_then(|p| args.get(p + 1)).and_then(|s| s.parse::<u32>().ok());
+        let override_text = args.iter().position(|a| a == "--override-text").and_then(|p| args.get(p + 1)).cloned();
+        let overlay_data = args.iter().position(|a| a == "--overlay-data").and_then(|p| args.get(p + 1)).cloned();
+        if let Err(e) = gui::overlay_window::run_overlay_window(overlay_id, calibration, override_text, duration_ms, overlay_data) {
+            eprintln!("Failed to launch overlay window: {e}");
+        }
+        return;
+    }
+
     if args.iter().any(|a| a == "--status") {
         match IpcClient::call(&ipc::IpcRequest::GetState) {
             Ok(ipc::IpcResponse::State(state)) => {

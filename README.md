@@ -176,27 +176,24 @@ cargo build --release
 
 </details>
 
----
+<details>
+<summary><b>Tech Stack</b></summary>
 
-## 🛠️ Tech Stack
-
-### Frontend / UI
+#### Frontend / UI
 - **egui**
 - **eframe**
 
-### Backend / Engine
+#### Backend / Engine
 - **Tokio**
 - **mlua**
 - **windows-rs**
 - **reqwest**
 - **Serde + Serde JSON**
 
----
-
-## 📂 Project Structure
+</details>
 
 <details>
-<summary><b>View structure</b></summary>
+<summary><b>Project Structure</b></summary>
 
 ```
 ProcessHandler/

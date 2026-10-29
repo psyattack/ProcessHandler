@@ -1,5 +1,6 @@
 pub mod components;
 pub mod macro_recorder;
+pub mod overlay_window;
 pub mod state;
 pub mod theme;
 pub mod views;
@@ -13,6 +14,7 @@ use views::action_catalog_modal::render_action_catalog_modal;
 use views::analytics_view::render_analytics_view;
 use views::changelog_modal::render_changelog_modal;
 use views::condition_catalog_modal::render_condition_catalog_modal;
+use views::element_catalog_modal::render_element_catalog_modal;
 use views::guide_modal::render_guide_modal;
 use views::header_bar::render_header_bar;
 use views::inspector::render_inspector_drawer;
@@ -55,9 +57,6 @@ impl ProcessHandlerApp {
 
     fn render_footer(&mut self, ui: &mut Ui, t: &Tokens) {
         let loc = self.state.loc();
-        let r = ui.max_rect();
-        // Hairline top border across footer
-        ui.painter().hline(r.x_range(), r.top() + 0.5, t.hairline());
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
@@ -235,9 +234,6 @@ impl App for ProcessHandlerApp {
         // 5. Action Catalog Modal (library for selecting rule actions)
         render_action_catalog_modal(&ctx, &mut self.state);
 
-        // 6. Process Picker Modal (Hunter inside studio modal for selecting a running process)
-        render_process_picker_modal(&ctx, &mut self.state);
-
         // 7. Centered Expanded Script Canvas (modal popup for pwsh / cmd editing)
         render_script_editor_canvas(&ctx, &mut self.state);
 
@@ -246,6 +242,12 @@ impl App for ProcessHandlerApp {
 
         // 8.1. Centered Interactive Overlay Studio Modal (visual WYSIWYG overlay designer)
         render_overlay_modal(&ctx, &mut self.state);
+
+        // 8.1.1. Overlay Element Catalog Modal (library for selecting overlay elements & widgets)
+        render_element_catalog_modal(&ctx, &mut self.state);
+
+        // 8.2. Process Picker Modal (Hunter inside studio modal for selecting a running process)
+        render_process_picker_modal(&ctx, &mut self.state);
 
         // 9. Centered Changelog & Release Notes Modal
         render_changelog_modal(&ctx, &mut self.state);

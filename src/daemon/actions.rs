@@ -649,6 +649,7 @@ impl ActionRunner {
                 operation,
                 override_text,
                 duration_ms,
+                ..
             } => {
                 let id = Self::interpolate_tokens(overlay_id, context);
                 let text = override_text.as_ref().map(|t| Self::interpolate_tokens(t, context));
@@ -2567,7 +2568,30 @@ fn set_audio_volume_or_mute(
     }
 }
 
-#[cfg(windows)]
+pub fn set_master_volume_scalar(scalar: f32) {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+        use windows::Win32::Media::Audio::{eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator};
+        use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+
+        let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let must_uninit = hr.is_ok();
+
+        if let Ok(enumerator) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+            if let Ok(device) = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia) {
+                if let Ok(endpoint_volume) = device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None) {
+                    let _ = endpoint_volume.SetMasterVolumeLevelScalar(scalar.clamp(0.0, 1.0), std::ptr::null());
+                }
+            }
+        }
+
+        if must_uninit {
+            CoUninitialize();
+        }
+    }
+}
+
 fn set_microphone_volume_or_mute(action_type: AudioVolumeAction, volume_level: u8) -> Result<(), String> {
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
     use windows::Win32::Media::Audio::{eCapture, eCommunications, eConsole, eMultimedia, IMMDeviceEnumerator, MMDeviceEnumerator};

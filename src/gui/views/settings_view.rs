@@ -67,17 +67,21 @@ pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
                     content_rect = resp_content.response.rect;
                 });
 
-                // Vertical divider spanning almost to the bottom with symmetrical padding to the top
+                // Vertical divider from header edge to footer edge (exact 1px filled rect, DPI-independent)
                 let div_x = sidebar_rect.right() + 12.0;
-                let offset = 8.0;
-                let top_y = start_top + offset;
-                let bottom_y = (start_top + initial_avail_h)
+                let top_y = theme::HEADER_H;
+                let bottom_y = (ui.ctx().content_rect().bottom() - theme::FOOTER_H)
                     .max(content_rect.bottom())
-                    .max(sidebar_rect.bottom())
-                    - offset;
+                    .max(start_top + initial_avail_h);
 
                 if bottom_y > top_y {
-                    ui.painter().vline(div_x, top_y..=bottom_y, t.hairline());
+                    let v_divider = Rect::from_min_max(
+                        pos2(div_x, top_y),
+                        pos2(div_x + 1.0, bottom_y),
+                    );
+                    ui.painter()
+                        .with_clip_rect(ui.ctx().content_rect())
+                        .rect_filled(v_divider, CornerRadius::ZERO, t.hairline().color);
                 }
             } else {
                 // Narrow / Compact Responsive Fallback: Top segmented tabs + panel
@@ -626,5 +630,19 @@ mod tests {
         out_compact.textures_delta.clear();
 
         assert_eq!(state.settings_tab, SettingsTab::Updates);
+
+        // Verify General tab renders full card height without being clipped
+        state.settings_tab = SettingsTab::General;
+        let mut general_height = 0.0;
+        let mut out = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(900.0);
+                let initial_top = ui.cursor().top();
+                render_settings_view(ui, &mut state);
+                general_height = ui.cursor().top() - initial_top;
+            });
+        });
+        out.textures_delta.clear();
+        assert!(general_height > 250.0, "Settings content card should not be clipped; was {general_height}");
     }
 }

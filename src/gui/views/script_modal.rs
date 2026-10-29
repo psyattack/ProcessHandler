@@ -49,7 +49,6 @@ pub fn render_script_editor_canvas(ctx: &egui::Context, state: &mut GuiState) {
         .height_fraction(0.82)
         .min_size(vec2(620.0, 420.0))
         .max_size(vec2(1150.0, 840.0))
-        .accent_bar(t.accent_ink)
         .header_height(52.0)
         .body_sunken(true)
         .show(ctx, &t, |frame| {

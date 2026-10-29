@@ -30,6 +30,7 @@ pub enum IpcRequest {
     ShowOverlayPreview { overlay: crate::models::OverlayDefinition, calibration_mode: bool },
     HideOverlayPreview(String),
     GetOverlayPosition(String),
+    UpdateOverlayPosition { id: String, x: f32, y: f32 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

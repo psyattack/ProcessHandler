@@ -544,6 +544,8 @@ pub enum Action {
         override_text: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         duration_ms: Option<u32>,
+        #[serde(default)]
+        close_on_exit: bool,
     },
 }
 
@@ -1056,6 +1058,38 @@ pub enum OverlayOperation {
     Flash,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MonitorInfo {
+    pub index: usize,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorOrientation {
+    Landscape,
+    Portrait,
+}
+
+impl MonitorInfo {
+    pub fn orientation(&self) -> MonitorOrientation {
+        if self.height > self.width {
+            MonitorOrientation::Portrait
+        } else {
+            MonitorOrientation::Landscape
+        }
+    }
+
+    pub fn is_portrait(&self) -> bool {
+        self.height > self.width
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum OverlayAnchor {
@@ -1156,6 +1190,135 @@ pub enum OverlayClickAction {
     TriggerRule { rule_id: String },
     ToggleRule { rule_id: String },
     CloseOverlay,
+    KillProcess { process_name: String },
+    TrimMemory { process_name: String },
+    ToggleMute,
+    MediaPlayPause,
+    MediaNext,
+    MediaPrev,
+    ResetTimer,
+    ToggleTimer,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphMetric {
+    #[default]
+    SystemCpu,
+    ProcessCpu,
+    SystemRam,
+    ProcessRam,
+    Fps,
+    Battery,
+    Network,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphStyle {
+    #[default]
+    Line,
+    AreaFilled,
+    Histogram,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TimerMode {
+    #[default]
+    Clock,
+    Stopwatch,
+    Countdown,
+    Uptime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InteractiveControlKind {
+    Button {
+        #[serde(default)]
+        label: String,
+        #[serde(default)]
+        icon: Option<String>,
+        #[serde(default)]
+        action: Option<OverlayClickAction>,
+    },
+    ToggleSwitch {
+        #[serde(default)]
+        label: String,
+        #[serde(default)]
+        is_active: bool,
+        #[serde(default)]
+        bind_rule_id: Option<String>,
+        #[serde(default)]
+        on_enable: Option<OverlayClickAction>,
+        #[serde(default)]
+        on_disable: Option<OverlayClickAction>,
+    },
+    Slider {
+        #[serde(default)]
+        label: String,
+        #[serde(default = "default_slider_val")]
+        value: f32,
+        #[serde(default)]
+        min: f32,
+        #[serde(default = "default_slider_max")]
+        max: f32,
+        #[serde(default)]
+        bind_target: SliderBindTarget,
+    },
+}
+
+impl Default for InteractiveControlKind {
+    fn default() -> Self {
+        InteractiveControlKind::Button {
+            label: "Action".to_string(),
+            icon: None,
+            action: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SliderBindTarget {
+    #[default]
+    MasterVolume,
+    ProcessVolume,
+    OverlayOpacity,
+    CustomVariable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryKind {
+    #[default]
+    Battery,
+    AudioMicStatus,
+    EngineStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryStyle {
+    #[default]
+    Badge,
+    Compact,
+    Detailed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyVisualizerLayout {
+    WasdMouse,
+    WasdOnly,
+    ActionRpg,
+    MouseOnly,
+    TextStream,
+}
+
+pub fn default_key_vis_layout() -> KeyVisualizerLayout {
+    KeyVisualizerLayout::WasdMouse
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1300,9 +1463,205 @@ pub enum OverlayElement {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         on_click: Option<OverlayClickAction>,
     },
+    Graph {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        metric: GraphMetric,
+        #[serde(default)]
+        style: GraphStyle,
+        #[serde(default = "default_graph_sample_count")]
+        sample_count: usize,
+        #[serde(default = "default_accent_color")]
+        color: [u8; 4],
+        #[serde(default = "default_graph_fill_color")]
+        fill_color: [u8; 4],
+        #[serde(default = "default_dark_color")]
+        bg_color: [u8; 4],
+        #[serde(default = "default_true")]
+        show_current_val: bool,
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_graph_width")]
+        width: f32,
+        #[serde(default = "default_graph_height")]
+        height: f32,
+        #[serde(default)]
+        rotation: f32,
+    },
+    ClockTimer {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        mode: TimerMode,
+        #[serde(default = "default_time_format")]
+        format_str: String,
+        #[serde(default = "default_timer_countdown_ms")]
+        countdown_total_ms: u64,
+        #[serde(default = "default_timer_countdown_ms")]
+        countdown_remaining_ms: u64,
+        #[serde(default)]
+        stopwatch_elapsed_ms: u64,
+        #[serde(default)]
+        is_running: bool,
+        #[serde(default = "default_font_size")]
+        font_size: f32,
+        #[serde(default = "default_white_color")]
+        color: [u8; 4],
+        #[serde(default = "default_badge_bg")]
+        bg_color: [u8; 4],
+        #[serde(default = "default_true")]
+        bold: bool,
+        #[serde(default = "default_font_family")]
+        font_family: String,
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_clock_width")]
+        width: f32,
+        #[serde(default = "default_clock_height")]
+        height: f32,
+        #[serde(default)]
+        rotation: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_finish: Option<OverlayClickAction>,
+    },
+    InteractiveControl {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        control: InteractiveControlKind,
+        #[serde(default = "default_white_color")]
+        color: [u8; 4],
+        #[serde(default = "default_badge_bg")]
+        bg_color: [u8; 4],
+        #[serde(default = "default_accent_color")]
+        active_color: [u8; 4],
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_control_width")]
+        width: f32,
+        #[serde(default = "default_control_height")]
+        height: f32,
+        #[serde(default)]
+        rotation: f32,
+    },
+    SystemTelemetry {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        kind: TelemetryKind,
+        #[serde(default)]
+        style: TelemetryStyle,
+        #[serde(default = "default_white_color")]
+        color: [u8; 4],
+        #[serde(default = "default_badge_bg")]
+        bg_color: [u8; 4],
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_telemetry_width")]
+        width: f32,
+        #[serde(default = "default_telemetry_height")]
+        height: f32,
+        #[serde(default)]
+        rotation: f32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_click: Option<OverlayClickAction>,
+    },
+    MediaWidget {
+        #[serde(default)]
+        id: String,
+        #[serde(default = "default_true")]
+        show_controls: bool,
+        #[serde(default)]
+        compact: bool,
+        #[serde(default = "default_white_color")]
+        color: [u8; 4],
+        #[serde(default = "default_badge_bg")]
+        bg_color: [u8; 4],
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_media_width")]
+        width: f32,
+        #[serde(default = "default_media_height")]
+        height: f32,
+        #[serde(default)]
+        rotation: f32,
+    },
+    KeyVisualizer {
+        #[serde(default)]
+        id: String,
+        #[serde(default = "default_key_vis_layout")]
+        layout: KeyVisualizerLayout,
+        #[serde(default = "default_max_keys")]
+        max_keys: usize,
+        #[serde(default = "default_decay_seconds")]
+        decay_seconds: f32,
+        #[serde(default)]
+        show_modifiers_only: bool,
+        #[serde(default = "default_white_color")]
+        color: [u8; 4],
+        #[serde(default = "default_badge_bg")]
+        bg_color: [u8; 4],
+        #[serde(default = "default_accent_color")]
+        active_color: [u8; 4],
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+        #[serde(default = "default_key_vis_width")]
+        width: f32,
+        #[serde(default = "default_key_vis_height")]
+        height: f32,
+        #[serde(default)]
+        rotation: f32,
+    },
 }
 
 impl OverlayElement {
+    pub fn id(&self) -> &str {
+        match self {
+            OverlayElement::Text { id, .. }
+            | OverlayElement::Crosshair { id, .. }
+            | OverlayElement::Image { id, .. }
+            | OverlayElement::Shape { id, .. }
+            | OverlayElement::ProgressBar { id, .. }
+            | OverlayElement::Badge { id, .. }
+            | OverlayElement::Graph { id, .. }
+            | OverlayElement::ClockTimer { id, .. }
+            | OverlayElement::InteractiveControl { id, .. }
+            | OverlayElement::SystemTelemetry { id, .. }
+            | OverlayElement::MediaWidget { id, .. }
+            | OverlayElement::KeyVisualizer { id, .. } => id.as_str(),
+        }
+    }
+
+    pub fn id_mut(&mut self) -> &mut String {
+        match self {
+            OverlayElement::Text { id, .. }
+            | OverlayElement::Crosshair { id, .. }
+            | OverlayElement::Image { id, .. }
+            | OverlayElement::Shape { id, .. }
+            | OverlayElement::ProgressBar { id, .. }
+            | OverlayElement::Badge { id, .. }
+            | OverlayElement::Graph { id, .. }
+            | OverlayElement::ClockTimer { id, .. }
+            | OverlayElement::InteractiveControl { id, .. }
+            | OverlayElement::SystemTelemetry { id, .. }
+            | OverlayElement::MediaWidget { id, .. }
+            | OverlayElement::KeyVisualizer { id, .. } => id,
+        }
+    }
+
     pub fn rotation(&self) -> f32 {
         match self {
             OverlayElement::Text { rotation, .. }
@@ -1310,7 +1669,13 @@ impl OverlayElement {
             | OverlayElement::Image { rotation, .. }
             | OverlayElement::Shape { rotation, .. }
             | OverlayElement::ProgressBar { rotation, .. }
-            | OverlayElement::Badge { rotation, .. } => *rotation,
+            | OverlayElement::Badge { rotation, .. }
+            | OverlayElement::Graph { rotation, .. }
+            | OverlayElement::ClockTimer { rotation, .. }
+            | OverlayElement::InteractiveControl { rotation, .. }
+            | OverlayElement::SystemTelemetry { rotation, .. }
+            | OverlayElement::MediaWidget { rotation, .. }
+            | OverlayElement::KeyVisualizer { rotation, .. } => *rotation,
         }
     }
 
@@ -1321,7 +1686,13 @@ impl OverlayElement {
             | OverlayElement::Image { rotation, .. }
             | OverlayElement::Shape { rotation, .. }
             | OverlayElement::ProgressBar { rotation, .. }
-            | OverlayElement::Badge { rotation, .. } => rotation,
+            | OverlayElement::Badge { rotation, .. }
+            | OverlayElement::Graph { rotation, .. }
+            | OverlayElement::ClockTimer { rotation, .. }
+            | OverlayElement::InteractiveControl { rotation, .. }
+            | OverlayElement::SystemTelemetry { rotation, .. }
+            | OverlayElement::MediaWidget { rotation, .. }
+            | OverlayElement::KeyVisualizer { rotation, .. } => rotation,
         }
     }
 
@@ -1332,7 +1703,13 @@ impl OverlayElement {
             | OverlayElement::Image { x, .. }
             | OverlayElement::Shape { x, .. }
             | OverlayElement::ProgressBar { x, .. }
-            | OverlayElement::Badge { x, .. } => *x,
+            | OverlayElement::Badge { x, .. }
+            | OverlayElement::Graph { x, .. }
+            | OverlayElement::ClockTimer { x, .. }
+            | OverlayElement::InteractiveControl { x, .. }
+            | OverlayElement::SystemTelemetry { x, .. }
+            | OverlayElement::MediaWidget { x, .. }
+            | OverlayElement::KeyVisualizer { x, .. } => *x,
         }
     }
 
@@ -1343,7 +1720,13 @@ impl OverlayElement {
             | OverlayElement::Image { y, .. }
             | OverlayElement::Shape { y, .. }
             | OverlayElement::ProgressBar { y, .. }
-            | OverlayElement::Badge { y, .. } => *y,
+            | OverlayElement::Badge { y, .. }
+            | OverlayElement::Graph { y, .. }
+            | OverlayElement::ClockTimer { y, .. }
+            | OverlayElement::InteractiveControl { y, .. }
+            | OverlayElement::SystemTelemetry { y, .. }
+            | OverlayElement::MediaWidget { y, .. }
+            | OverlayElement::KeyVisualizer { y, .. } => *y,
         }
     }
 
@@ -1354,7 +1737,13 @@ impl OverlayElement {
             | OverlayElement::Image { x, .. }
             | OverlayElement::Shape { x, .. }
             | OverlayElement::ProgressBar { x, .. }
-            | OverlayElement::Badge { x, .. } => x,
+            | OverlayElement::Badge { x, .. }
+            | OverlayElement::Graph { x, .. }
+            | OverlayElement::ClockTimer { x, .. }
+            | OverlayElement::InteractiveControl { x, .. }
+            | OverlayElement::SystemTelemetry { x, .. }
+            | OverlayElement::MediaWidget { x, .. }
+            | OverlayElement::KeyVisualizer { x, .. } => x,
         }
     }
 
@@ -1365,10 +1754,37 @@ impl OverlayElement {
             | OverlayElement::Image { y, .. }
             | OverlayElement::Shape { y, .. }
             | OverlayElement::ProgressBar { y, .. }
-            | OverlayElement::Badge { y, .. } => y,
+            | OverlayElement::Badge { y, .. }
+            | OverlayElement::Graph { y, .. }
+            | OverlayElement::ClockTimer { y, .. }
+            | OverlayElement::InteractiveControl { y, .. }
+            | OverlayElement::SystemTelemetry { y, .. }
+            | OverlayElement::MediaWidget { y, .. }
+            | OverlayElement::KeyVisualizer { y, .. } => y,
         }
     }
 }
+
+pub fn default_graph_sample_count() -> usize { 30 }
+pub fn default_graph_fill_color() -> [u8; 4] { [0, 180, 255, 60] }
+pub fn default_graph_width() -> f32 { 160.0 }
+pub fn default_graph_height() -> f32 { 60.0 }
+pub fn default_time_format() -> String { "%H:%M:%S".to_string() }
+pub fn default_timer_countdown_ms() -> u64 { 60_000 }
+pub fn default_clock_width() -> f32 { 120.0 }
+pub fn default_clock_height() -> f32 { 32.0 }
+pub fn default_slider_val() -> f32 { 50.0 }
+pub fn default_slider_max() -> f32 { 100.0 }
+pub fn default_control_width() -> f32 { 120.0 }
+pub fn default_control_height() -> f32 { 32.0 }
+pub fn default_telemetry_width() -> f32 { 130.0 }
+pub fn default_telemetry_height() -> f32 { 28.0 }
+pub fn default_media_width() -> f32 { 220.0 }
+pub fn default_media_height() -> f32 { 54.0 }
+pub fn default_max_keys() -> usize { 4 }
+pub fn default_decay_seconds() -> f32 { 2.5 }
+pub fn default_key_vis_width() -> f32 { 170.0 }
+pub fn default_key_vis_height() -> f32 { 105.0 }
 
 pub fn default_shape_size() -> f32 {
     48.0
@@ -1457,6 +1873,10 @@ pub struct OverlayDefinition {
     pub fade_in_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade_out_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor_index: Option<usize>,
+    #[serde(default)]
+    pub close_with_target: bool,
 }
 
 impl Default for OverlayDefinition {
@@ -1488,6 +1908,8 @@ impl OverlayDefinition {
             hide_from_capture: false,
             fade_in_ms: None,
             fade_out_ms: None,
+            monitor_index: None,
+            close_with_target: false,
         }
     }
 
@@ -1526,6 +1948,8 @@ impl OverlayDefinition {
             hide_from_capture: false,
             fade_in_ms: None,
             fade_out_ms: None,
+            monitor_index: None,
+            close_with_target: false,
         }
     }
 
@@ -1582,6 +2006,8 @@ impl OverlayDefinition {
             hide_from_capture: false,
             fade_in_ms: None,
             fade_out_ms: None,
+            monitor_index: None,
+            close_with_target: false,
         }
     }
 
@@ -1638,6 +2064,8 @@ impl OverlayDefinition {
             hide_from_capture: false,
             fade_in_ms: None,
             fade_out_ms: None,
+            monitor_index: None,
+            close_with_target: false,
         }
     }
 }
@@ -1707,6 +2135,7 @@ mod tests {
             operation: OverlayOperation::Toggle,
             override_text: None,
             duration_ms: None,
+            close_on_exit: false,
         };
 
         let duplicated = overlay_act.duplicate_with_fresh_ids();
@@ -2149,6 +2578,7 @@ mod tests {
             operation: OverlayOperation::Toggle,
             override_text: Some("Aim Active".to_string()),
             duration_ms: Some(3000),
+            close_on_exit: true,
         };
         let json = serde_json::to_string(&action).expect("Serialize Action::Overlay");
         let decoded: Action = serde_json::from_str(&json).expect("Deserialize Action::Overlay");
@@ -2161,15 +2591,45 @@ mod tests {
             operation: OverlayOperation::Show,
             override_text: None,
             duration_ms: None,
+            close_on_exit: false,
         };
         let custom_json = serde_json::to_string(&custom_action).unwrap();
         let custom_decoded: Action = serde_json::from_str(&custom_json).unwrap();
         assert_eq!(custom_decoded, custom_action);
 
-        let overlay = OverlayDefinition::default_crosshair();
+        let mut overlay = OverlayDefinition::default_crosshair();
+        overlay.monitor_index = Some(1);
+        overlay.close_with_target = true;
         let json_ov = serde_json::to_string(&overlay).expect("Serialize OverlayDefinition");
         let decoded_ov: OverlayDefinition = serde_json::from_str(&json_ov).expect("Deserialize OverlayDefinition");
         assert_eq!(decoded_ov, overlay);
+        assert_eq!(decoded_ov.monitor_index, Some(1));
+        assert!(decoded_ov.close_with_target);
+
+        // Test MonitorInfo orientation
+        let mon_landscape = MonitorInfo {
+            index: 0,
+            name: "Display 1".to_string(),
+            x: 0,
+            y: 0,
+            width: 2560,
+            height: 1440,
+            is_primary: true,
+        };
+        assert_eq!(mon_landscape.orientation(), MonitorOrientation::Landscape);
+        assert!(!mon_landscape.is_portrait());
+
+        let mon_portrait = MonitorInfo {
+            index: 1,
+            name: "Display 2".to_string(),
+            x: -1080,
+            y: 0,
+            width: 1080,
+            height: 1920,
+            is_primary: false,
+        };
+        assert_eq!(mon_portrait.orientation(), MonitorOrientation::Portrait);
+        assert!(mon_portrait.is_portrait());
 
         let macro_ov = OverlayDefinition::default_macro_badge();
         let json_macro = serde_json::to_string(&macro_ov).unwrap();
@@ -2203,5 +2663,162 @@ mod tests {
         assert_eq!(decoded_no_fade.fade_out_ms, None);
         assert!(!decoded_no_fade.click_through, "click_through must default to false");
         assert!(!OverlayDefinition::default_new_overlay().click_through, "new overlay click_through must be false by default");
+    }
+
+    #[test]
+    fn test_overlay_interactive_and_telemetry_elements() {
+        let elements = vec![
+            OverlayElement::Graph {
+                id: "g1".to_string(),
+                metric: GraphMetric::SystemCpu,
+                style: GraphStyle::AreaFilled,
+                sample_count: 50,
+                color: [0, 255, 128, 255],
+                fill_color: [0, 255, 128, 60],
+                bg_color: [20, 20, 30, 200],
+                show_current_val: true,
+                x: 10.0,
+                y: 20.0,
+                width: 140.0,
+                height: 60.0,
+                rotation: 0.0,
+            },
+            OverlayElement::ClockTimer {
+                id: "c1".to_string(),
+                mode: TimerMode::Countdown,
+                format_str: "%H:%M".to_string(),
+                countdown_total_ms: 30000,
+                countdown_remaining_ms: 25000,
+                stopwatch_elapsed_ms: 0,
+                is_running: true,
+                font_size: 16.0,
+                color: [255, 255, 255, 255],
+                bg_color: [0, 0, 0, 180],
+                bold: true,
+                font_family: "Segoe UI".to_string(),
+                x: 15.0,
+                y: 25.0,
+                width: 100.0,
+                height: 30.0,
+                rotation: 45.0,
+                on_finish: Some(OverlayClickAction::CloseOverlay),
+            },
+            OverlayElement::InteractiveControl {
+                id: "ctrl1".to_string(),
+                control: InteractiveControlKind::Button {
+                    label: "Mute".to_string(),
+                    icon: None,
+                    action: Some(OverlayClickAction::ToggleMute),
+                },
+                color: [255, 255, 255, 255],
+                bg_color: [40, 45, 55, 220],
+                active_color: [0, 200, 100, 255],
+                x: 5.0,
+                y: 5.0,
+                width: 80.0,
+                height: 28.0,
+                rotation: 0.0,
+            },
+            OverlayElement::SystemTelemetry {
+                id: "tel1".to_string(),
+                kind: TelemetryKind::Battery,
+                style: TelemetryStyle::Badge,
+                color: [0, 220, 130, 255],
+                bg_color: [25, 30, 40, 220],
+                x: 50.0,
+                y: 60.0,
+                width: 90.0,
+                height: 24.0,
+                rotation: 0.0,
+                on_click: None,
+            },
+            OverlayElement::MediaWidget {
+                id: "m1".to_string(),
+                show_controls: true,
+                compact: false,
+                color: [240, 240, 250, 255],
+                bg_color: [20, 24, 32, 200],
+                x: 0.0,
+                y: 0.0,
+                width: 180.0,
+                height: 52.0,
+                rotation: 0.0,
+            },
+            OverlayElement::KeyVisualizer {
+                id: "k1".to_string(),
+                layout: KeyVisualizerLayout::WasdMouse,
+                max_keys: 5,
+                decay_seconds: 2.0,
+                show_modifiers_only: true,
+                color: [255, 255, 255, 255],
+                bg_color: [35, 40, 50, 220],
+                active_color: [0, 180, 255, 255],
+                x: 100.0,
+                y: 100.0,
+                width: 170.0,
+                height: 105.0,
+                rotation: 0.0,
+            },
+        ];
+
+        for mut elem in elements {
+            assert!(!elem.id().is_empty());
+            assert_eq!(elem.x(), elem.x());
+            assert_eq!(elem.y(), elem.y());
+            *elem.id_mut() = format!("{}_cloned", elem.id());
+            assert!(elem.id().ends_with("_cloned"));
+
+            let json = serde_json::to_string(&elem).expect("Serialize element");
+            let decoded: OverlayElement = serde_json::from_str(&json).expect("Deserialize element");
+            assert_eq!(decoded.id(), elem.id());
+            assert_eq!(decoded.x(), elem.x());
+            assert_eq!(decoded.y(), elem.y());
+            assert_eq!(decoded.rotation(), elem.rotation());
+        }
+    }
+
+    #[test]
+    fn test_key_visualizer_layouts_and_backcompat() {
+        let layouts = [
+            KeyVisualizerLayout::WasdMouse,
+            KeyVisualizerLayout::WasdOnly,
+            KeyVisualizerLayout::ActionRpg,
+            KeyVisualizerLayout::MouseOnly,
+            KeyVisualizerLayout::TextStream,
+        ];
+        for layout in layouts {
+            let elem = OverlayElement::KeyVisualizer {
+                id: "k".into(),
+                layout,
+                max_keys: 4,
+                decay_seconds: 1.5,
+                show_modifiers_only: false,
+                color: [255, 255, 255, 255],
+                bg_color: [0, 0, 0, 200],
+                active_color: [0, 200, 255, 255],
+                x: 10.0,
+                y: 10.0,
+                width: 170.0,
+                height: 105.0,
+                rotation: 0.0,
+            };
+            let json = serde_json::to_string(&elem).unwrap();
+            let decoded: OverlayElement = serde_json::from_str(&json).unwrap();
+            if let OverlayElement::KeyVisualizer { layout: dec_layout, .. } = decoded {
+                assert_eq!(dec_layout, layout);
+            } else {
+                panic!("Expected KeyVisualizer");
+            }
+        }
+
+        // Backward compatibility: legacy JSON without layout and active_color
+        let legacy_json = r#"{"type":"key_visualizer","id":"legacy","max_keys":3,"decay_seconds":1.0,"show_modifiers_only":false,"color":[255,255,255,255],"bg_color":[0,0,0,200],"x":0.0,"y":0.0,"width":160.0,"height":32.0,"rotation":0.0}"#;
+        let decoded: OverlayElement = serde_json::from_str(legacy_json).unwrap();
+        if let OverlayElement::KeyVisualizer { layout, active_color, .. } = decoded {
+            assert_eq!(layout, KeyVisualizerLayout::WasdMouse);
+            assert_eq!(active_color, default_accent_color());
+        } else {
+            panic!("Expected KeyVisualizer");
+        }
     }
 }

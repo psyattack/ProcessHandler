@@ -90,7 +90,6 @@ pub struct Modal {
     height_fraction: f32,
     min_size: Vec2,
     max_size: Vec2,
-    accent_bar: Option<Color32>,
     close_on_escape: bool,
     close_on_scrim: bool,
     scrim_max_alpha: u8,
@@ -114,7 +113,6 @@ impl Modal {
             height_fraction: 0.80,
             min_size: vec2(580.0, 380.0),
             max_size: vec2(1180.0, 840.0),
-            accent_bar: None,
             close_on_escape: true,
             close_on_scrim: true,
             scrim_max_alpha: 215,
@@ -150,12 +148,6 @@ impl Modal {
         self
     }
 
-    /// Add a signature top accent stripe across the top edge of the modal card.
-    pub fn accent_bar(mut self, color: Color32) -> Self {
-        self.accent_bar = Some(color);
-        self
-    }
-
     pub fn close_on_escape(mut self, allow: bool) -> Self {
         self.close_on_escape = allow;
         self
@@ -186,6 +178,7 @@ impl Modal {
         self
     }
 
+    #[allow(dead_code)]
     pub fn toolbar_sunken(mut self, sunken: bool) -> Self {
         self.toolbar_sunken = sunken;
         self
@@ -362,14 +355,12 @@ impl Modal {
                     if let Some(h_rect) = header_rect {
                         let fill = if self.header_sunken { t.sunken } else { t.bg };
                         p.rect_filled(h_rect, CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, fill.gamma_multiply(card_alpha));
-                        p.hline(modal_rect.x_range(), h_rect.bottom(), t.hairline());
                     }
 
-                    // Toolbar fill & divider
+                    // Toolbar fill
                     if let Some(tb_rect) = toolbar_rect {
                         let fill = if self.toolbar_sunken { t.sunken } else { t.bg };
                         p.rect_filled(tb_rect, CornerRadius::ZERO, fill.gamma_multiply(card_alpha));
-                        p.hline(modal_rect.x_range(), tb_rect.bottom(), t.hairline());
                     }
 
                     // Body fill if sunken
@@ -382,11 +373,10 @@ impl Modal {
                         p.rect_filled(body_rect, cr, t.sunken.gamma_multiply(card_alpha));
                     }
 
-                    // Footer fill & divider
+                    // Footer fill
                     if let Some(f_rect) = footer_rect {
                         let fill = if self.footer_sunken { t.sunken } else { t.bg };
                         p.rect_filled(f_rect, CornerRadius { nw: 0, ne: 0, sw: 2, se: 2 }, fill.gamma_multiply(card_alpha));
-                        p.hline(modal_rect.x_range(), f_rect.top(), t.hairline());
                     }
                 }
 
@@ -401,10 +391,38 @@ impl Modal {
                 };
                 render_content(&mut frame);
 
-                // 3. CRITICAL: Paint outer border stroke and top accent bar AFTER all inner contents
+                // 3. CRITICAL: Paint dividers, outer border stroke and top accent bar AFTER all inner contents
                 // so no inner fills, table rows, frames, or sidebars can ever obscure or overwrite them!
                 {
                     let p = ui.painter();
+                    let div_color = t.hairline().color.gamma_multiply(card_alpha);
+
+                    // Header divider (under header)
+                    if let Some(h_rect) = header_rect {
+                        let div_rect = Rect::from_min_max(
+                            pos2(modal_rect.left() + 1.0, h_rect.bottom()),
+                            pos2(modal_rect.right() - 1.0, h_rect.bottom() + 1.0),
+                        );
+                        p.rect_filled(div_rect, CornerRadius::ZERO, div_color);
+                    }
+
+                    // Toolbar divider (under toolbar)
+                    if let Some(tb_rect) = toolbar_rect {
+                        let div_rect = Rect::from_min_max(
+                            pos2(modal_rect.left() + 1.0, tb_rect.bottom()),
+                            pos2(modal_rect.right() - 1.0, tb_rect.bottom() + 1.0),
+                        );
+                        p.rect_filled(div_rect, CornerRadius::ZERO, div_color);
+                    }
+
+                    // Footer divider (above footer)
+                    if let Some(f_rect) = footer_rect {
+                        let div_rect = Rect::from_min_max(
+                            pos2(modal_rect.left() + 1.0, f_rect.top() - 1.0),
+                            pos2(modal_rect.right() - 1.0, f_rect.top()),
+                        );
+                        p.rect_filled(div_rect, CornerRadius::ZERO, div_color);
+                    }
 
                     // Outer border stroke
                     p.rect_stroke(
@@ -413,15 +431,6 @@ impl Modal {
                         Stroke::new(1.0, t.line_strong.gamma_multiply(card_alpha)),
                         egui::StrokeKind::Inside,
                     );
-
-                    // Signature top accent stripe (if specified) painted over outer border
-                    if let Some(accent) = self.accent_bar {
-                        p.hline(
-                            modal_rect.x_range(),
-                            modal_rect.top() + 1.0,
-                            Stroke::new(2.5, accent.gamma_multiply(card_alpha)),
-                        );
-                    }
                 }
             });
 

@@ -2,6 +2,7 @@ pub mod action_catalog_modal;
 pub mod analytics_view;
 pub mod changelog_modal;
 pub mod condition_catalog_modal;
+pub mod element_catalog_modal;
 pub mod guide_modal;
 pub mod header_bar;
 pub mod inspector;

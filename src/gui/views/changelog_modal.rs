@@ -24,7 +24,6 @@ pub fn render_changelog_modal(ctx: &egui::Context, state: &mut GuiState) {
         .height_fraction(0.78)
         .min_size(vec2(580.0, 380.0))
         .max_size(vec2(920.0, 720.0))
-        .accent_bar(t.accent_ink)
         .header_height(56.0)
         .body_sunken(true)
         .show(ctx, &t, |frame| {

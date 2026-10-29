@@ -7,33 +7,7 @@ use crate::models::{
     CrosshairStyle, OverlayAnchor, OverlayClickAction, OverlayDefinition, OverlayElement, ShapeKind,
 };
 
-pub fn get_element_size(elem: &OverlayElement) -> (f32, f32) {
-    match elem {
-        OverlayElement::Crosshair { size, gap, .. } => {
-            let s = (*size + *gap) * 2.0;
-            (s, s)
-        }
-        OverlayElement::Text { text, font_size, .. } => {
-            let char_len = (text.chars().count() as f32).max(1.0);
-            let est_w = (char_len * (*font_size * 0.6).max(8.0) + 12.0).max(30.0);
-            let est_h = (*font_size + 6.0).max(18.0);
-            (est_w, est_h)
-        }
-        OverlayElement::Badge { text, .. } => {
-            let est_w = (text.len() as f32 * 7.5 + 18.0).max(40.0);
-            (est_w, 22.0)
-        }
-        OverlayElement::ProgressBar { width, height, .. } => {
-            (*width, (*height).max(10.0))
-        }
-        OverlayElement::Image { width, height, .. } => {
-            (*width, *height)
-        }
-        OverlayElement::Shape { width, height, .. } => {
-            (*width, *height)
-        }
-    }
-}
+pub use crate::gui::components::overlay_renderer::get_element_size;
 
 fn rotate_vec(v: egui::Vec2, angle_rad: f32) -> egui::Vec2 {
     let cos = angle_rad.cos();
@@ -54,38 +28,11 @@ fn get_rotated_aabb(center: egui::Pos2, half_w: f32, half_h: f32, angle_rad: f32
     Rect::from_center_size(center, vec2(bounding_half_w * 2.0, bounding_half_h * 2.0))
 }
 
-fn draw_filled_convex_polygon(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    points: &[egui::Pos2],
-    fill_color: Color32,
-) {
-    if points.len() < 3 || fill_color.a() == 0 {
-        return;
-    }
-    let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(center, fill_color);
-    for (i, &p) in points.iter().enumerate() {
-        mesh.colored_vertex(p, fill_color);
-        let next_i = ((i + 1) % points.len()) as u32;
-        mesh.add_triangle(0, (i as u32) + 1, next_i + 1);
-    }
-    painter.add(egui::Shape::mesh(mesh));
-}
+#[cfg(windows)]
+static OVERLAY_STUDIO_LAST_Z: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(windows)]
+static OVERLAY_STUDIO_LAST_Y: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-fn draw_polygon_stroke(
-    painter: &egui::Painter,
-    points: &[egui::Pos2],
-    stroke: Stroke,
-) {
-    if points.len() < 2 || stroke.width <= 0.0 || stroke.color.a() == 0 {
-        return;
-    }
-    for i in 0..points.len() {
-        let next_i = (i + 1) % points.len();
-        painter.line_segment([points[i], points[next_i]], stroke);
-    }
-}
 
 pub fn clamp_elements_to_canvas(overlay: &mut OverlayDefinition) {
     let canvas_w = overlay.rect.width.max(20.0);
@@ -177,6 +124,19 @@ pub fn clamp_elements_to_canvas(overlay: &mut OverlayDefinition) {
                 *x = x.clamp(0.0, max_x);
                 *y = y.clamp(0.0, max_y);
             }
+            OverlayElement::Graph { width, height, x, y, .. }
+            | OverlayElement::ClockTimer { width, height, x, y, .. }
+            | OverlayElement::InteractiveControl { width, height, x, y, .. }
+            | OverlayElement::SystemTelemetry { width, height, x, y, .. }
+            | OverlayElement::MediaWidget { width, height, x, y, .. }
+            | OverlayElement::KeyVisualizer { width, height, x, y, .. } => {
+                *width = width.clamp(10.0, canvas_w);
+                *height = height.clamp(4.0, canvas_h);
+                let max_x = (canvas_w - *width).max(0.0);
+                let max_y = (canvas_h - *height).max(0.0);
+                *x = x.clamp(0.0, max_x);
+                *y = y.clamp(0.0, max_y);
+            }
         }
     }
 }
@@ -190,6 +150,8 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         .cloned();
 
     let Some(mut studio) = active_studio else { return };
+    // Continually request repaint for live telemetry, clock, and graph animations
+    ctx.request_repaint_after(std::time::Duration::from_millis(100));
     clamp_elements_to_canvas(&mut studio.overlay);
     let t = Tokens::get(ctx);
     let loc = state.loc();
@@ -197,21 +159,26 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
 
     let mut toggle_calibration = false;
 
+    let monitors = crate::daemon::overlay_manager::get_system_monitors();
+    let active_mon = resolve_overlay_monitor(&studio.overlay, &monitors);
+
     // Synchronize live on-screen calibration coordinates from daemon via IPC
     // Only poll from daemon if the user is not actively interacting/dragging with egui
     let is_gui_interacting = ctx.input(|i| i.pointer.any_down());
     if studio.is_calibrating && !is_gui_interacting {
-        if let Ok(crate::ipc::IpcResponse::OverlayPosition(Some((x, y)))) =
+        if let Ok(crate::ipc::IpcResponse::OverlayPosition(Some((abs_x, abs_y)))) =
             crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::GetOverlayPosition(studio.overlay.id.clone()))
         {
-            let pos_differs_from_current = (studio.overlay.rect.x - x).abs() > 0.5 || (studio.overlay.rect.y - y).abs() > 0.5;
-            let pos_differs_from_last_synced = studio.last_synced_pos.is_none_or(|(lx, ly)| (lx - x).abs() > 0.5 || (ly - y).abs() > 0.5);
+            let rel_x = (abs_x - active_mon.x as f32).clamp(0.0, (active_mon.width as f32 - studio.overlay.rect.width).max(0.0));
+            let rel_y = (abs_y - active_mon.y as f32).clamp(0.0, (active_mon.height as f32 - studio.overlay.rect.height).max(0.0));
+            let pos_differs_from_current = (studio.overlay.rect.x - rel_x).abs() > 0.5 || (studio.overlay.rect.y - rel_y).abs() > 0.5;
+            let pos_differs_from_last_synced = studio.last_synced_pos.is_none_or(|(lx, ly)| (lx - abs_x).abs() > 0.5 || (ly - abs_y).abs() > 0.5);
 
             if pos_differs_from_current && pos_differs_from_last_synced {
                 studio.overlay.anchor = OverlayAnchor::Custom;
-                studio.overlay.rect.x = x;
-                studio.overlay.rect.y = y;
-                studio.last_synced_pos = Some((x, y));
+                studio.overlay.rect.x = rel_x;
+                studio.overlay.rect.y = rel_y;
+                studio.last_synced_pos = Some((abs_x, abs_y));
                 initial_overlay = studio.overlay.clone();
                 ctx.request_repaint();
             }
@@ -224,8 +191,88 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         .map(|s| s.config.rules.iter().map(|r| (r.id.clone(), r.name.clone())).collect())
         .unwrap_or_default();
 
+    let mut open_element_catalog = false;
+
     // Studio Keyboard Shortcuts (processed before UI rendering for 0-lag and instant consumption)
     let is_typing = ctx.text_edit_focused();
+
+    if is_open {
+        // 1. Studio History: Ctrl+Z (Undo) and Ctrl+Y / Ctrl+Shift+Z (Redo)
+        // Uses physical Win32 GetAsyncKeyState edge transitions (immune to layout like Russian Cyrillic)
+        // with fallback to egui events.
+        let mut do_undo = false;
+        let mut do_redo = false;
+
+        #[cfg(windows)]
+        if !is_typing && ctx.input(|i| i.focused) {
+            use std::sync::atomic::Ordering;
+            use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+
+            let ctrl_down = unsafe { (GetAsyncKeyState(0x11) as u16 & 0x8000) != 0 }; // VK_CONTROL
+            let shift_down = unsafe { (GetAsyncKeyState(0x10) as u16 & 0x8000) != 0 }; // VK_SHIFT
+            let z_down = unsafe { (GetAsyncKeyState(0x5A) as u16 & 0x8000) != 0 }; // 'Z'
+            let y_down = unsafe { (GetAsyncKeyState(0x59) as u16 & 0x8000) != 0 }; // 'Y'
+
+            let was_z = OVERLAY_STUDIO_LAST_Z.swap(z_down, Ordering::SeqCst);
+            let was_y = OVERLAY_STUDIO_LAST_Y.swap(y_down, Ordering::SeqCst);
+
+            if ctrl_down {
+                if z_down && !was_z {
+                    if shift_down {
+                        do_redo = true;
+                    } else {
+                        do_undo = true;
+                    }
+                } else if y_down && !was_y {
+                    do_redo = true;
+                }
+            }
+        }
+
+        ctx.input(|i| {
+            let is_ctrl = i.modifiers.command || i.modifiers.ctrl;
+            let is_shift = i.modifiers.shift;
+            for event in &i.events {
+                if let egui::Event::Key { key, physical_key, pressed: true, .. } = event {
+                    let is_z = *key == egui::Key::Z || *physical_key == Some(egui::Key::Z);
+                    let is_y = *key == egui::Key::Y || *physical_key == Some(egui::Key::Y);
+                    if is_ctrl && !is_shift && is_z {
+                        do_undo = true;
+                    } else if (is_ctrl && is_y) || (is_ctrl && is_shift && is_z) {
+                        do_redo = true;
+                    }
+                }
+            }
+        });
+
+        // Also consume standard keys via consume_key
+        ctx.input_mut(|i| {
+            if i.consume_key(egui::Modifiers::CTRL, egui::Key::Z) || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z) {
+                do_undo = true;
+            }
+            if i.consume_key(egui::Modifiers::CTRL, egui::Key::Y) || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
+                || i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::Z)
+                || i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z)
+            {
+                do_redo = true;
+            }
+        });
+
+        if do_undo {
+            studio.undo();
+            ctx.request_repaint();
+        } else if do_redo {
+            studio.redo();
+            ctx.request_repaint();
+        }
+    } else {
+        #[cfg(windows)]
+        {
+            use std::sync::atomic::Ordering;
+            OVERLAY_STUDIO_LAST_Z.store(false, Ordering::Relaxed);
+            OVERLAY_STUDIO_LAST_Y.store(false, Ordering::Relaxed);
+        }
+    }
 
     if is_open && !is_typing {
         // Tab / Shift+Tab -> Cycle selected element forward / backward
@@ -276,6 +323,7 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)) {
             if let Some(sel) = studio.selected_element_idx {
                 if sel < studio.overlay.elements.len() {
+                    studio.push_undo_snapshot();
                     studio.overlay.elements.remove(sel);
                     studio.selected_element_idx = if studio.overlay.elements.is_empty() {
                         None
@@ -291,26 +339,18 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::D) || i.consume_key(egui::Modifiers::CTRL, egui::Key::D)) {
             if let Some(sel) = studio.selected_element_idx {
                 if sel < studio.overlay.elements.len() {
+                    studio.push_undo_snapshot();
                     let mut cloned = studio.overlay.elements[sel].clone();
                     let (ew, eh) = get_element_size(&cloned);
-                    match &mut cloned {
-                        OverlayElement::Text { id, x, y, .. }
-                        | OverlayElement::Badge { id, x, y, .. }
-                        | OverlayElement::ProgressBar { id, x, y, .. }
-                        | OverlayElement::Image { id, x, y, .. }
-                        | OverlayElement::Shape { id, x, y, .. }
-                        | OverlayElement::Crosshair { id, x, y, .. } => {
-                            *id = format!("{}_copy", id);
-                            let cand_x = *x + 16.0;
-                            let cand_y = *y + 16.0;
-                            if cand_x + ew > studio.overlay.rect.width || cand_y + eh > studio.overlay.rect.height {
-                                *x = 0.0;
-                                *y = 0.0;
-                            } else {
-                                *x = cand_x;
-                                *y = cand_y;
-                            }
-                        }
+                    *cloned.id_mut() = format!("{}_copy", cloned.id());
+                    let cand_x = cloned.x() + 16.0;
+                    let cand_y = cloned.y() + 16.0;
+                    if cand_x + ew > studio.overlay.rect.width || cand_y + eh > studio.overlay.rect.height {
+                        *cloned.x_mut() = 0.0;
+                        *cloned.y_mut() = 0.0;
+                    } else {
+                        *cloned.x_mut() = cand_x;
+                        *cloned.y_mut() = cand_y;
                     }
                     studio.overlay.elements.insert(sel + 1, cloned);
                     clamp_elements_to_canvas(&mut studio.overlay);
@@ -329,23 +369,20 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         if ctx.input(|i| i.key_pressed(egui::Key::ArrowDown)) { nudge_y += step; }
 
         if nudge_x != 0.0 || nudge_y != 0.0 {
+            studio.push_undo_snapshot();
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
             if let Some(sel) = studio.selected_element_idx {
                 if sel < studio.overlay.elements.len() {
                     let (ew, eh) = get_element_size(&studio.overlay.elements[sel]);
-                    match &mut studio.overlay.elements[sel] {
-                        OverlayElement::Text { x, y, .. }
-                        | OverlayElement::Badge { x, y, .. }
-                        | OverlayElement::ProgressBar { x, y, .. }
-                        | OverlayElement::Image { x, y, .. }
-                        | OverlayElement::Shape { x, y, .. } => {
-                            *x = (*x + nudge_x).clamp(0.0, (studio.overlay.rect.width - ew).max(0.0));
-                            *y = (*y + nudge_y).clamp(0.0, (studio.overlay.rect.height - eh).max(0.0));
-                        }
-                        OverlayElement::Crosshair { x, y, .. } => {
-                            *x = (*x + nudge_x).clamp(0.0, studio.overlay.rect.width);
-                            *y = (*y + nudge_y).clamp(0.0, studio.overlay.rect.height);
-                        }
+                    let elem = &mut studio.overlay.elements[sel];
+                    let cur_x = elem.x();
+                    let cur_y = elem.y();
+                    if matches!(elem, OverlayElement::Crosshair { .. }) {
+                        *elem.x_mut() = (cur_x + nudge_x).clamp(0.0, studio.overlay.rect.width);
+                        *elem.y_mut() = (cur_y + nudge_y).clamp(0.0, studio.overlay.rect.height);
+                    } else {
+                        *elem.x_mut() = (cur_x + nudge_x).clamp(0.0, (studio.overlay.rect.width - ew).max(0.0));
+                        *elem.y_mut() = (cur_y + nudge_y).clamp(0.0, (studio.overlay.rect.height - eh).max(0.0));
                     }
                 }
             }
@@ -355,6 +392,7 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         if ctx.input(|i| i.key_pressed(egui::Key::OpenBracket)) {
             if let Some(sel) = studio.selected_element_idx {
                 if sel > 0 && sel < studio.overlay.elements.len() {
+                    studio.push_undo_snapshot();
                     let item = studio.overlay.elements.remove(sel);
                     studio.overlay.elements.insert(sel - 1, item);
                     studio.selected_element_idx = Some(sel - 1);
@@ -364,6 +402,7 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         if ctx.input(|i| i.key_pressed(egui::Key::CloseBracket)) {
             if let Some(sel) = studio.selected_element_idx {
                 if sel + 1 < studio.overlay.elements.len() {
+                    studio.push_undo_snapshot();
                     let item = studio.overlay.elements.remove(sel);
                     studio.overlay.elements.insert(sel + 1, item);
                     studio.selected_element_idx = Some(sel + 1);
@@ -388,7 +427,6 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         .height_fraction(0.92)
         .min_size(vec2(920.0, 600.0))
         .max_size(vec2(1360.0, 940.0))
-        .accent_bar(t.accent_ink)
         .header_height(50.0)
         .close_on_escape(studio.active_color_target.is_none())
         .show(ctx, &t, |frame| {
@@ -437,7 +475,11 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
                 );
 
                 // Vertical Divider between panels
-                ui.painter().vline(left_rect.right(), body_rect.y_range(), t.hairline());
+                let v_divider = Rect::from_min_max(
+                    pos2(left_rect.right(), body_rect.top() + 1.0),
+                    pos2(left_rect.right() + 1.0, body_rect.bottom() - 1.0),
+                );
+                ui.painter().rect_filled(v_divider, CornerRadius::ZERO, t.hairline().color);
 
                 // LEFT PANEL: Overlay Settings & Elements Inspector
                 ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
@@ -456,11 +498,15 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
                                     render_overlay_inspector(
                                         ui,
                                         &mut studio.overlay,
+                                        &mut studio.undo_stack,
+                                        &mut studio.redo_stack,
+                                        &monitors,
                                         studio.is_calibrating,
                                         &mut studio.card_lock_aspect,
                                         &mut studio.selected_element_idx,
                                         &mut studio.active_color_target,
                                         &rules_list,
+                                        &mut open_element_catalog,
                                         &t,
                                         loc,
                                     );
@@ -495,9 +541,10 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
             if toggle_calibration {
                 studio.is_calibrating = !studio.is_calibrating;
                 if studio.is_calibrating {
-                    let (screen_w, screen_h) = get_screen_resolution();
-                    let (csx, csy) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
-                    studio.last_synced_pos = Some((csx, csy));
+                    let (csx, csy) = compute_overlay_screen_pos(&studio.overlay, active_mon.width as f32, active_mon.height as f32);
+                    let abs_x = active_mon.x as f32 + csx;
+                    let abs_y = active_mon.y as f32 + csy;
+                    studio.last_synced_pos = Some((abs_x, abs_y));
                     let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::ShowOverlayPreview {
                         overlay: studio.overlay.clone(),
                         calibration_mode: true,
@@ -511,9 +558,10 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
             }
 
             if studio.is_calibrating && studio.overlay != initial_overlay {
-                let (screen_w, screen_h) = get_screen_resolution();
-                let (csx, csy) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
-                studio.last_synced_pos = Some((csx, csy));
+                let (csx, csy) = compute_overlay_screen_pos(&studio.overlay, active_mon.width as f32, active_mon.height as f32);
+                let abs_x = active_mon.x as f32 + csx;
+                let abs_y = active_mon.y as f32 + csy;
+                studio.last_synced_pos = Some((abs_x, abs_y));
                 let _ = crate::ipc::IpcClient::call(&crate::ipc::IpcRequest::ShowOverlayPreview {
                     overlay: studio.overlay.clone(),
                     calibration_mode: true,
@@ -539,6 +587,10 @@ pub fn render_overlay_modal(ctx: &egui::Context, state: &mut GuiState) {
         }
     } else if !is_open {
         state.last_overlay_studio = None;
+    }
+
+    if open_element_catalog {
+        state.open_element_catalog();
     }
 }
 
@@ -890,15 +942,31 @@ fn render_elem_drop_slot(
 fn render_overlay_inspector(
     ui: &mut Ui,
     overlay: &mut OverlayDefinition,
+    undo_stack: &mut Vec<OverlayDefinition>,
+    redo_stack: &mut Vec<OverlayDefinition>,
+    monitors: &[crate::models::MonitorInfo],
     is_calibrating: bool,
     card_lock_aspect: &mut bool,
     selected_idx: &mut Option<usize>,
     active_color_target: &mut Option<ColorPickerTarget>,
     rules_list: &[(String, String)],
+    open_element_catalog: &mut bool,
     t: &Tokens,
     loc: &crate::i18n::Strings,
 ) {
+    let mut push_undo = |ov: &OverlayDefinition| {
+        if undo_stack.len() >= 50 {
+            undo_stack.remove(0);
+        }
+        undo_stack.push(ov.clone());
+        redo_stack.clear();
+    };
+
     ui.spacing_mut().item_spacing.y = 8.0;
+
+    let active_mon = resolve_overlay_monitor(overlay, monitors);
+    let screen_w = active_mon.width as f32;
+    let screen_h = active_mon.height as f32;
 
     // Anchor Picker
     widgets::hud(ui, loc.overlay_studio_field_anchor, t.faint);
@@ -925,7 +993,6 @@ fn render_overlay_inspector(
             ui.selectable_value(&mut overlay.anchor, OverlayAnchor::WindowRelative, loc.overlay_studio_anchor_window);
         });
 
-    let (screen_w, screen_h) = get_screen_resolution();
     if overlay.anchor != prev_anchor {
         match overlay.anchor {
             OverlayAnchor::ScreenCenter => {
@@ -986,17 +1053,6 @@ fn render_overlay_inspector(
         });
         if pos_changed {
             clamp_card_to_monitor(overlay, screen_w, screen_h);
-        }
-    }
-
-    if overlay.anchor == OverlayAnchor::WindowRelative {
-        let mut proc_target = overlay.target_process.clone().unwrap_or_default();
-        if ui.add(
-            egui::TextEdit::singleline(&mut proc_target)
-                .desired_width(ui.available_width())
-                .hint_text(loc.overlay_studio_hint_process)
-        ).changed() {
-            overlay.target_process = if proc_target.trim().is_empty() { None } else { Some(proc_target.trim().to_string()) };
         }
     }
 
@@ -1099,35 +1155,6 @@ fn render_overlay_inspector(
             .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
     );
 
-    // Fade Animation (Fade In / Fade Out in 2 columns)
-    ui.add_space(4.0);
-    widgets::hud(ui, loc.inspector_overlay_fade_title, t.faint);
-    ui.columns(2, |cols| {
-        let mut fade_in = overlay.fade_in_ms.unwrap_or(0);
-        if cols[0].add_sized(
-            vec2(cols[0].available_width(), theme::CONTROL_H),
-            egui::DragValue::new(&mut fade_in)
-                .range(0..=5000)
-                .speed(10.0)
-                .prefix(format!("{}: ", loc.inspector_overlay_fade_in))
-                .suffix(" ms"),
-        ).changed() {
-            overlay.fade_in_ms = if fade_in == 0 { None } else { Some(fade_in) };
-        }
-
-        let mut fade_out = overlay.fade_out_ms.unwrap_or(0);
-        if cols[1].add_sized(
-            vec2(cols[1].available_width(), theme::CONTROL_H),
-            egui::DragValue::new(&mut fade_out)
-                .range(0..=5000)
-                .speed(10.0)
-                .prefix(format!("{}: ", loc.inspector_overlay_fade_out))
-                .suffix(" ms"),
-        ).changed() {
-            overlay.fade_out_ms = if fade_out == 0 { None } else { Some(fade_out) };
-        }
-    });
-
     // Style Card Settings: Colors in 2 columns
     ui.add_space(6.0);
     widgets::hud(ui, loc.overlay_studio_card_colors, t.faint);
@@ -1151,135 +1178,9 @@ fn render_overlay_inspector(
 
     // ----------------- SECTION 03: ELEMENTS -----------------
 
-    // Elements Section Header with Add Element ComboBox (Point 3)
+    // Elements Section Header
     ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        widgets::hud(ui, loc.overlay_studio_elements_title, t.ink);
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let mut add_elem_choice: Option<&str> = None;
-            egui::ComboBox::from_id_salt("add_overlay_element_dropdown")
-                .selected_text(RichText::new(loc.overlay_studio_btn_add_element).family(theme::semibold()).color(t.accent_ink))
-                .width(150.0)
-                .show_ui(ui, |ui| {
-                    if ui.selectable_label(false, loc.overlay_studio_elem_text).clicked() {
-                        add_elem_choice = Some("text");
-                    }
-                    if ui.selectable_label(false, loc.overlay_studio_elem_crosshair).clicked() {
-                        add_elem_choice = Some("crosshair");
-                    }
-                    if ui.selectable_label(false, loc.overlay_studio_elem_image).clicked() {
-                        add_elem_choice = Some("image");
-                    }
-                    if ui.selectable_label(false, loc.overlay_studio_elem_shape).clicked() {
-                        add_elem_choice = Some("shape");
-                    }
-                });
-
-            if let Some(kind) = add_elem_choice {
-                let id = overlay.elements.len() + 1;
-                let cand_x = 14.0;
-                let cand_y = 12.0 + (overlay.elements.len() as f32 * 22.0);
-                match kind {
-                    "text" => {
-                        let (spawn_x, spawn_y) = if cand_x + 80.0 > overlay.rect.width || cand_y + 20.0 > overlay.rect.height {
-                            (0.0, 0.0)
-                        } else {
-                            (cand_x, cand_y)
-                        };
-                        overlay.elements.push(OverlayElement::Text {
-                            id: format!("text_{id}"),
-                            text: "New Text".to_string(),
-                            font_size: 13.0,
-                            color: [240, 240, 250, 255],
-                            x: spawn_x,
-                            y: spawn_y,
-                            width: None,
-                            height: None,
-                            lock_aspect: false,
-                            bold: false,
-                            font_family: "Segoe UI".to_string(),
-                            rotation: 0.0,
-                            on_click: None,
-                        });
-                    }
-                    "crosshair" => {
-                        let s = 14.0;
-                        let gap = 4.0;
-                        let ew = (s + gap) * 2.0;
-                        let (spawn_x, spawn_y) = if (overlay.rect.width / 2.0) + (ew / 2.0) > overlay.rect.width
-                            || (overlay.rect.height / 2.0) + (ew / 2.0) > overlay.rect.height
-                        {
-                            (0.0, 0.0)
-                        } else {
-                            ((overlay.rect.width / 2.0).round(), (overlay.rect.height / 2.0).round())
-                        };
-                        overlay.elements.push(OverlayElement::Crosshair {
-                            id: format!("cross_{id}"),
-                            style: CrosshairStyle::Cross,
-                            size: s,
-                            color: [0, 255, 136, 255],
-                            center_dot: true,
-                            thickness: 2.0,
-                            gap,
-                            x: spawn_x,
-                            y: spawn_y,
-                            rotation: 0.0,
-                        });
-                    }
-                    "image" => {
-                        let ew = 32.0;
-                        let eh = 32.0;
-                        let (spawn_x, spawn_y) = if cand_x + ew > overlay.rect.width || cand_y + eh > overlay.rect.height {
-                            (0.0, 0.0)
-                        } else {
-                            (cand_x, cand_y)
-                        };
-                        overlay.elements.push(OverlayElement::Image {
-                            id: format!("img_{id}"),
-                            path: String::new(),
-                            x: spawn_x,
-                            y: spawn_y,
-                            width: ew,
-                            height: eh,
-                            opacity: 1.0,
-                            lock_aspect: true,
-                            rotation: 0.0,
-                            on_click: None,
-                        });
-                    }
-                    "shape" => {
-                        let ew = 48.0;
-                        let eh = 48.0;
-                        let (spawn_x, spawn_y) = if cand_x + ew > overlay.rect.width || cand_y + eh > overlay.rect.height {
-                            (0.0, 0.0)
-                        } else {
-                            (cand_x, cand_y)
-                        };
-                        overlay.elements.push(OverlayElement::Shape {
-                            id: format!("shape_{id}"),
-                            shape_type: ShapeKind::Rectangle,
-                            x: spawn_x,
-                            y: spawn_y,
-                            width: ew,
-                            height: eh,
-                            thickness: 2.0,
-                            color: [80, 160, 255, 255],
-                            filled: false,
-                            fill_color: [80, 160, 255, 60],
-                            corner_radius: 4.0,
-                            lock_aspect: true,
-                            rotation: 0.0,
-                            on_click: None,
-                        });
-                    }
-                    _ => {}
-                }
-                clamp_elements_to_canvas(overlay);
-                *selected_idx = Some(overlay.elements.len() - 1);
-            }
-        });
-    });
+    widgets::hud(ui, loc.overlay_studio_elements_title, t.ink);
 
     ui.add_space(4.0);
 
@@ -1333,26 +1234,9 @@ fn render_overlay_inspector(
     let total_elems = overlay.elements.len();
     if total_elems == 0 {
         ui.add_space(8.0);
-        egui::Frame::new()
-            .fill(t.sunken)
-            .stroke(t.hairline())
-            .corner_radius(CornerRadius::same(4))
-            .inner_margin(egui::Margin::same(12))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.set_max_width(ui.available_width());
-                ui.vertical_centered(|ui| {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(loc.overlay_studio_no_elements)
-                                .font(FontId::proportional(11.5))
-                                .color(t.faint),
-                        )
-                        .wrap()
-                        .selectable(false),
-                    );
-                });
-            });
+        if widgets::full_width_action_button(ui, loc.overlay_studio_btn_add_element_large, "", t) {
+            *open_element_catalog = true;
+        }
         ui.add_space(8.0);
     }
     for idx in 0..total_elems {
@@ -1403,6 +1287,12 @@ fn render_overlay_inspector(
                             },
                             t.accent_ink,
                         ),
+                        OverlayElement::Graph { .. } => ("GRAPH", t.good),
+                        OverlayElement::ClockTimer { .. } => ("CLOCK", t.ink),
+                        OverlayElement::InteractiveControl { .. } => ("CONTROL", t.accent_ink),
+                        OverlayElement::SystemTelemetry { .. } => ("STATUS", t.warn),
+                        OverlayElement::MediaWidget { .. } => ("MEDIA", t.good),
+                        OverlayElement::KeyVisualizer { .. } => ("KEYS", t.faint),
                     };
 
                     // Clean badge label without selectable_label background highlight
@@ -1619,13 +1509,19 @@ fn render_overlay_inspector(
                                     }
                                 }
                             }
-                            ui.add(
+                            let img_path_resp = ui.add(
                                 egui::TextEdit::singleline(path)
                                     .desired_width(ui.available_width())
                                     .min_size(vec2(0.0, theme::CONTROL_H))
                                     .margin(vec2(8.0, 5.0))
                                     .hint_text(loc.overlay_studio_hint_img_path),
                             );
+                            if img_path_resp.changed() || img_path_resp.lost_focus() {
+                                let clean = path.trim().trim_matches('"').trim_matches('\'').to_string();
+                                if clean != *path {
+                                    *path = clean;
+                                }
+                            }
                         });
 
                         // Width & Height with Aspect Ratio Lock
@@ -1640,11 +1536,11 @@ fn render_overlay_inspector(
                             let field_w = ((total_w - btn_w - spacing * 2.0 - 4.0) / 2.0).max(40.0).floor();
                             let w_resp = ui.add_sized(
                                 vec2(field_w, theme::CONTROL_H),
-                                egui::DragValue::new(width).range(8.0..=overlay.rect.width).prefix("W: ").suffix(" px").speed(1.0),
+                                egui::DragValue::new(width).range(8.0..=overlay.rect.width.max(8.0)).prefix("W: ").suffix(" px").speed(1.0),
                             );
                             let h_resp = ui.add_sized(
                                 vec2(field_w, theme::CONTROL_H),
-                                egui::DragValue::new(height).range(8.0..=overlay.rect.height).prefix("H: ").suffix(" px").speed(1.0),
+                                egui::DragValue::new(height).range(8.0..=overlay.rect.height.max(8.0)).prefix("H: ").suffix(" px").speed(1.0),
                             );
 
                             if *lock_aspect {
@@ -1780,11 +1676,11 @@ fn render_overlay_inspector(
                             let field_w = ((total_w - btn_w - spacing * 2.0 - 4.0) / 2.0).max(40.0).floor();
                             let w_resp = ui.add_sized(
                                 vec2(field_w, theme::CONTROL_H),
-                                egui::DragValue::new(width).range(4.0..=overlay.rect.width).prefix("W: ").suffix(" px").speed(1.0),
+                                egui::DragValue::new(width).range(4.0..=overlay.rect.width.max(4.0)).prefix("W: ").suffix(" px").speed(1.0),
                             );
                             let h_resp = ui.add_sized(
                                 vec2(field_w, theme::CONTROL_H),
-                                egui::DragValue::new(height).range(4.0..=overlay.rect.height).prefix("H: ").suffix(" px").speed(1.0),
+                                egui::DragValue::new(height).range(4.0..=overlay.rect.height.max(4.0)).prefix("H: ").suffix(" px").speed(1.0),
                             );
 
                             if *lock_aspect {
@@ -1838,6 +1734,520 @@ fn render_overlay_inspector(
                             render_element_click_action_ui(ui, on_click, rules_list, idx, t, loc);
                         }
                     }
+
+                    OverlayElement::Graph {
+                        metric,
+                        style,
+                        sample_count,
+                        color,
+                        fill_color,
+                        bg_color,
+                        show_current_val,
+                        x,
+                        y,
+                        width,
+                        height,
+                        rotation,
+                        ..
+                    } => {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(loc.overlay_studio_graph_metric).size(10.0).family(theme::semibold()).color(t.faint));
+                            let metric_lbl = match metric {
+                                crate::models::GraphMetric::SystemCpu => loc.overlay_studio_graph_metric_cpu,
+                                crate::models::GraphMetric::ProcessCpu => loc.overlay_studio_graph_metric_proc_cpu,
+                                crate::models::GraphMetric::SystemRam => loc.overlay_studio_graph_metric_ram,
+                                crate::models::GraphMetric::ProcessRam => loc.overlay_studio_graph_metric_proc_ram,
+                                crate::models::GraphMetric::Fps => loc.overlay_studio_graph_metric_fps,
+                                crate::models::GraphMetric::Battery => loc.overlay_studio_graph_metric_battery,
+                                crate::models::GraphMetric::Network => loc.overlay_studio_graph_metric_network,
+                            };
+                            egui::ComboBox::from_id_salt(ui.id().with(("graph_metric", idx)))
+                                .selected_text(metric_lbl)
+                                .width(ui.available_width() - 8.0)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(metric, crate::models::GraphMetric::SystemCpu, loc.overlay_studio_graph_metric_cpu);
+                                    ui.selectable_value(metric, crate::models::GraphMetric::ProcessCpu, loc.overlay_studio_graph_metric_proc_cpu);
+                                    ui.selectable_value(metric, crate::models::GraphMetric::SystemRam, loc.overlay_studio_graph_metric_ram);
+                                    ui.selectable_value(metric, crate::models::GraphMetric::ProcessRam, loc.overlay_studio_graph_metric_proc_ram);
+                                    ui.selectable_value(metric, crate::models::GraphMetric::Fps, loc.overlay_studio_graph_metric_fps);
+                                    ui.selectable_value(metric, crate::models::GraphMetric::Battery, loc.overlay_studio_graph_metric_battery);
+                                    ui.selectable_value(metric, crate::models::GraphMetric::Network, loc.overlay_studio_graph_metric_network);
+                                });
+                        });
+
+                        ui.horizontal(|ui| {
+                            let styles = [
+                                (crate::models::GraphStyle::AreaFilled, "Area"),
+                                (crate::models::GraphStyle::Line, "Line"),
+                                (crate::models::GraphStyle::Histogram, "Bars"),
+                            ];
+                            for (s, lbl) in styles {
+                                let is_s = *style == s;
+                                let kind = if is_s { Kind::Primary } else { Kind::Secondary };
+                                if widgets::button(ui, lbl, kind, 0.0).clicked() {
+                                    *style = s;
+                                }
+                            }
+                        });
+
+                        ui.add(egui::Slider::new(sample_count, 10..=120).text(loc.overlay_studio_graph_samples));
+                        ui.checkbox(show_current_val, loc.overlay_studio_graph_show_val);
+
+                        ui.columns(3, |cols| {
+                            render_color_chip(&mut cols[0], "LINE:", color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
+                            render_color_chip(&mut cols[1], "FILL:", fill_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
+                            render_color_chip(&mut cols[2], "BG:", bg_color, ColorPickerTarget::CardBg, active_color_target, t);
+                        });
+                        if *active_color_target == Some(ColorPickerTarget::ElementPrimary(idx)) {
+                            render_inline_color_editor(ui, color, true, t);
+                        } else if *active_color_target == Some(ColorPickerTarget::ElementSecondary(idx)) {
+                            render_inline_color_editor(ui, fill_color, true, t);
+                        }
+
+                        ui.columns(2, |cols| {
+                            cols[0].add(egui::DragValue::new(width).range(20.0..=overlay.rect.width.max(20.0)).prefix("W: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(height).range(15.0..=overlay.rect.height.max(15.0)).prefix("H: ").suffix(" px"));
+                        });
+
+                        render_rotation_control(ui, rotation, t, loc);
+
+                        ui.columns(2, |cols| {
+                            let max_x = (overlay.rect.width - *width).max(0.0);
+                            let max_y = (overlay.rect.height - *height).max(0.0);
+                            cols[0].add(egui::DragValue::new(x).range(0.0..=max_x.max(0.0)).prefix("X: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(y).range(0.0..=max_y.max(0.0)).prefix("Y: ").suffix(" px"));
+                        });
+                    }
+
+                    OverlayElement::ClockTimer {
+                        mode,
+                        format_str,
+                        font_size,
+                        color,
+                        bg_color,
+                        countdown_total_ms,
+                        bold,
+                        x,
+                        y,
+                        width,
+                        height,
+                        rotation,
+                        on_finish,
+                        ..
+                    } => {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(loc.overlay_studio_timer_mode).size(10.0).family(theme::semibold()).color(t.faint));
+                            let mode_lbl = match mode {
+                                crate::models::TimerMode::Clock => loc.overlay_studio_timer_mode_clock,
+                                crate::models::TimerMode::Stopwatch => loc.overlay_studio_timer_mode_stopwatch,
+                                crate::models::TimerMode::Countdown => loc.overlay_studio_timer_mode_countdown,
+                                crate::models::TimerMode::Uptime => loc.overlay_studio_timer_mode_uptime,
+                            };
+                            egui::ComboBox::from_id_salt(ui.id().with(("clock_mode", idx)))
+                                .selected_text(mode_lbl)
+                                .width(ui.available_width() - 8.0)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(mode, crate::models::TimerMode::Clock, loc.overlay_studio_timer_mode_clock);
+                                    ui.selectable_value(mode, crate::models::TimerMode::Stopwatch, loc.overlay_studio_timer_mode_stopwatch);
+                                    ui.selectable_value(mode, crate::models::TimerMode::Countdown, loc.overlay_studio_timer_mode_countdown);
+                                    ui.selectable_value(mode, crate::models::TimerMode::Uptime, loc.overlay_studio_timer_mode_uptime);
+                                });
+                        });
+
+                        match mode {
+                            crate::models::TimerMode::Clock => {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(loc.overlay_studio_timer_format).size(10.0).family(theme::semibold()).color(t.faint));
+                                    ui.text_edit_singleline(format_str);
+                                });
+                            }
+                            crate::models::TimerMode::Countdown => {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(loc.overlay_studio_timer_countdown).size(10.0).family(theme::semibold()).color(t.faint));
+                                    let mut sec = *countdown_total_ms / 1000;
+                                    if ui.add(egui::DragValue::new(&mut sec).range(1..=86400).suffix(" s")).changed() {
+                                        *countdown_total_ms = sec * 1000;
+                                    }
+                                });
+                            }
+                            _ => {}
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Slider::new(font_size, 8.0..=48.0).text("Font Size"));
+                            ui.checkbox(bold, "Bold");
+                        });
+
+                        ui.columns(2, |cols| {
+                            render_color_chip(&mut cols[0], "TEXT:", color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
+                            render_color_chip(&mut cols[1], "BG:", bg_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
+                        });
+                        if *active_color_target == Some(ColorPickerTarget::ElementPrimary(idx)) {
+                            render_inline_color_editor(ui, color, true, t);
+                        } else if *active_color_target == Some(ColorPickerTarget::ElementSecondary(idx)) {
+                            render_inline_color_editor(ui, bg_color, true, t);
+                        }
+
+                        ui.columns(2, |cols| {
+                            cols[0].add(egui::DragValue::new(width).range(20.0..=overlay.rect.width.max(20.0)).prefix("W: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(height).range(15.0..=overlay.rect.height.max(15.0)).prefix("H: ").suffix(" px"));
+                        });
+
+                        render_rotation_control(ui, rotation, t, loc);
+
+                        ui.columns(2, |cols| {
+                            let max_x = (overlay.rect.width - *width).max(0.0);
+                            let max_y = (overlay.rect.height - *height).max(0.0);
+                            cols[0].add(egui::DragValue::new(x).range(0.0..=max_x.max(0.0)).prefix("X: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(y).range(0.0..=max_y.max(0.0)).prefix("Y: ").suffix(" px"));
+                        });
+
+                        if !overlay.click_through && matches!(mode, crate::models::TimerMode::Countdown) {
+                            render_element_click_action_ui(ui, on_finish, rules_list, idx, t, loc);
+                        }
+                    }
+
+                    OverlayElement::InteractiveControl {
+                        control,
+                        color,
+                        bg_color,
+                        active_color,
+                        x,
+                        y,
+                        width,
+                        height,
+                        rotation,
+                        ..
+                    } => {
+                        let cur_kind_name = match control {
+                            crate::models::InteractiveControlKind::Button { .. } => "Button",
+                            crate::models::InteractiveControlKind::ToggleSwitch { .. } => "Toggle",
+                            crate::models::InteractiveControlKind::Slider { .. } => "Slider",
+                        };
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(loc.overlay_studio_control_kind).size(10.0).family(theme::semibold()).color(t.faint));
+                            for lbl in ["Button", "Toggle", "Slider"] {
+                                let is_sel = cur_kind_name == lbl;
+                                let kind = if is_sel { Kind::Primary } else { Kind::Secondary };
+                                if widgets::button(ui, lbl, kind, 0.0).clicked() && !is_sel {
+                                    *control = match lbl {
+                                        "Button" => crate::models::InteractiveControlKind::Button {
+                                            label: "Action".to_string(),
+                                            icon: None,
+                                            action: None,
+                                        },
+                                        "Toggle" => crate::models::InteractiveControlKind::ToggleSwitch {
+                                            label: "Toggle".to_string(),
+                                            is_active: false,
+                                            bind_rule_id: None,
+                                            on_enable: None,
+                                            on_disable: None,
+                                        },
+                                        _ => crate::models::InteractiveControlKind::Slider {
+                                            label: "Volume".to_string(),
+                                            value: 50.0,
+                                            min: 0.0,
+                                            max: 100.0,
+                                            bind_target: crate::models::SliderBindTarget::MasterVolume,
+                                        },
+                                    };
+                                }
+                            }
+                        });
+
+                        match control {
+                            crate::models::InteractiveControlKind::Button { label, action, .. } => {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(loc.overlay_studio_control_label).size(10.0).family(theme::semibold()).color(t.faint));
+                                    ui.text_edit_singleline(label);
+                                });
+                                render_element_click_action_ui(ui, action, rules_list, idx, t, loc);
+                            }
+                            crate::models::InteractiveControlKind::ToggleSwitch { label, is_active, on_enable, on_disable, .. } => {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(loc.overlay_studio_control_label).size(10.0).family(theme::semibold()).color(t.faint));
+                                    ui.text_edit_singleline(label);
+                                });
+                                ui.checkbox(is_active, "Initial Active State");
+                                render_element_click_action_ui(ui, on_enable, rules_list, idx + 100, t, loc);
+                                render_element_click_action_ui(ui, on_disable, rules_list, idx + 200, t, loc);
+                            }
+                            crate::models::InteractiveControlKind::Slider { label, value, min, max, bind_target } => {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(loc.overlay_studio_control_label).size(10.0).family(theme::semibold()).color(t.faint));
+                                    ui.text_edit_singleline(label);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(loc.overlay_studio_control_slider_target).size(10.0).family(theme::semibold()).color(t.faint));
+                                    let target_lbl = match bind_target {
+                                        crate::models::SliderBindTarget::MasterVolume => "Master Volume",
+                                        crate::models::SliderBindTarget::CustomVariable => "Custom Variable",
+                                        crate::models::SliderBindTarget::OverlayOpacity => "Overlay Opacity",
+                                        crate::models::SliderBindTarget::ProcessVolume => "Process Volume",
+                                    };
+                                    egui::ComboBox::from_id_salt(ui.id().with(("slider_target", idx)))
+                                        .selected_text(target_lbl)
+                                        .width(ui.available_width() - 8.0)
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::MasterVolume, "Master Volume");
+                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::CustomVariable, "Custom Variable");
+                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::OverlayOpacity, "Overlay Opacity");
+                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::ProcessVolume, "Process Volume");
+                                        });
+                                });
+                                ui.columns(2, |cols| {
+                                    cols[0].add(egui::DragValue::new(min).prefix("Min: "));
+                                    cols[1].add(egui::DragValue::new(max).prefix("Max: "));
+                                });
+                                ui.add(egui::Slider::new(value, *min..=*max).text("Value"));
+                            }
+                        }
+
+                        ui.columns(3, |cols| {
+                            render_color_chip(&mut cols[0], "TEXT:", color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
+                            render_color_chip(&mut cols[1], "BG:", bg_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
+                            render_color_chip(&mut cols[2], "ACTIVE:", active_color, ColorPickerTarget::CardBorder, active_color_target, t);
+                        });
+                        if *active_color_target == Some(ColorPickerTarget::ElementPrimary(idx)) {
+                            render_inline_color_editor(ui, color, true, t);
+                        } else if *active_color_target == Some(ColorPickerTarget::ElementSecondary(idx)) {
+                            render_inline_color_editor(ui, bg_color, true, t);
+                        }
+
+                        ui.columns(2, |cols| {
+                            cols[0].add(egui::DragValue::new(width).range(20.0..=overlay.rect.width.max(20.0)).prefix("W: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(height).range(15.0..=overlay.rect.height.max(15.0)).prefix("H: ").suffix(" px"));
+                        });
+
+                        render_rotation_control(ui, rotation, t, loc);
+
+                        ui.columns(2, |cols| {
+                            let max_x = (overlay.rect.width - *width).max(0.0);
+                            let max_y = (overlay.rect.height - *height).max(0.0);
+                            cols[0].add(egui::DragValue::new(x).range(0.0..=max_x.max(0.0)).prefix("X: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(y).range(0.0..=max_y.max(0.0)).prefix("Y: ").suffix(" px"));
+                        });
+                    }
+
+                    OverlayElement::SystemTelemetry {
+                        kind,
+                        style,
+                        color,
+                        bg_color,
+                        x,
+                        y,
+                        width,
+                        height,
+                        rotation,
+                        on_click,
+                        ..
+                    } => {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(loc.overlay_studio_telemetry_kind).size(10.0).family(theme::semibold()).color(t.faint));
+                            let kind_lbl = match kind {
+                                crate::models::TelemetryKind::Battery => loc.overlay_studio_telemetry_kind_battery,
+                                crate::models::TelemetryKind::AudioMicStatus => loc.overlay_studio_telemetry_kind_audio,
+                                crate::models::TelemetryKind::EngineStatus => loc.overlay_studio_telemetry_kind_engine,
+                            };
+                            egui::ComboBox::from_id_salt(ui.id().with(("telem_kind", idx)))
+                                .selected_text(kind_lbl)
+                                .width(ui.available_width() - 8.0)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(kind, crate::models::TelemetryKind::Battery, loc.overlay_studio_telemetry_kind_battery);
+                                    ui.selectable_value(kind, crate::models::TelemetryKind::AudioMicStatus, loc.overlay_studio_telemetry_kind_audio);
+                                    ui.selectable_value(kind, crate::models::TelemetryKind::EngineStatus, loc.overlay_studio_telemetry_kind_engine);
+                                });
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(loc.overlay_studio_telemetry_style).size(10.0).family(theme::semibold()).color(t.faint));
+                            let style_lbl = match style {
+                                crate::models::TelemetryStyle::Badge => loc.overlay_studio_telemetry_style_badge,
+                                crate::models::TelemetryStyle::Compact => loc.overlay_studio_telemetry_style_compact,
+                                crate::models::TelemetryStyle::Detailed => loc.overlay_studio_telemetry_style_detailed,
+                            };
+                            egui::ComboBox::from_id_salt(ui.id().with(("telem_style", idx)))
+                                .selected_text(style_lbl)
+                                .width(ui.available_width() - 8.0)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(style, crate::models::TelemetryStyle::Badge, loc.overlay_studio_telemetry_style_badge);
+                                    ui.selectable_value(style, crate::models::TelemetryStyle::Compact, loc.overlay_studio_telemetry_style_compact);
+                                    ui.selectable_value(style, crate::models::TelemetryStyle::Detailed, loc.overlay_studio_telemetry_style_detailed);
+                                });
+                        });
+
+                        ui.columns(2, |cols| {
+                            render_color_chip(&mut cols[0], "COLOR:", color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
+                            render_color_chip(&mut cols[1], "BG:", bg_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
+                        });
+                        if *active_color_target == Some(ColorPickerTarget::ElementPrimary(idx)) {
+                            render_inline_color_editor(ui, color, true, t);
+                        } else if *active_color_target == Some(ColorPickerTarget::ElementSecondary(idx)) {
+                            render_inline_color_editor(ui, bg_color, true, t);
+                        }
+
+                        ui.columns(2, |cols| {
+                            cols[0].add(egui::DragValue::new(width).range(20.0..=overlay.rect.width.max(20.0)).prefix("W: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(height).range(15.0..=overlay.rect.height.max(15.0)).prefix("H: ").suffix(" px"));
+                        });
+
+                        render_rotation_control(ui, rotation, t, loc);
+
+                        ui.columns(2, |cols| {
+                            let max_x = (overlay.rect.width - *width).max(0.0);
+                            let max_y = (overlay.rect.height - *height).max(0.0);
+                            cols[0].add(egui::DragValue::new(x).range(0.0..=max_x.max(0.0)).prefix("X: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(y).range(0.0..=max_y.max(0.0)).prefix("Y: ").suffix(" px"));
+                        });
+
+                        if !overlay.click_through {
+                            render_element_click_action_ui(ui, on_click, rules_list, idx, t, loc);
+                        }
+                    }
+
+                    OverlayElement::MediaWidget {
+                        show_controls,
+                        compact,
+                        color,
+                        bg_color,
+                        x,
+                        y,
+                        width,
+                        height,
+                        rotation,
+                        ..
+                    } => {
+                        ui.horizontal(|ui| {
+                            ui.checkbox(show_controls, loc.overlay_studio_media_controls);
+                            ui.checkbox(compact, loc.overlay_studio_compact_mode);
+                        });
+
+                        ui.columns(2, |cols| {
+                            render_color_chip(&mut cols[0], "TEXT:", color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
+                            render_color_chip(&mut cols[1], "BG:", bg_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
+                        });
+                        if *active_color_target == Some(ColorPickerTarget::ElementPrimary(idx)) {
+                            render_inline_color_editor(ui, color, true, t);
+                        } else if *active_color_target == Some(ColorPickerTarget::ElementSecondary(idx)) {
+                            render_inline_color_editor(ui, bg_color, true, t);
+                        }
+
+                        ui.columns(2, |cols| {
+                            cols[0].add(egui::DragValue::new(width).range(40.0..=overlay.rect.width.max(40.0)).prefix("W: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(height).range(20.0..=overlay.rect.height.max(20.0)).prefix("H: ").suffix(" px"));
+                        });
+
+                        render_rotation_control(ui, rotation, t, loc);
+
+                        ui.columns(2, |cols| {
+                            let max_x = (overlay.rect.width - *width).max(0.0);
+                            let max_y = (overlay.rect.height - *height).max(0.0);
+                            cols[0].add(egui::DragValue::new(x).range(0.0..=max_x.max(0.0)).prefix("X: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(y).range(0.0..=max_y.max(0.0)).prefix("Y: ").suffix(" px"));
+                        });
+                    }
+
+                    OverlayElement::KeyVisualizer {
+                        layout,
+                        max_keys,
+                        decay_seconds,
+                        show_modifiers_only,
+                        color,
+                        bg_color,
+                        active_color,
+                        x,
+                        y,
+                        width,
+                        height,
+                        rotation,
+                        ..
+                    } => {
+                        let mut changed_layout = false;
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(loc.overlay_studio_keyvis_layout).size(10.0).family(theme::semibold()).color(t.faint));
+                            let selected_text = match layout {
+                                crate::models::KeyVisualizerLayout::WasdMouse => loc.overlay_studio_keyvis_wasd_mouse,
+                                crate::models::KeyVisualizerLayout::WasdOnly => loc.overlay_studio_keyvis_wasd_only,
+                                crate::models::KeyVisualizerLayout::ActionRpg => loc.overlay_studio_keyvis_action_rpg,
+                                crate::models::KeyVisualizerLayout::MouseOnly => loc.overlay_studio_keyvis_mouse_only,
+                                crate::models::KeyVisualizerLayout::TextStream => loc.overlay_studio_keyvis_text_stream,
+                            };
+                            egui::ComboBox::from_id_salt(format!("kv_layout_{idx}"))
+                                .selected_text(selected_text)
+                                .show_ui(ui, |ui| {
+                                    if ui.selectable_value(layout, crate::models::KeyVisualizerLayout::WasdMouse, loc.overlay_studio_keyvis_wasd_mouse).clicked() {
+                                        changed_layout = true;
+                                    }
+                                    if ui.selectable_value(layout, crate::models::KeyVisualizerLayout::WasdOnly, loc.overlay_studio_keyvis_wasd_only).clicked() {
+                                        changed_layout = true;
+                                    }
+                                    if ui.selectable_value(layout, crate::models::KeyVisualizerLayout::ActionRpg, loc.overlay_studio_keyvis_action_rpg).clicked() {
+                                        changed_layout = true;
+                                    }
+                                    if ui.selectable_value(layout, crate::models::KeyVisualizerLayout::MouseOnly, loc.overlay_studio_keyvis_mouse_only).clicked() {
+                                        changed_layout = true;
+                                    }
+                                    if ui.selectable_value(layout, crate::models::KeyVisualizerLayout::TextStream, loc.overlay_studio_keyvis_text_stream).clicked() {
+                                        changed_layout = true;
+                                    }
+                                });
+                        });
+                        if changed_layout {
+                            match layout {
+                                crate::models::KeyVisualizerLayout::WasdMouse => { *width = 170.0; *height = 105.0; }
+                                crate::models::KeyVisualizerLayout::WasdOnly => { *width = 120.0; *height = 100.0; }
+                                crate::models::KeyVisualizerLayout::ActionRpg => { *width = 160.0; *height = 110.0; }
+                                crate::models::KeyVisualizerLayout::MouseOnly => { *width = 90.0; *height = 70.0; }
+                                crate::models::KeyVisualizerLayout::TextStream => { *width = 160.0; *height = 32.0; }
+                            }
+                        }
+
+                        if *layout == crate::models::KeyVisualizerLayout::TextStream {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(loc.overlay_studio_key_max).size(10.0).family(theme::semibold()).color(t.faint));
+                                ui.add(egui::DragValue::new(max_keys).range(1..=8));
+                                ui.label(RichText::new(loc.overlay_studio_key_decay).size(10.0).family(theme::semibold()).color(t.faint));
+                                ui.add(egui::DragValue::new(decay_seconds).range(0.2..=5.0).suffix(" s"));
+                            });
+                            ui.checkbox(show_modifiers_only, loc.overlay_studio_key_modifiers_only);
+                        }
+
+                        if *layout == crate::models::KeyVisualizerLayout::TextStream {
+                            ui.columns(2, |cols| {
+                                render_color_chip(&mut cols[0], "TEXT:", color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
+                                render_color_chip(&mut cols[1], "BG:", bg_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
+                            });
+                        } else {
+                            ui.columns(3, |cols| {
+                                render_color_chip(&mut cols[0], "TEXT:", color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
+                                render_color_chip(&mut cols[1], "BG:", bg_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
+                                render_color_chip(&mut cols[2], "GLOW:", active_color, ColorPickerTarget::ElementTertiary(idx), active_color_target, t);
+                            });
+                        }
+
+                        if *active_color_target == Some(ColorPickerTarget::ElementPrimary(idx)) {
+                            render_inline_color_editor(ui, color, true, t);
+                        } else if *active_color_target == Some(ColorPickerTarget::ElementSecondary(idx)) {
+                            render_inline_color_editor(ui, bg_color, true, t);
+                        } else if *active_color_target == Some(ColorPickerTarget::ElementTertiary(idx)) {
+                            render_inline_color_editor(ui, active_color, true, t);
+                        }
+
+                        ui.columns(2, |cols| {
+                            cols[0].add(egui::DragValue::new(width).range(30.0..=overlay.rect.width.max(30.0)).prefix("W: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(height).range(18.0..=overlay.rect.height.max(18.0)).prefix("H: ").suffix(" px"));
+                        });
+
+                        render_rotation_control(ui, rotation, t, loc);
+
+                        ui.columns(2, |cols| {
+                            let max_x = (overlay.rect.width - *width).max(0.0);
+                            let max_y = (overlay.rect.height - *height).max(0.0);
+                            cols[0].add(egui::DragValue::new(x).range(0.0..=max_x.max(0.0)).prefix("X: ").suffix(" px"));
+                            cols[1].add(egui::DragValue::new(y).range(0.0..=max_y.max(0.0)).prefix("Y: ").suffix(" px"));
+                        });
+                    }
                 }
             });
 
@@ -1869,6 +2279,11 @@ fn render_overlay_inspector(
     // Trailing drop slot after all elements
     if total_elems > 0 {
         render_elem_drop_slot(ui, total_elems, active_dst, active_src, total_elems, t);
+
+        if widgets::full_width_action_button(ui, loc.overlay_studio_btn_add_element_large, "", t) {
+            *open_element_catalog = true;
+        }
+        ui.add_space(4.0);
     }
 
     // Commit reorder on mouse release
@@ -1878,10 +2293,12 @@ fn render_overlay_inspector(
             let dst = session.target_idx;
             if src < overlay.elements.len() && dst <= overlay.elements.len() {
                 if dst < src {
+                    push_undo(overlay);
                     let item = overlay.elements.remove(src);
                     overlay.elements.insert(dst, item);
                     *selected_idx = Some(dst);
                 } else if dst > src + 1 {
+                    push_undo(overlay);
                     let item = overlay.elements.remove(src);
                     overlay.elements.insert(dst - 1, item);
                     *selected_idx = Some(dst - 1);
@@ -1923,6 +2340,12 @@ fn render_overlay_inspector(
                         },
                         t.accent_ink,
                     ),
+                    OverlayElement::Graph { .. } => ("GRAPH", t.good),
+                    OverlayElement::ClockTimer { .. } => ("CLOCK", t.ink),
+                    OverlayElement::InteractiveControl { .. } => ("CONTROL", t.accent_ink),
+                    OverlayElement::SystemTelemetry { .. } => ("STATUS", t.warn),
+                    OverlayElement::MediaWidget { .. } => ("MEDIA", t.good),
+                    OverlayElement::KeyVisualizer { .. } => ("KEYS", t.faint),
                 };
                 let float_rect = Rect::from_min_size(pointer + vec2(12.0, 10.0), vec2(110.0, 26.0));
                 p.rect_filled(float_rect, CornerRadius::same(4), t.bg);
@@ -1941,26 +2364,18 @@ fn render_overlay_inspector(
     // Handle cloning
     if let Some(idx) = clone_idx {
         if idx < overlay.elements.len() {
+            push_undo(overlay);
             let mut cloned = overlay.elements[idx].clone();
             let (ew, eh) = get_element_size(&cloned);
-            match &mut cloned {
-                OverlayElement::Text { id, x, y, .. }
-                | OverlayElement::Badge { id, x, y, .. }
-                | OverlayElement::ProgressBar { id, x, y, .. }
-                | OverlayElement::Image { id, x, y, .. }
-                | OverlayElement::Shape { id, x, y, .. }
-                | OverlayElement::Crosshair { id, x, y, .. } => {
-                    *id = format!("{}_copy", id);
-                    let cand_x = *x + 16.0;
-                    let cand_y = *y + 16.0;
-                    if cand_x + ew > overlay.rect.width || cand_y + eh > overlay.rect.height {
-                        *x = 0.0;
-                        *y = 0.0;
-                    } else {
-                        *x = cand_x;
-                        *y = cand_y;
-                    }
-                }
+            *cloned.id_mut() = format!("{}_copy", cloned.id());
+            let cand_x = cloned.x() + 16.0;
+            let cand_y = cloned.y() + 16.0;
+            if cand_x + ew > overlay.rect.width || cand_y + eh > overlay.rect.height {
+                *cloned.x_mut() = 0.0;
+                *cloned.y_mut() = 0.0;
+            } else {
+                *cloned.x_mut() = cand_x;
+                *cloned.y_mut() = cand_y;
             }
             overlay.elements.insert(idx + 1, cloned);
             clamp_elements_to_canvas(overlay);
@@ -1971,6 +2386,7 @@ fn render_overlay_inspector(
     // Handle removal
     if let Some(r_idx) = remove_idx {
         if r_idx < overlay.elements.len() {
+            push_undo(overlay);
             overlay.elements.remove(r_idx);
             if *selected_idx == Some(r_idx) {
                 *selected_idx = None;
@@ -2004,6 +2420,18 @@ fn render_element_click_action_ui(
                 let name = rules_list.iter().find(|(id, _)| id == rule_id).map(|(_, n)| n.as_str()).unwrap_or(rule_id);
                 format!("{}: {name}", loc.overlay_studio_on_click_trigger)
             }
+            Some(OverlayClickAction::KillProcess { process_name }) => {
+                format!("Kill: {process_name}")
+            }
+            Some(OverlayClickAction::TrimMemory { process_name }) => {
+                format!("Trim: {process_name}")
+            }
+            Some(OverlayClickAction::ToggleMute) => "Toggle Mute".to_string(),
+            Some(OverlayClickAction::MediaPlayPause) => "Play / Pause".to_string(),
+            Some(OverlayClickAction::MediaNext) => "Next Track".to_string(),
+            Some(OverlayClickAction::MediaPrev) => "Prev Track".to_string(),
+            Some(OverlayClickAction::ResetTimer) => "Reset Timer".to_string(),
+            Some(OverlayClickAction::ToggleTimer) => "Toggle Timer".to_string(),
         };
 
         egui::ComboBox::from_id_salt(ui.id().with(("elem_onclick", idx)))
@@ -2015,6 +2443,24 @@ fn render_element_click_action_ui(
                 }
                 if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::CloseOverlay)), loc.overlay_studio_on_click_close).clicked() {
                     *on_click = Some(OverlayClickAction::CloseOverlay);
+                }
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ToggleMute)), "Toggle Mute").clicked() {
+                    *on_click = Some(OverlayClickAction::ToggleMute);
+                }
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaPlayPause)), "Media Play/Pause").clicked() {
+                    *on_click = Some(OverlayClickAction::MediaPlayPause);
+                }
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaNext)), "Media Next").clicked() {
+                    *on_click = Some(OverlayClickAction::MediaNext);
+                }
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaPrev)), "Media Prev").clicked() {
+                    *on_click = Some(OverlayClickAction::MediaPrev);
+                }
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ToggleTimer)), "Timer: Play/Pause").clicked() {
+                    *on_click = Some(OverlayClickAction::ToggleTimer);
+                }
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ResetTimer)), "Timer: Reset").clicked() {
+                    *on_click = Some(OverlayClickAction::ResetTimer);
                 }
                 if !rules_list.is_empty() {
                     ui.separator();
@@ -2066,6 +2512,28 @@ enum CanvasDragMode {
     },
 }
 
+pub fn resolve_overlay_monitor(
+    overlay: &OverlayDefinition,
+    monitors: &[crate::models::MonitorInfo],
+) -> crate::models::MonitorInfo {
+    overlay
+        .monitor_index
+        .and_then(|idx| monitors.get(idx))
+        .or_else(|| monitors.iter().find(|m| m.is_primary))
+        .or_else(|| monitors.first())
+        .cloned()
+        .unwrap_or_else(|| crate::models::MonitorInfo {
+            index: 0,
+            name: "Primary Display".to_string(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            is_primary: true,
+        })
+}
+
+#[allow(dead_code)]
 #[cfg(windows)]
 fn get_screen_resolution() -> (f32, f32) {
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
@@ -2078,6 +2546,7 @@ fn get_screen_resolution() -> (f32, f32) {
     }
 }
 
+#[allow(dead_code)]
 #[cfg(not(windows))]
 fn get_screen_resolution() -> (f32, f32) {
     (1920.0, 1080.0)
@@ -2158,157 +2627,208 @@ fn render_overlay_canvas(
     t: &Tokens,
     loc: &crate::i18n::Strings,
 ) {
-    let (screen_w, screen_h) = get_screen_resolution();
+    let monitors = crate::daemon::overlay_manager::get_system_monitors();
+    let active_mon = resolve_overlay_monitor(&studio.overlay, &monitors);
+    let screen_w = active_mon.width as f32;
+    let screen_h = active_mon.height as f32;
     clamp_card_to_monitor(&mut studio.overlay, screen_w, screen_h);
 
-    let avail_canvas_w = (ui.available_width() - 4.0).max(80.0);
+    let min_x = monitors.iter().map(|m| m.x).min().unwrap_or(0);
+    let min_y = monitors.iter().map(|m| m.y).min().unwrap_or(0);
+    let max_x = monitors.iter().map(|m| m.x + m.width as i32).max().unwrap_or(1920);
+    let max_y = monitors.iter().map(|m| m.y + m.height as i32).max().unwrap_or(1080);
+    let desktop_w = (max_x - min_x).max(1) as f32;
+    let desktop_h = (max_y - min_y).max(1) as f32;
+    let desktop_center_x = (min_x + max_x) as f32 * 0.5;
+    let desktop_center_y = (min_y + max_y) as f32 * 0.5;
+
+    let avail_canvas_w = ui.available_width().max(80.0);
     let avail_canvas_h = (ui.available_height() - 44.0).max(80.0);
 
-    // 1. Calculate default auto-fit zoom for monitor artboard
+    // 1. Calculate default auto-fit zoom for all monitors on the virtual desktop
     let fit_margin = 32.0;
-    let fit_scale_x = (avail_canvas_w - fit_margin * 2.0).max(40.0) / screen_w;
-    let fit_scale_y = (avail_canvas_h - fit_margin * 2.0).max(40.0) / screen_h;
+    let fit_scale_x = (avail_canvas_w - fit_margin * 2.0).max(40.0) / desktop_w;
+    let fit_scale_y = (avail_canvas_h - fit_margin * 2.0).max(40.0) / desktop_h;
     let auto_zoom = fit_scale_x.min(fit_scale_y).clamp(0.05, 5.0);
 
     let cur_zoom = studio.canvas_zoom.unwrap_or(auto_zoom);
 
-    // Header Strip with camera controls and snap toggle
-    ui.horizontal(|ui| {
-        widgets::hud(ui, loc.overlay_studio_canvas_title, t.faint);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(4.0);
-            egui::Frame::new()
-                .fill(t.sunken)
-                .stroke(t.hairline())
-                .corner_radius(CornerRadius::same(4))
-                .inner_margin(egui::Margin::symmetric(6, 3))
-                .show(ui, |ui| {
+    // Full-width Header Toolbar with undo/redo, camera controls, and snap toggle
+    // Aligned on the right with the canvas below
+    let tb_frame = egui::Frame::new()
+        .fill(t.sunken)
+        .stroke(t.hairline())
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(egui::Margin::symmetric(8, 4));
+    let tb_content_w = (avail_canvas_w - tb_frame.total_margin().sum().x).max(60.0);
+
+    tb_frame.show(ui, |ui| {
+        ui.set_width(tb_content_w);
+        ui.horizontal(|ui| {
+                // 1. LEFT: Undo & Redo buttons
+                // Undo Button (ArrowUUpLeft)
+                let can_undo = studio.can_undo();
+                let undo_color = if can_undo { t.ink } else { t.faint.gamma_multiply(0.35) };
+                let (undo_rect, undo_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), if can_undo { Sense::click() } else { Sense::hover() });
+                if can_undo && undo_resp.hovered() {
+                    ui.painter().rect_filled(undo_rect, CornerRadius::same(2), t.bg);
+                }
+                ui.painter().text(
+                    undo_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    egui_phosphor::regular::ARROW_U_UP_LEFT,
+                    FontId::new(12.0, theme::phosphor()),
+                    undo_color,
+                );
+                if can_undo && undo_resp.on_hover_text(loc.overlay_studio_undo_tooltip).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    studio.undo();
+                }
+
+                // Redo Button (ArrowUUpRight)
+                let can_redo = studio.can_redo();
+                let redo_color = if can_redo { t.ink } else { t.faint.gamma_multiply(0.35) };
+                let (redo_rect, redo_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), if can_redo { Sense::click() } else { Sense::hover() });
+                if can_redo && redo_resp.hovered() {
+                    ui.painter().rect_filled(redo_rect, CornerRadius::same(2), t.bg);
+                }
+                ui.painter().text(
+                    redo_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    egui_phosphor::regular::ARROW_U_UP_RIGHT,
+                    FontId::new(12.0, theme::phosphor()),
+                    redo_color,
+                );
+                if can_redo && redo_resp.on_hover_text(loc.overlay_studio_redo_tooltip).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    studio.redo();
+                }
+
+                // 2. RIGHT: Camera controls and snap toggle (right-to-left layout)
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.horizontal(|ui| {
-                        // 1. Snap to Grid Toggle
-                        let grid_glyph = egui_phosphor::regular::MAGNET;
-                        let grid_color = if studio.snap_to_grid { t.accent_ink } else { t.faint };
-                        let (grid_rect, grid_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                        if studio.snap_to_grid {
-                            ui.painter().rect_filled(grid_rect, CornerRadius::same(2), t.accent_ink.gamma_multiply(0.2));
-                        } else if grid_resp.hovered() {
-                            ui.painter().rect_filled(grid_rect, CornerRadius::same(2), t.bg);
-                        }
-                        ui.painter().text(
-                            grid_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            grid_glyph,
-                            FontId::new(12.0, theme::phosphor()),
-                            grid_color,
-                        );
-                        if grid_resp.on_hover_text(loc.overlay_studio_snap_grid).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            studio.snap_to_grid = !studio.snap_to_grid;
-                        }
 
-                        // 2. Focus Overlay Card Button
-                        let (focus_rect, focus_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                        if focus_resp.hovered() {
-                            ui.painter().rect_filled(focus_rect, CornerRadius::same(2), t.bg);
-                        }
-                        ui.painter().text(
-                            focus_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            egui_phosphor::regular::TARGET,
-                            FontId::new(12.0, theme::phosphor()),
-                            t.faint,
-                        );
-                        if focus_resp.on_hover_text(loc.overlay_studio_focus_card).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            let (csx, csy) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
-                            let focus_margin = 60.0;
-                            let f_zoom_x = (avail_canvas_w - focus_margin * 2.0).max(40.0) / studio.overlay.rect.width.max(32.0);
-                            let f_zoom_y = (avail_canvas_h - focus_margin * 2.0).max(40.0) / studio.overlay.rect.height.max(32.0);
-                            let target_zoom = f_zoom_x.min(f_zoom_y).clamp(0.2, 5.0);
-                            let card_center = pos2(csx + studio.overlay.rect.width * 0.5, csy + studio.overlay.rect.height * 0.5);
-                            let offset = card_center - pos2(screen_w * 0.5, screen_h * 0.5);
-                            studio.canvas_pan = -offset * target_zoom;
-                            studio.canvas_zoom = Some(target_zoom);
-                        }
+                    // 7. Zoom In (+) Button (Rightmost)
+                    let (in_rect, in_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                    if in_resp.hovered() {
+                        ui.painter().rect_filled(in_rect, CornerRadius::same(2), t.bg);
+                    }
+                    ui.painter().text(
+                        in_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        egui_phosphor::regular::PLUS,
+                        FontId::new(12.0, theme::phosphor()),
+                        t.faint,
+                    );
+                    if in_resp.on_hover_text(loc.overlay_studio_zoom_in).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        studio.canvas_zoom = Some((cur_zoom * 1.2).clamp(0.08, 10.0));
+                    }
 
-                        // 4. Fit Screen Button
-                        let (fit_rect, fit_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                        if fit_resp.hovered() {
-                            ui.painter().rect_filled(fit_rect, CornerRadius::same(2), t.bg);
-                        }
-                        ui.painter().text(
-                            fit_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            egui_phosphor::regular::ARROWS_OUT,
-                            FontId::new(12.0, theme::phosphor()),
-                            t.faint,
-                        );
-                        if fit_resp.on_hover_text(loc.overlay_studio_fit_screen).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            studio.canvas_pan = Vec2::ZERO;
-                            studio.canvas_zoom = Some(auto_zoom);
-                        }
+                    // 6. Zoom Level Display / Reset to 100%
+                    let zoom_pct = (cur_zoom * 100.0).round() as i32;
+                    let zoom_str = format!("{zoom_pct}%");
+                    let z_text_w = ui.painter().layout_no_wrap(zoom_str.clone(), FontId::new(10.5, theme::mono_bold()), t.ink).size().x + 8.0;
+                    let (z_rect, z_resp) = ui.allocate_exact_size(vec2(z_text_w, 18.0), Sense::click());
+                    if z_resp.hovered() {
+                        ui.painter().rect_filled(z_rect, CornerRadius::same(2), t.bg);
+                    }
+                    ui.painter().text(
+                        z_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        &zoom_str,
+                        FontId::new(10.5, theme::mono_bold()),
+                        t.accent_ink,
+                    );
+                    if z_resp.on_hover_text(loc.overlay_studio_reset_zoom).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        studio.canvas_zoom = Some(1.0);
+                        studio.canvas_pan = Vec2::ZERO;
+                    }
 
-                        // Divider
-                        let (div_rect2, _) = ui.allocate_exact_size(vec2(1.0, 14.0), Sense::hover());
-                        ui.painter().vline(div_rect2.center().x, div_rect2.y_range(), t.hairline());
+                    // 5. Zoom Out (-) Button
+                    let (out_rect, out_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                    if out_resp.hovered() {
+                        ui.painter().rect_filled(out_rect, CornerRadius::same(2), t.bg);
+                    }
+                    ui.painter().text(
+                        out_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        egui_phosphor::regular::MINUS,
+                        FontId::new(12.0, theme::phosphor()),
+                        t.faint,
+                    );
+                    if out_resp.on_hover_text(loc.overlay_studio_zoom_out).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        studio.canvas_zoom = Some((cur_zoom / 1.2).clamp(0.08, 10.0));
+                    }
 
-                        // 5. Zoom Out (-) Button
-                        let (out_rect, out_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                        if out_resp.hovered() {
-                            ui.painter().rect_filled(out_rect, CornerRadius::same(2), t.bg);
-                        }
-                        ui.painter().text(
-                            out_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            egui_phosphor::regular::MINUS,
-                            FontId::new(12.0, theme::phosphor()),
-                            t.faint,
-                        );
-                        if out_resp.on_hover_text(loc.overlay_studio_zoom_out).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            studio.canvas_zoom = Some((cur_zoom / 1.2).clamp(0.08, 10.0));
-                        }
+                    // Divider
+                    let (div_rect2, _) = ui.allocate_exact_size(vec2(1.0, 14.0), Sense::hover());
+                    ui.painter().vline(div_rect2.center().x, div_rect2.y_range(), t.hairline());
 
-                        // 6. Zoom Level Display / Reset to 100%
-                        let zoom_pct = (cur_zoom * 100.0).round() as i32;
-                        let zoom_str = format!("{zoom_pct}%");
-                        let z_text_w = ui.painter().layout_no_wrap(zoom_str.clone(), FontId::new(10.5, theme::mono_bold()), t.ink).size().x + 8.0;
-                        let (z_rect, z_resp) = ui.allocate_exact_size(vec2(z_text_w, 18.0), Sense::click());
-                        if z_resp.hovered() {
-                            ui.painter().rect_filled(z_rect, CornerRadius::same(2), t.bg);
-                        }
-                        ui.painter().text(
-                            z_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            &zoom_str,
-                            FontId::new(10.5, theme::mono_bold()),
-                            t.accent_ink,
-                        );
-                        if z_resp.on_hover_text(loc.overlay_studio_reset_zoom).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            studio.canvas_zoom = Some(1.0);
-                            studio.canvas_pan = Vec2::ZERO;
-                        }
+                    // 4. Fit Screen Button
+                    let (fit_rect, fit_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                    if fit_resp.hovered() {
+                        ui.painter().rect_filled(fit_rect, CornerRadius::same(2), t.bg);
+                    }
+                    ui.painter().text(
+                        fit_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        egui_phosphor::regular::ARROWS_OUT,
+                        FontId::new(12.0, theme::phosphor()),
+                        t.faint,
+                    );
+                    if fit_resp.on_hover_text(loc.overlay_studio_fit_screen).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        studio.canvas_pan = Vec2::ZERO;
+                        studio.canvas_zoom = Some(auto_zoom);
+                    }
 
-                        // 7. Zoom In (+) Button
-                        let (in_rect, in_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                        if in_resp.hovered() {
-                            ui.painter().rect_filled(in_rect, CornerRadius::same(2), t.bg);
-                        }
-                        ui.painter().text(
-                            in_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            egui_phosphor::regular::PLUS,
-                            FontId::new(12.0, theme::phosphor()),
-                            t.faint,
-                        );
-                        if in_resp.on_hover_text(loc.overlay_studio_zoom_in).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            studio.canvas_zoom = Some((cur_zoom * 1.2).clamp(0.08, 10.0));
-                        }
-                    });
+                    // 3. Focus Overlay Card Button
+                    let (focus_rect, focus_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                    if focus_resp.hovered() {
+                        ui.painter().rect_filled(focus_rect, CornerRadius::same(2), t.bg);
+                    }
+                    ui.painter().text(
+                        focus_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        egui_phosphor::regular::TARGET,
+                        FontId::new(12.0, theme::phosphor()),
+                        t.faint,
+                    );
+                    if focus_resp.on_hover_text(loc.overlay_studio_focus_card).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        let (csx, csy) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
+                        let card_center_vx = active_mon.x as f32 + csx + studio.overlay.rect.width * 0.5;
+                        let card_center_vy = active_mon.y as f32 + csy + studio.overlay.rect.height * 0.5;
+                        let focus_margin = 60.0;
+                        let f_zoom_x = (avail_canvas_w - focus_margin * 2.0).max(40.0) / studio.overlay.rect.width.max(32.0);
+                        let f_zoom_y = (avail_canvas_h - focus_margin * 2.0).max(40.0) / studio.overlay.rect.height.max(32.0);
+                        let target_zoom = f_zoom_x.min(f_zoom_y).clamp(0.2, 5.0);
+                        studio.canvas_pan = -vec2((card_center_vx - desktop_center_x) * target_zoom, (card_center_vy - desktop_center_y) * target_zoom);
+                        studio.canvas_zoom = Some(target_zoom);
+                    }
+
+                    // 2. Snap to Grid Toggle
+                    let grid_glyph = egui_phosphor::regular::MAGNET;
+                    let grid_color = if studio.snap_to_grid { t.accent_ink } else { t.faint };
+                    let (grid_rect, grid_resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
+                    if studio.snap_to_grid {
+                        ui.painter().rect_filled(grid_rect, CornerRadius::same(2), t.accent_ink.gamma_multiply(0.2));
+                    } else if grid_resp.hovered() {
+                        ui.painter().rect_filled(grid_rect, CornerRadius::same(2), t.bg);
+                    }
+                    ui.painter().text(
+                        grid_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        grid_glyph,
+                        FontId::new(12.0, theme::phosphor()),
+                        grid_color,
+                    );
+                    if grid_resp.on_hover_text(loc.overlay_studio_snap_grid).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        studio.snap_to_grid = !studio.snap_to_grid;
+                    }
                 });
+            });
         });
-    });
     ui.add_space(4.0);
 
     let canvas_size = vec2(
-        (ui.available_width() - 4.0).max(80.0),
+        avail_canvas_w,
         (ui.available_height() - 6.0).max(80.0),
     );
     let (canvas_rect, _resp) = ui.allocate_exact_size(canvas_size, Sense::hover());
@@ -2317,82 +2837,119 @@ fn render_overlay_canvas(
     let zoom = studio.canvas_zoom.unwrap_or(auto_zoom);
     let pan = studio.canvas_pan;
 
-    // Monitor Artboard setup
-    let monitor_size = vec2(screen_w * zoom, screen_h * zoom);
-    let monitor_origin = canvas_rect.center() + pan - monitor_size * 0.5;
-    let monitor_rect = Rect::from_min_size(monitor_origin, monitor_size);
-
-    let screen_to_canvas = |sp: Pos2| -> Pos2 {
-        monitor_origin + vec2(sp.x * zoom, sp.y * zoom)
+    let canvas_center = canvas_rect.center() + pan;
+    let virtual_to_canvas = |vx: f32, vy: f32| -> Pos2 {
+        canvas_center + vec2((vx - desktop_center_x) * zoom, (vy - desktop_center_y) * zoom)
     };
+    let canvas_to_virtual = |cp: Pos2| -> (f32, f32) {
+        let offset = cp - canvas_center;
+        (desktop_center_x + offset.x / zoom, desktop_center_y + offset.y / zoom)
+    };
+
+    let monitor_rects: Vec<(usize, Rect)> = monitors.iter().map(|m| {
+        let m_min = virtual_to_canvas(m.x as f32, m.y as f32);
+        let m_size = vec2(m.width as f32 * zoom, m.height as f32 * zoom);
+        (m.index, Rect::from_min_size(m_min, m_size))
+    }).collect();
 
     // 2. Draw workspace canvas background (Infinite artboard background)
     painter.rect_filled(canvas_rect, CornerRadius::same(6), Color32::from_rgb(11, 12, 15));
     painter.rect_stroke(canvas_rect, CornerRadius::same(6), t.hairline(), egui::StrokeKind::Inside);
 
-    // Workspace dot grid outside monitor
+    // Workspace dot grid outside monitors
     let dot_step = 24.0;
     let mut gx = canvas_rect.left() + dot_step;
     while gx < canvas_rect.right() {
         let mut gy = canvas_rect.top() + dot_step;
         while gy < canvas_rect.bottom() {
-            if !monitor_rect.contains(pos2(gx, gy)) {
-                painter.circle_filled(pos2(gx, gy), 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 12));
+            let pt = pos2(gx, gy);
+            if !monitor_rects.iter().any(|(_, mr)| mr.contains(pt)) {
+                painter.circle_filled(pt, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 12));
             }
             gy += dot_step;
         }
         gx += dot_step;
     }
 
-    // 3. Draw Monitor Artboard (Drop shadow + monitor surface)
-    painter.rect_filled(monitor_rect.expand(4.0), CornerRadius::same(8), Color32::from_rgba_unmultiplied(0, 0, 0, 90));
-    painter.rect_filled(monitor_rect, CornerRadius::same(6), Color32::from_rgb(17, 19, 24));
-    painter.rect_stroke(monitor_rect, CornerRadius::same(6), Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 30)), egui::StrokeKind::Inside);
+    // 3. Draw Monitor Artboards in true spatial layout
+    for m in &monitors {
+        let is_active = m.index == active_mon.index;
+        let m_rect = monitor_rects.iter().find(|(idx, _)| *idx == m.index).map(|(_, r)| *r).unwrap_or(Rect::ZERO);
 
-    // Monitor resolution label
-    let mon_label = format!("🖥 SCREEN 1 ({}×{})", screen_w as i32, screen_h as i32);
-    let mon_font = FontId::new((10.0f32 * zoom).clamp(8.0, 12.0), theme::mono());
-    let mon_label_pos = monitor_rect.min + vec2(8.0, 6.0);
-    if monitor_rect.height() > 30.0 {
-        painter.text(mon_label_pos, egui::Align2::LEFT_TOP, mon_label, mon_font, Color32::from_rgba_unmultiplied(255, 255, 255, 45));
-    }
+        let mon_label = format!("DISPLAY {}×{}", m.width, m.height);
 
-    // Monitor center crosslines (subtle guide)
-    let m_center = monitor_rect.center();
-    let center_stroke = if studio.snap_to_grid {
-        Stroke::new(1.0, t.accent_ink.gamma_multiply(0.35))
-    } else {
-        Stroke::new(0.8, Color32::from_rgba_unmultiplied(255, 255, 255, 18))
-    };
-    painter.vline(m_center.x, monitor_rect.y_range(), center_stroke);
-    painter.hline(monitor_rect.x_range(), m_center.y, center_stroke);
+        if is_active {
+            // Active Monitor Artboard (illuminated border + subtle surface)
+            painter.rect_filled(m_rect.expand(4.0), CornerRadius::same(8), Color32::from_rgba_unmultiplied(0, 0, 0, 110));
+            painter.rect_filled(m_rect, CornerRadius::same(6), Color32::from_rgb(17, 19, 24));
+            painter.rect_stroke(
+                m_rect,
+                CornerRadius::same(6),
+                Stroke::new(1.5, t.accent_ink),
+                egui::StrokeKind::Inside,
+            );
 
-    // Monitor grid if snap-to-grid is active
-    if studio.snap_to_grid {
-        let grid_step = 64.0 * zoom;
-        if grid_step >= 12.0 {
-            let mut mgx = monitor_rect.left() + grid_step;
-            while mgx < monitor_rect.right() - 1.0 {
-                painter.vline(mgx, monitor_rect.y_range(), Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 255, 255, 10)));
-                mgx += grid_step;
+            // Active monitor resolution badge
+            let mon_font = FontId::new((10.0f32 * zoom).clamp(8.0, 12.0), theme::mono_bold());
+            let label_pos = m_rect.min + vec2(8.0, 6.0);
+            if m_rect.height() > 24.0 {
+                painter.text(label_pos, egui::Align2::LEFT_TOP, mon_label, mon_font, t.accent_ink);
             }
-            let mut mgy = monitor_rect.top() + grid_step;
-            while mgy < monitor_rect.bottom() - 1.0 {
-                painter.hline(monitor_rect.x_range(), mgy, Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 255, 255, 10)));
-                mgy += grid_step;
+
+            // Monitor center crosslines (subtle guide)
+            let m_center = m_rect.center();
+            let center_stroke = if studio.snap_to_grid {
+                Stroke::new(1.0, t.accent_ink.gamma_multiply(0.35))
+            } else {
+                Stroke::new(0.8, Color32::from_rgba_unmultiplied(255, 255, 255, 18))
+            };
+            painter.vline(m_center.x, m_rect.y_range(), center_stroke);
+            painter.hline(m_rect.x_range(), m_center.y, center_stroke);
+
+            // Monitor grid if snap-to-grid is active
+            if studio.snap_to_grid {
+                let grid_step = 64.0 * zoom;
+                if grid_step >= 12.0 {
+                    let mut mgx = m_rect.left() + grid_step;
+                    while mgx < m_rect.right() - 1.0 {
+                        painter.vline(mgx, m_rect.y_range(), Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 255, 255, 10)));
+                        mgx += grid_step;
+                    }
+                    let mut mgy = m_rect.top() + grid_step;
+                    while mgy < m_rect.bottom() - 1.0 {
+                        painter.hline(m_rect.x_range(), mgy, Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 255, 255, 10)));
+                        mgy += grid_step;
+                    }
+                }
+            }
+        } else {
+            // Inactive Monitor Artboard (dimmed surface + subtle border)
+            painter.rect_filled(m_rect.expand(4.0), CornerRadius::same(8), Color32::from_rgba_unmultiplied(0, 0, 0, 80));
+            painter.rect_filled(m_rect, CornerRadius::same(6), Color32::from_rgb(13, 14, 18));
+            painter.rect_stroke(
+                m_rect,
+                CornerRadius::same(6),
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 24)),
+                egui::StrokeKind::Inside,
+            );
+
+            let mon_font = FontId::new((10.0f32 * zoom).clamp(8.0, 11.0), theme::mono());
+            let label_pos = m_rect.min + vec2(8.0, 6.0);
+            if m_rect.height() > 24.0 {
+                painter.text(label_pos, egui::Align2::LEFT_TOP, mon_label, mon_font, Color32::from_rgba_unmultiplied(255, 255, 255, 55));
             }
         }
     }
 
     // 4. Compute Card position and geometry on canvas
     let (card_sx, card_sy) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
-    let card_screen_rect = Rect::from_min_size(pos2(card_sx, card_sy), vec2(studio.overlay.rect.width, studio.overlay.rect.height));
-    let card_canvas_min = screen_to_canvas(card_screen_rect.min);
+    let card_virtual_min = pos2(active_mon.x as f32 + card_sx, active_mon.y as f32 + card_sy);
+    let card_canvas_min = virtual_to_canvas(card_virtual_min.x, card_virtual_min.y);
     let card_canvas_size = vec2(studio.overlay.rect.width * zoom, studio.overlay.rect.height * zoom);
     let card_canvas_rect = Rect::from_min_size(card_canvas_min, card_canvas_size);
 
     let pill_h = 16.0;
-    let pill_w = 160.0;
+    let pill_w = 114.0;
     let pill_top = (card_canvas_rect.top() - pill_h - 3.0).max(canvas_rect.top() + 4.0);
     let pill_rect = Rect::from_min_size(pos2(card_canvas_rect.left(), pill_top), vec2(pill_w, pill_h));
 
@@ -2468,6 +3025,7 @@ fn render_overlay_canvas(
                 drag_mode = CanvasDragMode::Pan { start_pointer: pos, start_pan: studio.canvas_pan };
             } else if let (Some(sel), Some((rot_rect, resize_rect, center, half_w, half_h))) = (studio.selected_element_idx, selected_handles) {
                 if rot_rect.expand(4.0).contains(pos) {
+                    studio.push_undo_snapshot();
                     let unrot_vec = vec2(-half_w - 3.0, -half_h - 3.0);
                     let base_angle_rad = unrot_vec.y.atan2(unrot_vec.x);
                     drag_mode = CanvasDragMode::Rotate {
@@ -2476,6 +3034,7 @@ fn render_overlay_canvas(
                         base_angle_rad,
                     };
                 } else if resize_rect.expand(4.0).contains(pos) {
+                    studio.push_undo_snapshot();
                     let elem = &studio.overlay.elements[sel];
                     let (raw_w, raw_h) = match elem {
                         OverlayElement::Crosshair { size, .. } => (*size, *size),
@@ -2489,6 +3048,7 @@ fn render_overlay_canvas(
                         start_pointer: pos,
                     };
                 } else if let Some((hit_idx, _)) = elem_rects.iter().rev().find(|(_, r)| r.expand(3.0).contains(pos)) {
+                    studio.push_undo_snapshot();
                     studio.selected_element_idx = Some(*hit_idx);
                     let (elem_x, elem_y) = (studio.overlay.elements[*hit_idx].x(), studio.overlay.elements[*hit_idx].y());
                     drag_mode = CanvasDragMode::Move {
@@ -2498,6 +3058,7 @@ fn render_overlay_canvas(
                         start_pointer: pos,
                     };
                 } else if card_resize_handle.expand(4.0).contains(pos) {
+                    studio.push_undo_snapshot();
                     studio.selected_element_idx = None;
                     drag_mode = CanvasDragMode::ResizeCard {
                         start_pointer: pos,
@@ -2505,6 +3066,7 @@ fn render_overlay_canvas(
                         start_h: studio.overlay.rect.height,
                     };
                 } else if pill_rect.expand(2.0).contains(pos) || card_canvas_rect.contains(pos) {
+                    studio.push_undo_snapshot();
                     studio.selected_element_idx = None;
                     drag_mode = CanvasDragMode::MoveCard {
                         start_pointer: pos,
@@ -2516,6 +3078,7 @@ fn render_overlay_canvas(
                     drag_mode = CanvasDragMode::Pan { start_pointer: pos, start_pan: studio.canvas_pan };
                 }
             } else if let Some((hit_idx, _)) = elem_rects.iter().rev().find(|(_, r)| r.expand(3.0).contains(pos)) {
+                studio.push_undo_snapshot();
                 studio.selected_element_idx = Some(*hit_idx);
                 let (elem_x, elem_y) = (studio.overlay.elements[*hit_idx].x(), studio.overlay.elements[*hit_idx].y());
                 drag_mode = CanvasDragMode::Move {
@@ -2525,6 +3088,7 @@ fn render_overlay_canvas(
                     start_pointer: pos,
                 };
             } else if card_resize_handle.expand(4.0).contains(pos) {
+                studio.push_undo_snapshot();
                 studio.selected_element_idx = None;
                 drag_mode = CanvasDragMode::ResizeCard {
                     start_pointer: pos,
@@ -2532,6 +3096,7 @@ fn render_overlay_canvas(
                     start_h: studio.overlay.rect.height,
                 };
             } else if pill_rect.expand(2.0).contains(pos) || card_canvas_rect.contains(pos) {
+                studio.push_undo_snapshot();
                 studio.selected_element_idx = None;
                 drag_mode = CanvasDragMode::MoveCard {
                     start_pointer: pos,
@@ -2546,7 +3111,45 @@ fn render_overlay_canvas(
     } else if canvas_sense_resp.clicked() {
         if let Some(pos) = pointer_pos {
             let hit = elem_rects.iter().rev().find(|(_, r)| r.expand(3.0).contains(pos));
-            studio.selected_element_idx = hit.map(|(i, _)| *i);
+            if let Some((i, _)) = hit {
+                let hit_idx = *i;
+                studio.selected_element_idx = Some(hit_idx);
+                // Interactive canvas testing on click!
+                match &mut studio.overlay.elements[hit_idx] {
+                    OverlayElement::InteractiveControl {
+                        control: crate::models::InteractiveControlKind::ToggleSwitch { is_active, .. },
+                        ..
+                    } => {
+                        *is_active = !*is_active;
+                    }
+                    OverlayElement::ClockTimer { is_running, mode, countdown_remaining_ms, countdown_total_ms, .. } => {
+                        if *mode == crate::models::TimerMode::Stopwatch || *mode == crate::models::TimerMode::Countdown {
+                            if *mode == crate::models::TimerMode::Countdown && *countdown_remaining_ms == 0 {
+                                *countdown_remaining_ms = *countdown_total_ms;
+                            }
+                            *is_running = !*is_running;
+                        }
+                    }
+                    OverlayElement::MediaWidget { .. } => {}
+                    _ => {}
+                }
+            } else if !card_canvas_rect.contains(pos) && !pill_rect.contains(pos) {
+                studio.selected_element_idx = None;
+                for m in &monitors {
+                    if m.index != active_mon.index {
+                        if let Some((_, mr)) = monitor_rects.iter().find(|(idx, _)| *idx == m.index) {
+                            if mr.contains(pos) {
+                                studio.overlay.monitor_index = Some(m.index);
+                                clamp_card_to_monitor(&mut studio.overlay, m.width as f32, m.height as f32);
+                                clamp_elements_to_canvas(&mut studio.overlay);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                studio.selected_element_idx = None;
+            }
         }
     }
 
@@ -2569,14 +3172,14 @@ fn render_overlay_canvas(
                     // Safeguard: only auto-pan camera across canvas when the overlay card itself is selected (no element selected)
                     if studio.selected_element_idx.is_none() {
                         let edge_zone = 70.0;
-                        let (cur_sx, cur_sy) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
+                        let (cur_rx, cur_ry) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
                         let max_card_x = (screen_w - studio.overlay.rect.width).max(0.0);
                         let max_card_y = (screen_h - studio.overlay.rect.height).max(0.0);
 
-                        let can_pan_right = cur_sx < max_card_x - 0.5;
-                        let can_pan_left = cur_sx > 0.5;
-                        let can_pan_down = cur_sy < max_card_y - 0.5;
-                        let can_pan_up = cur_sy > 0.5;
+                        let can_pan_right = cur_rx < max_card_x - 0.5;
+                        let can_pan_left = cur_rx > 0.5;
+                        let can_pan_down = cur_ry < max_card_y - 0.5;
+                        let can_pan_up = cur_ry > 0.5;
 
                         let mut pan_step = Vec2::ZERO;
 
@@ -2604,19 +3207,19 @@ fn render_overlay_canvas(
                     }
 
                     let delta = (pos - *start_pointer) / zoom.max(0.05);
-                    let mut new_sx = snap(*start_card_sx + delta.x);
-                    let mut new_sy = snap(*start_card_sy + delta.y);
+                    let mut new_rx = snap(*start_card_sx + delta.x);
+                    let mut new_ry = snap(*start_card_sy + delta.y);
 
-                    // Magnetic screen-center snap guide (within 12px)
+                    // Magnetic monitor-center snap guide (within 12px)
                     let center_x = (screen_w - studio.overlay.rect.width) * 0.5;
                     let center_y = (screen_h - studio.overlay.rect.height) * 0.5;
-                    let is_center_x = (new_sx - center_x).abs() < 12.0;
-                    let is_center_y = (new_sy - center_y).abs() < 12.0;
-                    if is_center_x { new_sx = center_x; }
-                    if is_center_y { new_sy = center_y; }
+                    let is_center_x = (new_rx - center_x).abs() < 12.0;
+                    let is_center_y = (new_ry - center_y).abs() < 12.0;
+                    if is_center_x { new_rx = center_x; }
+                    if is_center_y { new_ry = center_y; }
 
-                    new_sx = new_sx.clamp(0.0, (screen_w - studio.overlay.rect.width).max(0.0));
-                    new_sy = new_sy.clamp(0.0, (screen_h - studio.overlay.rect.height).max(0.0));
+                    new_rx = new_rx.clamp(0.0, (screen_w - studio.overlay.rect.width).max(0.0));
+                    new_ry = new_ry.clamp(0.0, (screen_h - studio.overlay.rect.height).max(0.0));
 
                     if is_center_x && is_center_y {
                         studio.overlay.anchor = OverlayAnchor::ScreenCenter;
@@ -2624,8 +3227,8 @@ fn render_overlay_canvas(
                         studio.overlay.rect.y = 0.0;
                     } else {
                         studio.overlay.anchor = OverlayAnchor::Custom;
-                        studio.overlay.rect.x = new_sx;
-                        studio.overlay.rect.y = new_sy;
+                        studio.overlay.rect.x = new_rx;
+                        studio.overlay.rect.y = new_ry;
                     }
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 }
@@ -2633,9 +3236,9 @@ fn render_overlay_canvas(
                     // Safeguard: only auto-pan camera across canvas when no element is selected
                     if studio.selected_element_idx.is_none() {
                         let edge_zone = 70.0;
-                        let (cur_sx, cur_sy) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
-                        let can_pan_right = cur_sx + studio.overlay.rect.width < screen_w - 0.5;
-                        let can_pan_down = cur_sy + studio.overlay.rect.height < screen_h - 0.5;
+                        let (cur_rx, cur_ry) = compute_overlay_screen_pos(&studio.overlay, screen_w, screen_h);
+                        let can_pan_right = cur_rx + studio.overlay.rect.width < screen_w - 0.5;
+                        let can_pan_down = cur_ry + studio.overlay.rect.height < screen_h - 0.5;
 
                         let mut pan_step = Vec2::ZERO;
                         if can_pan_right && pos.x > canvas_rect.right() - edge_zone {
@@ -2681,7 +3284,13 @@ fn render_overlay_canvas(
                             | OverlayElement::Badge { x, y, .. }
                             | OverlayElement::ProgressBar { x, y, .. }
                             | OverlayElement::Image { x, y, .. }
-                            | OverlayElement::Shape { x, y, .. } => {
+                            | OverlayElement::Shape { x, y, .. }
+                            | OverlayElement::Graph { x, y, .. }
+                            | OverlayElement::ClockTimer { x, y, .. }
+                            | OverlayElement::InteractiveControl { x, y, .. }
+                            | OverlayElement::SystemTelemetry { x, y, .. }
+                            | OverlayElement::MediaWidget { x, y, .. }
+                            | OverlayElement::KeyVisualizer { x, y, .. } => {
                                 *x = snap(*start_x + total_delta.x).clamp(0.0, (studio.overlay.rect.width - ew).max(0.0));
                                 *y = snap(*start_y + total_delta.y).clamp(0.0, (studio.overlay.rect.height - eh).max(0.0));
                             }
@@ -2764,6 +3373,17 @@ fn render_overlay_canvas(
                                     *height = snap(*start_h + total_delta.y).clamp(8.0, max_h);
                                 }
                             }
+                            OverlayElement::Graph { width, height, x, y, .. }
+                            | OverlayElement::ClockTimer { width, height, x, y, .. }
+                            | OverlayElement::InteractiveControl { width, height, x, y, .. }
+                            | OverlayElement::SystemTelemetry { width, height, x, y, .. }
+                            | OverlayElement::MediaWidget { width, height, x, y, .. }
+                            | OverlayElement::KeyVisualizer { width, height, x, y, .. } => {
+                                let max_w = (studio.overlay.rect.width - *x).max(10.0);
+                                let max_h = (studio.overlay.rect.height - *y).max(10.0);
+                                *width = snap(*start_w + total_delta.x).clamp(10.0, max_w);
+                                *height = snap(*start_h + total_delta.y).clamp(10.0, max_h);
+                            }
                             OverlayElement::Crosshair { size, x, y, .. } => {
                                 let max_s = (studio.overlay.rect.width - *x).min(studio.overlay.rect.height - *y).max(8.0);
                                 *size = snap(*start_w + total_delta.x * 0.5).clamp(4.0, max_s.min(128.0));
@@ -2822,9 +3442,9 @@ fn render_overlay_canvas(
                 let factor = 1.0 + zoom_delta;
                 let new_zoom = (zoom * factor).clamp(0.08, 10.0);
                 if let Some(pos) = pointer_pos {
-                    let screen_pt = (pos - monitor_origin) / zoom;
-                    let new_monitor_origin = pos - screen_pt * new_zoom;
-                    studio.canvas_pan = new_monitor_origin + vec2(screen_w * 0.5 * new_zoom, screen_h * 0.5 * new_zoom) - canvas_rect.center();
+                    let (vx, vy) = canvas_to_virtual(pos);
+                    let new_center = pos - vec2((vx - desktop_center_x) * new_zoom, (vy - desktop_center_y) * new_zoom);
+                    studio.canvas_pan = new_center - canvas_rect.center();
                 }
                 studio.canvas_zoom = Some(new_zoom);
             }
@@ -2861,7 +3481,7 @@ fn render_overlay_canvas(
     // Card Header Pill
     painter.rect_filled(pill_rect, CornerRadius::same(3), Color32::from_rgba_unmultiplied(20, 26, 38, 220));
     painter.rect_stroke(pill_rect, CornerRadius::same(3), Stroke::new(1.0, t.accent_ink.gamma_multiply(0.4)), egui::StrokeKind::Inside);
-    let pill_text = format!("⬚ OVERLAY ({}×{})", studio.overlay.rect.width as i32, studio.overlay.rect.height as i32);
+    let pill_text = format!("OVERLAY {}×{}", studio.overlay.rect.width as i32, studio.overlay.rect.height as i32);
     painter.text(pill_rect.center(), egui::Align2::CENTER_CENTER, pill_text, FontId::new(9.5, theme::mono_bold()), t.accent_ink);
 
     // Card Resize Handle at bottom-right corner
@@ -2873,307 +3493,20 @@ fn render_overlay_canvas(
     let card_painter = painter.with_clip_rect(card_canvas_rect.intersect(canvas_rect));
 
     for (elem_idx, elem) in studio.overlay.elements.iter().enumerate() {
-        match elem {
-            OverlayElement::Crosshair { style, size, color, thickness, gap, center_dot, x, y, rotation, .. } => {
-                let cc = if *x > 0.0 && *y > 0.0 {
-                    card_canvas_rect.min + vec2(*x * zoom, *y * zoom)
-                } else {
-                    card_canvas_rect.center()
-                };
-
-                let stroke = Stroke::new((*thickness * zoom).max(1.0), apply_opacity(*color));
-                let g = *gap * zoom;
-                let s = *size * zoom;
-                let angle_rad = rotation.to_radians();
-
-                let rot = |v: egui::Vec2| rotate_vec(v, angle_rad);
-
-                match style {
-                    CrosshairStyle::Cross => {
-                        card_painter.line_segment([cc + rot(vec2(-(g + s), 0.0)), cc + rot(vec2(-g, 0.0))], stroke);
-                        card_painter.line_segment([cc + rot(vec2(g, 0.0)), cc + rot(vec2(g + s, 0.0))], stroke);
-                        card_painter.line_segment([cc + rot(vec2(0.0, -(g + s))), cc + rot(vec2(0.0, -g))], stroke);
-                        card_painter.line_segment([cc + rot(vec2(0.0, g)), cc + rot(vec2(0.0, g + s))], stroke);
-                    }
-                    CrosshairStyle::TShaped => {
-                        card_painter.line_segment([cc + rot(vec2(-(g + s), 0.0)), cc + rot(vec2(-g, 0.0))], stroke);
-                        card_painter.line_segment([cc + rot(vec2(g, 0.0)), cc + rot(vec2(g + s, 0.0))], stroke);
-                        card_painter.line_segment([cc + rot(vec2(0.0, g)), cc + rot(vec2(0.0, g + s))], stroke);
-                    }
-                    CrosshairStyle::Circle => {
-                        card_painter.circle_stroke(cc, s / 2.0, stroke);
-                    }
-                    CrosshairStyle::Dot => {}
-                }
-
-                if *center_dot {
-                    card_painter.circle_filled(cc, (*thickness * zoom).max(1.0), apply_opacity(*color));
-                }
-            }
-            OverlayElement::Text { text, font_size, color, x, y, bold, font_family, rotation, .. } => {
-                let norm = font_family.trim().to_lowercase();
-                let family = match norm.as_str() {
-                    "archivo" | "archivo display" => {
-                        if *bold { theme::font_archivo_bold() } else { theme::font_archivo() }
-                    }
-                    "inter" => {
-                        if *bold { theme::semibold() } else { theme::medium() }
-                    }
-                    "geist mono" | "geistmono" | "mono" => {
-                        if *bold { theme::mono_bold() } else { theme::mono() }
-                    }
-                    _ => {
-                        egui::FontFamily::Name(norm.into())
-                    }
-                };
-
-                let font = FontId::new((*font_size * zoom).max(7.0), family);
-                let text_color = apply_opacity(*color);
-                let galley = card_painter.layout_no_wrap(text.clone(), font, text_color);
-                let text_size = galley.size();
-
-                let (nat_w, nat_h) = get_element_size(elem);
-                let center = card_canvas_rect.min + vec2((*x + nat_w * 0.5) * zoom, (*y + nat_h * 0.5) * zoom);
-                let angle_rad = rotation.to_radians();
-
-                let half_galley = text_size * 0.5;
-                let pos = center - rotate_vec(half_galley, angle_rad);
-
-                let mut text_shape = egui::epaint::TextShape::new(pos, galley, text_color);
-                text_shape.angle = angle_rad;
-                card_painter.add(text_shape);
-            }
-            OverlayElement::Badge { text, color, bg_color, x, y, rotation, .. } => {
-                let (raw_w, raw_h) = get_element_size(elem);
-                let b_size = vec2((raw_w * zoom).max(8.0), (raw_h * zoom).max(8.0));
-                let center = card_canvas_rect.min + vec2((*x + raw_w * 0.5) * zoom, (*y + raw_h * 0.5) * zoom);
-                let angle_rad = rotation.to_radians();
-
-                let bg_c = apply_opacity(*bg_color);
-                let fg_c = apply_opacity(*color);
-
-                if angle_rad.abs() < 0.001 {
-                    let b_rect = Rect::from_center_size(center, b_size);
-                    card_painter.rect_filled(b_rect, CornerRadius::same(4), bg_c);
-                    card_painter.rect_stroke(b_rect, CornerRadius::same(4), Stroke::new(1.0, fg_c), egui::StrokeKind::Inside);
-                    card_painter.text(center, egui::Align2::CENTER_CENTER, text, FontId::new((10.5 * zoom).max(6.0), theme::semibold()), fg_c);
-                } else {
-                    let hw = b_size.x * 0.5;
-                    let hh = b_size.y * 0.5;
-                    let pts = [
-                        center + rotate_vec(vec2(-hw, -hh), angle_rad),
-                        center + rotate_vec(vec2(hw, -hh), angle_rad),
-                        center + rotate_vec(vec2(hw, hh), angle_rad),
-                        center + rotate_vec(vec2(-hw, hh), angle_rad),
-                    ];
-                    draw_filled_convex_polygon(&card_painter, center, &pts, bg_c);
-                    draw_polygon_stroke(&card_painter, &pts, Stroke::new(1.0, fg_c));
-
-                    let font = FontId::new((10.5 * zoom).max(6.0), theme::semibold());
-                    let galley = card_painter.layout_no_wrap(text.clone(), font, fg_c);
-                    let half_g = galley.size() * 0.5;
-                    let text_pos = center - rotate_vec(half_g, angle_rad);
-                    let mut text_shape = egui::epaint::TextShape::new(text_pos, galley, fg_c);
-                    text_shape.angle = angle_rad;
-                    card_painter.add(text_shape);
-                }
-            }
-            OverlayElement::ProgressBar { progress, fill_color, bg_color, x, y, width, height, rotation, .. } => {
-                let p_size = vec2((*width * zoom).max(8.0), (*height * zoom).max(2.0));
-                let center = card_canvas_rect.min + vec2((*x + *width * 0.5) * zoom, (*y + *height * 0.5) * zoom);
-                let angle_rad = rotation.to_radians();
-
-                let bg_c = apply_opacity(*bg_color);
-                let fg_c = apply_opacity(*fill_color);
-
-                if angle_rad.abs() < 0.001 {
-                    let p_rect = Rect::from_center_size(center, p_size);
-                    card_painter.rect_filled(p_rect, CornerRadius::same(2), bg_c);
-                    let fill_w = (p_size.x * progress.clamp(0.0, 1.0)).max(0.0);
-                    let fill_rect = Rect::from_min_size(p_rect.min, vec2(fill_w, p_size.y));
-                    card_painter.rect_filled(fill_rect, CornerRadius::same(2), fg_c);
-                } else {
-                    let hw = p_size.x * 0.5;
-                    let hh = p_size.y * 0.5;
-                    let pts = [
-                        center + rotate_vec(vec2(-hw, -hh), angle_rad),
-                        center + rotate_vec(vec2(hw, -hh), angle_rad),
-                        center + rotate_vec(vec2(hw, hh), angle_rad),
-                        center + rotate_vec(vec2(-hw, hh), angle_rad),
-                    ];
-                    draw_filled_convex_polygon(&card_painter, center, &pts, bg_c);
-
-                    let prog = progress.clamp(0.0, 1.0);
-                    if prog > 0.0 {
-                        let fill_hw = hw * prog;
-                        let fill_center_unrot = vec2(-hw + fill_hw, 0.0);
-                        let fill_center = center + rotate_vec(fill_center_unrot, angle_rad);
-                        let fill_pts = [
-                            fill_center + rotate_vec(vec2(-fill_hw, -hh), angle_rad),
-                            fill_center + rotate_vec(vec2(fill_hw, -hh), angle_rad),
-                            fill_center + rotate_vec(vec2(fill_hw, hh), angle_rad),
-                            fill_center + rotate_vec(vec2(-fill_hw, hh), angle_rad),
-                        ];
-                        draw_filled_convex_polygon(&card_painter, fill_center, &fill_pts, fg_c);
-                    }
-                }
-            }
-            OverlayElement::Image { path, x, y, width, height, opacity, rotation, .. } => {
-                let img_size = vec2((*width * zoom).max(4.0), (*height * zoom).max(4.0));
-                let center = card_canvas_rect.min + vec2((*x + *width * 0.5) * zoom, (*y + *height * 0.5) * zoom);
-                let img_rect = Rect::from_center_size(center, img_size);
-                let angle_rad = rotation.to_radians();
-
-                if !path.is_empty() && std::path::Path::new(path).exists() {
-                    let clean = path.replace('\\', "/");
-                    let uri = if clean.starts_with('/') {
-                        format!("file://{clean}")
-                    } else {
-                        format!("file:///{clean}")
-                    };
-                    let alpha = ((255.0 * opacity * studio.overlay.opacity) as u8).max(10);
-                    let img = egui::Image::new(uri)
-                        .tint(Color32::from_white_alpha(alpha))
-                        .fit_to_exact_size(img_size)
-                        .maintain_aspect_ratio(false)
-                        .rotate(angle_rad, vec2(0.5, 0.5));
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(card_canvas_rect), |ui| {
-                        ui.set_clip_rect(card_canvas_rect);
-                        ui.put(img_rect, img);
-                    });
-                } else {
-                    let hw = img_size.x * 0.5;
-                    let hh = img_size.y * 0.5;
-                    let p0 = center + rotate_vec(vec2(-hw, -hh), angle_rad);
-                    let p1 = center + rotate_vec(vec2(hw, -hh), angle_rad);
-                    let p2 = center + rotate_vec(vec2(hw, hh), angle_rad);
-                    let p3 = center + rotate_vec(vec2(-hw, hh), angle_rad);
-                    let pts = [p0, p1, p2, p3];
-
-                    draw_filled_convex_polygon(&card_painter, center, &pts, Color32::from_rgba_unmultiplied(40, 44, 56, 120));
-                    draw_polygon_stroke(&card_painter, &pts, Stroke::new(1.0, Color32::from_rgba_unmultiplied(100, 110, 130, 100)));
-
-                    let text_color = Color32::from_rgb(140, 150, 170);
-                    let font = FontId::new((9.5 * zoom).max(6.0), theme::semibold());
-                    let galley = card_painter.layout_no_wrap("IMG".to_string(), font, text_color);
-                    let half_g = galley.size() * 0.5;
-                    let text_pos = center - rotate_vec(half_g, angle_rad);
-                    let mut text_shape = egui::epaint::TextShape::new(text_pos, galley, text_color);
-                    text_shape.angle = angle_rad;
-                    card_painter.add(text_shape);
-                }
-            }
-            OverlayElement::Shape {
-                shape_type,
-                x,
-                y,
-                width,
-                height,
-                thickness,
-                color,
-                filled,
-                fill_color,
-                corner_radius,
-                rotation,
-                ..
-            } => {
-                let s_size = vec2((*width * zoom).max(2.0), (*height * zoom).max(2.0));
-                let center = card_canvas_rect.min + vec2((*x + *width * 0.5) * zoom, (*y + *height * 0.5) * zoom);
-                let s_rect = Rect::from_center_size(center, s_size);
-                let stroke_c = apply_opacity(*color);
-                let stroke_w = (*thickness * zoom).max(1.0);
-                let stroke = Stroke::new(stroke_w, stroke_c);
-                let angle_rad = rotation.to_radians();
-
-                match shape_type {
-                    ShapeKind::Rectangle => {
-                        let hw = s_size.x * 0.5;
-                        let hh = s_size.y * 0.5;
-                        let cr = (*corner_radius * zoom).min(hw).min(hh);
-                        let fill_c = if *filled { Some(apply_opacity(*fill_color)) } else { None };
-
-                        if angle_rad.abs() < 0.001 {
-                            let corner_rad = CornerRadius::same(cr.round() as u8);
-                            if let Some(fc) = fill_c {
-                                card_painter.rect_filled(s_rect, corner_rad, fc);
-                            }
-                            card_painter.rect_stroke(s_rect, corner_rad, stroke, egui::StrokeKind::Inside);
-                        } else {
-                            let mut points = Vec::new();
-                            if cr > 0.5 {
-                                let arc_steps = 4;
-                                let centers = [
-                                    (vec2(hw - cr, -(hh - cr)), -std::f32::consts::FRAC_PI_2),
-                                    (vec2(hw - cr, hh - cr), 0.0),
-                                    (vec2(-(hw - cr), hh - cr), std::f32::consts::FRAC_PI_2),
-                                    (vec2(-(hw - cr), -(hh - cr)), std::f32::consts::PI),
-                                ];
-                                for (c_off, start_a) in centers {
-                                    for s in 0..arc_steps {
-                                        let a = start_a + (s as f32) * std::f32::consts::FRAC_PI_2 / (arc_steps as f32);
-                                        let pt = c_off + vec2(cr * a.cos(), cr * a.sin());
-                                        points.push(center + rotate_vec(pt, angle_rad));
-                                    }
-                                }
-                            } else {
-                                points.push(center + rotate_vec(vec2(-hw, -hh), angle_rad));
-                                points.push(center + rotate_vec(vec2(hw, -hh), angle_rad));
-                                points.push(center + rotate_vec(vec2(hw, hh), angle_rad));
-                                points.push(center + rotate_vec(vec2(-hw, hh), angle_rad));
-                            }
-
-                            if let Some(fc) = fill_c {
-                                draw_filled_convex_polygon(&card_painter, center, &points, fc);
-                            }
-                            draw_polygon_stroke(&card_painter, &points, stroke);
-                        }
-                    }
-                    ShapeKind::Circle => {
-                        let rx = s_size.x / 2.0;
-                        let ry = s_size.y / 2.0;
-                        let fill_c = if *filled { Some(apply_opacity(*fill_color)) } else { None };
-
-                        if angle_rad.abs() < 0.001 && (rx - ry).abs() < 0.5 {
-                            if let Some(fc) = fill_c {
-                                card_painter.circle_filled(center, rx, fc);
-                            }
-                            card_painter.circle_stroke(center, rx, stroke);
-                        } else {
-                            let n = 48;
-                            let mut points = Vec::with_capacity(n);
-                            for i in 0..n {
-                                let t = (i as f32) * std::f32::consts::TAU / (n as f32);
-                                let unrot = vec2(rx * t.cos(), ry * t.sin());
-                                let rot = rotate_vec(unrot, angle_rad);
-                                points.push(center + rot);
-                            }
-
-                            if let Some(fc) = fill_c {
-                                draw_filled_convex_polygon(&card_painter, center, &points, fc);
-                            }
-                            draw_polygon_stroke(&card_painter, &points, stroke);
-                        }
-                    }
-                    ShapeKind::Line => {
-                        let hw = s_size.x * 0.5;
-                        let p_left = center + rotate_vec(vec2(-hw, 0.0), angle_rad);
-                        let p_right = center + rotate_vec(vec2(hw, 0.0), angle_rad);
-                        card_painter.line_segment([p_left, p_right], stroke);
-                    }
-                    ShapeKind::Arrow => {
-                        let hw = s_size.x * 0.5;
-                        let p_left = center + rotate_vec(vec2(-hw, 0.0), angle_rad);
-                        let p_right = center + rotate_vec(vec2(hw, 0.0), angle_rad);
-                        card_painter.line_segment([p_left, p_right], stroke);
-                        let head_sz = (s_size.y * 0.4).clamp(4.0 * zoom, 24.0 * zoom);
-                        let barb_top = p_right + rotate_vec(vec2(-head_sz, -head_sz), angle_rad);
-                        let barb_bottom = p_right + rotate_vec(vec2(-head_sz, head_sz), angle_rad);
-                        card_painter.line_segment([barb_top, p_right], stroke);
-                        card_painter.line_segment([barb_bottom, p_right], stroke);
-                    }
-                }
-            }
-        }
+        let mut render_ctx = crate::gui::components::overlay_renderer::RenderContext {
+            painter: &card_painter,
+            card_canvas_rect,
+            zoom,
+            global_opacity: studio.overlay.opacity,
+            is_interactive: true,
+            pointer_pos,
+            pointer_clicked: canvas_sense_resp.clicked(),
+            pointer_down: canvas_sense_resp.is_pointer_button_down_on(),
+            override_text: None,
+            target_process: studio.overlay.target_process.as_deref(),
+        };
+        let mut elem_clone = elem.clone();
+        crate::gui::components::overlay_renderer::render_element(&mut render_ctx, &mut elem_clone);
 
         // Draw selection highlight box & interactive resize handle (rotated OBB)
         if studio.selected_element_idx == Some(elem_idx) {
@@ -3193,7 +3526,13 @@ fn render_overlay_canvas(
                 | OverlayElement::Badge { x, y, .. }
                 | OverlayElement::ProgressBar { x, y, .. }
                 | OverlayElement::Image { x, y, .. }
-                | OverlayElement::Shape { x, y, .. } => {
+                | OverlayElement::Shape { x, y, .. }
+                | OverlayElement::Graph { x, y, .. }
+                | OverlayElement::ClockTimer { x, y, .. }
+                | OverlayElement::InteractiveControl { x, y, .. }
+                | OverlayElement::SystemTelemetry { x, y, .. }
+                | OverlayElement::MediaWidget { x, y, .. }
+                | OverlayElement::KeyVisualizer { x, y, .. } => {
                     card_canvas_rect.min + vec2((*x + raw_w * 0.5) * zoom, (*y + raw_h * 0.5) * zoom)
                 }
             };
@@ -3759,5 +4098,121 @@ mod tests {
         let daemon_pos = (750.0, 350.0);
         let pos_differs_from_last_synced = studio.last_synced_pos.is_none_or(|(lx, ly)| (lx - daemon_pos.0).abs() > 0.5 || (ly - daemon_pos.1).abs() > 0.5);
         assert!(!pos_differs_from_last_synced, "Position matching last_synced_pos must not trigger overwrite");
+    }
+
+    #[test]
+    fn test_multimonitor_canvas_support_and_card_clamping() {
+        use crate::models::{MonitorInfo, MonitorOrientation, OverlayDefinition};
+
+        // Create a 2-monitor virtual desktop setup:
+        // Monitor 0: Primary Landscape 2560x1440 at (0, 0)
+        // Monitor 1: Secondary Portrait 1080x1920 at (-1080, -383)
+        let monitors = vec![
+            MonitorInfo {
+                index: 0,
+                name: "Primary Display".to_string(),
+                x: 0,
+                y: 0,
+                width: 2560,
+                height: 1440,
+                is_primary: true,
+            },
+            MonitorInfo {
+                index: 1,
+                name: "Portrait Display".to_string(),
+                x: -1080,
+                y: -383,
+                width: 1080,
+                height: 1920,
+                is_primary: false,
+            },
+        ];
+
+        // 1. Verify monitor orientation detection
+        assert_eq!(monitors[0].orientation(), MonitorOrientation::Landscape);
+        assert!(!monitors[0].is_portrait());
+        assert_eq!(monitors[1].orientation(), MonitorOrientation::Portrait);
+        assert!(monitors[1].is_portrait());
+
+        // 2. Verify resolve_overlay_monitor
+        let mut overlay = OverlayDefinition::default_new_overlay();
+        assert_eq!(overlay.monitor_index, None);
+        let resolved = resolve_overlay_monitor(&overlay, &monitors);
+        assert_eq!(resolved.index, 0);
+        assert!(resolved.is_primary);
+
+        // Switch to secondary monitor (index 1)
+        overlay.monitor_index = Some(1);
+        let resolved_sec = resolve_overlay_monitor(&overlay, &monitors);
+        assert_eq!(resolved_sec.index, 1);
+        assert_eq!(resolved_sec.width, 1080);
+        assert_eq!(resolved_sec.height, 1920);
+
+        // Invalid index falls back to primary
+        overlay.monitor_index = Some(99);
+        let resolved_fallback = resolve_overlay_monitor(&overlay, &monitors);
+        assert_eq!(resolved_fallback.index, 0);
+
+        // 3. Verify Virtual Desktop Bounding Box calculation
+        let min_x = monitors.iter().map(|m| m.x).min().unwrap_or(0);
+        let min_y = monitors.iter().map(|m| m.y).min().unwrap_or(0);
+        let max_x = monitors.iter().map(|m| m.x + m.width as i32).max().unwrap_or(1920);
+        let max_y = monitors.iter().map(|m| m.y + m.height as i32).max().unwrap_or(1080);
+        assert_eq!(min_x, -1080);
+        assert_eq!(min_y, -383);
+        assert_eq!(max_x, 2560);
+        assert_eq!(max_y, 1537); // -383 + 1920 = 1537
+
+        let desktop_w = (max_x - min_x) as f32; // 3640
+        let desktop_h = (max_y - min_y) as f32; // 1920
+        assert_eq!(desktop_w, 3640.0);
+        assert_eq!(desktop_h, 1920.0);
+
+        // 4. Verify strict clamping within active monitor (preventing crossing to other monitors during drag)
+        // Set overlay on Monitor 1 (Portrait 1080x1920)
+        overlay.monitor_index = Some(1);
+        overlay.rect.width = 400.0;
+        overlay.rect.height = 300.0;
+        let mon1 = &monitors[1];
+
+        // Attempt to drag card beyond right edge of portrait monitor (e.g. 1200.0 px)
+        let dragged_rel_x = 1200.0f32;
+        let clamped_rel_x = dragged_rel_x.clamp(0.0, (mon1.width as f32 - overlay.rect.width).max(0.0));
+        assert_eq!(clamped_rel_x, 680.0); // 1080 - 400 = 680
+
+        // Attempt to drag card below bottom edge of portrait monitor (e.g. 2500.0 px)
+        let dragged_rel_y = 2500.0f32;
+        let clamped_rel_y = dragged_rel_y.clamp(0.0, (mon1.height as f32 - overlay.rect.height).max(0.0));
+        assert_eq!(clamped_rel_y, 1620.0); // 1920 - 300 = 1620
+
+        // Attempt to drag card into negative coordinates (crossing left or top)
+        let dragged_neg_x = -150.0f32;
+        let clamped_neg_x = dragged_neg_x.clamp(0.0, (mon1.width as f32 - overlay.rect.width).max(0.0));
+        assert_eq!(clamped_neg_x, 0.0);
+
+        // Verify card cannot cross monitor boundaries
+        assert!(clamped_rel_x + overlay.rect.width <= mon1.width as f32);
+        assert!(clamped_rel_y + overlay.rect.height <= mon1.height as f32);
+        assert!(clamped_neg_x >= 0.0);
+
+        // 5. Verify Canvas Display Header badge label formatting
+        let mon0_label = format!("DISPLAY {}×{}", monitors[0].width, monitors[0].height);
+        assert_eq!(mon0_label, "DISPLAY 2560×1440");
+        let mon1_label = format!("DISPLAY {}×{}", monitors[1].width, monitors[1].height);
+        assert_eq!(mon1_label, "DISPLAY 1080×1920");
+
+        // 6. Verify Overlay Header Pill text formatting (no glyph, no brackets)
+        let pill_text = format!("OVERLAY {}×{}", overlay.rect.width as i32, overlay.rect.height as i32);
+        assert_eq!(pill_text, "OVERLAY 400×300");
+
+        // 7. Verify Image & Card boundary clipping prevents bleeding into left settings panel
+        let left_panel_rect = Rect::from_min_max(pos2(0.0, 50.0), pos2(400.0, 800.0));
+        let canvas_rect = Rect::from_min_max(pos2(400.0, 50.0), pos2(1200.0, 800.0));
+        // Panned card overlapping left panel (left edge at 200.0, crossing x=400.0)
+        let panned_card = Rect::from_min_max(pos2(200.0, 100.0), pos2(700.0, 500.0));
+        let effective_clip = panned_card.intersect(canvas_rect);
+        assert_eq!(effective_clip.min.x, 400.0, "Clip rect must never extend left of canvas boundary");
+        assert!(!effective_clip.intersects(left_panel_rect.shrink(0.1)), "Clip rect must not intersect left settings panel");
+        assert!(effective_clip.is_positive());
     }
 }

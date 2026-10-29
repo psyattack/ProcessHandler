@@ -85,6 +85,7 @@ pub enum ColorPickerTarget {
     CardBorder,
     ElementPrimary(usize),
     ElementSecondary(usize),
+    ElementTertiary(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +101,58 @@ pub struct OverlayStudioState {
     pub canvas_pan: egui::Vec2,
     pub canvas_zoom: Option<f32>,
     pub last_synced_pos: Option<(f32, f32)>,
+    pub undo_stack: Vec<crate::models::OverlayDefinition>,
+    pub redo_stack: Vec<crate::models::OverlayDefinition>,
+}
+
+impl OverlayStudioState {
+    pub fn push_undo_snapshot(&mut self) {
+        if self.undo_stack.last() != Some(&self.overlay) {
+            self.undo_stack.push(self.overlay.clone());
+            if self.undo_stack.len() > 50 {
+                self.undo_stack.remove(0);
+            }
+            self.redo_stack.clear();
+        }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(prev) = self.undo_stack.pop() {
+            self.redo_stack.push(self.overlay.clone());
+            self.overlay = prev;
+            if let Some(sel) = self.selected_element_idx {
+                if sel >= self.overlay.elements.len() {
+                    self.selected_element_idx = None;
+                }
+            }
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if let Some(next) = self.redo_stack.pop() {
+            self.undo_stack.push(self.overlay.clone());
+            self.overlay = next;
+            if let Some(sel) = self.selected_element_idx {
+                if sel >= self.overlay.elements.len() {
+                    self.selected_element_idx = None;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ElementCatalogModalState {
+    pub search_query: String,
+    pub selected_category: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -139,6 +192,8 @@ pub struct GuiState {
     pub last_trigger_catalog: Option<TriggerCatalogState>,
     pub condition_catalog: Option<ConditionCatalogState>,
     pub last_condition_catalog: Option<ConditionCatalogState>,
+    pub element_catalog: Option<ElementCatalogModalState>,
+    pub last_element_catalog: Option<ElementCatalogModalState>,
     pub language: crate::i18n::Language,
     pub theme: crate::config::AppTheme,
     pub last_sync: Instant,
@@ -196,6 +251,8 @@ impl GuiState {
             last_trigger_catalog: None,
             condition_catalog: None,
             last_condition_catalog: None,
+            element_catalog: None,
+            last_element_catalog: None,
             language: config.language,
             theme: config.theme,
             last_sync: Instant::now() - std::time::Duration::from_secs(10),
@@ -307,6 +364,8 @@ impl GuiState {
             canvas_pan: egui::Vec2::ZERO,
             canvas_zoom: None,
             last_synced_pos: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         };
         self.overlay_studio = Some(studio.clone());
         self.last_overlay_studio = Some(studio);
@@ -341,6 +400,8 @@ impl GuiState {
                     canvas_pan: egui::Vec2::ZERO,
                     canvas_zoom: None,
                     last_synced_pos: None,
+                    undo_stack: Vec::new(),
+                    redo_stack: Vec::new(),
                 };
                 self.overlay_studio = Some(studio.clone());
                 self.last_overlay_studio = Some(studio);
@@ -422,6 +483,16 @@ impl GuiState {
 
     pub fn close_condition_catalog(&mut self) {
         self.condition_catalog = None;
+    }
+
+    pub fn open_element_catalog(&mut self) {
+        let catalog = ElementCatalogModalState::default();
+        self.element_catalog = Some(catalog.clone());
+        self.last_element_catalog = Some(catalog);
+    }
+
+    pub fn close_element_catalog(&mut self) {
+        self.element_catalog = None;
     }
 
     pub fn add_condition_from_catalog(&mut self, condition: crate::models::RuleCondition) {
@@ -824,6 +895,7 @@ impl GuiState {
             || self.action_catalog.is_some()
             || self.trigger_catalog.is_some()
             || self.condition_catalog.is_some()
+            || self.element_catalog.is_some()
             || self.picker_target.is_some()
             || (self.show_changelog_modal && self.available_update.is_some())
             || self.show_guide_modal

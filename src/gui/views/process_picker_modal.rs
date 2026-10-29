@@ -26,7 +26,6 @@ pub fn render_process_picker_modal(ctx: &egui::Context, state: &mut GuiState) {
         .max_size(vec2(960.0, 680.0))
         .header_height(46.0)
         .header_sunken(true)
-        .accent_bar(t.accent_ink)
         .show(ctx, &t, |frame| {
             // Header: Category Cells on the left, Search + Close on the right
             frame.header(|ui, close_req| {

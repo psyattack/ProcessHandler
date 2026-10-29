@@ -169,6 +169,50 @@ pub fn button(ui: &mut Ui, text: &str, kind: Kind, width: f32) -> Response {
     }
 }
 
+/// Full-width outlined action button with plus glyph and tracking, 1-in-1 matching ADD STEP / ADD CONDITION.
+pub fn full_width_action_button(
+    ui: &mut Ui,
+    label: &str,
+    tip: &str,
+    t: &Tokens,
+) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
+    let is_hov = resp.hovered();
+    let p = ui.painter();
+
+    let border = if is_hov {
+        Stroke::new(1.0, t.accent_ink)
+    } else {
+        Stroke::new(1.0, t.muted.gamma_multiply(0.35))
+    };
+    p.rect_stroke(rect, CornerRadius::same(2), border, egui::StrokeKind::Inside);
+
+    let text_color = if is_hov { t.accent_ink } else { t.faint };
+    let plus_galley = p.layout_no_wrap(
+        egui_phosphor::regular::PLUS.to_string(),
+        egui::FontId::new(12.0, theme::phosphor()),
+        text_color,
+    );
+    let label_galley = caps(ui, label, 10.0, theme::mono(), 0.8, text_color);
+
+    let spacing = 8.0;
+    let plus_w = plus_galley.size().x;
+    let plus_h = plus_galley.size().y;
+    let total_w = plus_w + spacing + label_galley.size().x;
+    let start_x = rect.center().x - total_w * 0.5;
+
+    let plus_pos = pos2(start_x, rect.center().y - plus_h * 0.5);
+    p.galley(plus_pos, plus_galley, text_color);
+
+    let label_pos = pos2(start_x + plus_w + spacing, rect.center().y - label_galley.size().y * 0.5);
+    p.galley_with_override_text_color(label_pos, label_galley, text_color);
+
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let resp = if !tip.trim().is_empty() { resp.on_hover_text(tip) } else { resp };
+
+    resp.clicked()
+}
+
 /// Precision toggle switch with smooth animated track and thumb, and hover feedback.
 pub fn toggle_switch(ui: &mut Ui, on: &mut bool) -> Response {
     let t = Tokens::get(ui.ctx());
@@ -702,4 +746,97 @@ pub fn checkbox_row<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> 
     ui.spacing_mut().interact_size.y = old_interact_h;
     ui.spacing_mut().item_spacing.x = old_spacing_x;
     ret
+}
+
+/// A sleek, rounded catalog search input with an embedded magnifying glass icon at the start,
+/// corner radius matching catalog cards (CornerRadius::same(6)), an integrated clear button,
+/// and subtle focus highlighting.
+pub fn catalog_search_box(
+    ui: &mut Ui,
+    query: &mut String,
+    hint_text: &str,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let search_id = ui.id().with("catalog_search_box_input");
+    let is_focused = ui.ctx().memory(|m| m.has_focus(search_id));
+
+    let search_w = ui.available_width().max(60.0);
+    let (box_rect, box_resp) = ui.allocate_exact_size(vec2(search_w, 32.0), Sense::click());
+    if box_resp.clicked() {
+        ui.ctx().memory_mut(|m| m.request_focus(search_id));
+    }
+
+    let is_hovered = box_resp.hovered();
+    let border_stroke = if is_focused {
+        Stroke::new(1.0, t.accent_ink)
+    } else if is_hovered {
+        Stroke::new(1.0, t.line_strong)
+    } else {
+        Stroke::new(1.0, t.line)
+    };
+
+    ui.painter().rect_filled(box_rect, CornerRadius::same(6), t.bg);
+    ui.painter().rect_stroke(box_rect, CornerRadius::same(6), border_stroke, egui::StrokeKind::Inside);
+
+    // Magnifying glass icon on left, perfectly centered vertically
+    let icon_pos = pos2(box_rect.left() + 11.0, box_rect.center().y);
+    let icon_color = if is_focused { t.accent_ink } else { t.muted };
+    ui.painter().text(
+        icon_pos,
+        egui::Align2::LEFT_CENTER,
+        egui_phosphor::regular::MAGNIFYING_GLASS,
+        egui::FontId::new(15.0, theme::phosphor()),
+        icon_color,
+    );
+
+    let has_query = !query.is_empty();
+    let clear_w = if has_query { 28.0 } else { 10.0 };
+
+    // Text edit area between icon and clear button, spanning full height to center text vertically
+    let text_rect = Rect::from_min_max(
+        pos2(box_rect.left() + 32.0, box_rect.top() + 1.0),
+        pos2(box_rect.right() - clear_w, box_rect.bottom() + 1.0),
+    );
+
+    let edit_resp = ui.put(
+        text_rect,
+        egui::TextEdit::singleline(query)
+            .id(search_id)
+            .hint_text(
+                egui::RichText::new(hint_text)
+                    .family(theme::medium())
+                    .size(12.5)
+                    .color(t.faint),
+            )
+            .font(egui::FontId::new(12.5, theme::medium()))
+            .text_color(t.ink)
+            .frame(egui::Frame::NONE)
+            .vertical_align(egui::Align::Center),
+    );
+
+    // Clear button on the right
+    if has_query {
+        let clear_rect = Rect::from_center_size(
+            pos2(box_rect.right() - 15.0, box_rect.center().y),
+            vec2(18.0, 18.0),
+        );
+        let clear_resp = ui.interact(clear_rect, ui.id().with("catalog_search_clear"), Sense::click());
+        let clear_hovered = clear_resp.hovered();
+        if clear_hovered {
+            ui.painter().rect_filled(clear_rect, CornerRadius::same(3), t.sunken);
+        }
+        ui.painter().text(
+            clear_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::regular::X,
+            egui::FontId::new(12.0, theme::phosphor()),
+            if clear_hovered { t.ink } else { t.muted },
+        );
+        if clear_resp.clicked() {
+            query.clear();
+            ui.ctx().memory_mut(|m| m.request_focus(search_id));
+        }
+    }
+
+    edit_resp
 }

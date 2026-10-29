@@ -527,38 +527,38 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 8.0;
 
-                        let (glyph, title, badge_text, badge_color) = match &rule.trigger {
-                            Some(Trigger::Process { .. }) => (egui_phosphor::regular::CPU, loc.inspector_trigger_process, "PROCESS", t.good),
-                            Some(Trigger::WindowFocus { .. }) => (egui_phosphor::regular::APP_WINDOW, loc.inspector_trigger_window, "WINDOW", t.accent_ink),
+                        let (glyph, title, glyph_color) = match &rule.trigger {
+                            Some(Trigger::Process { .. }) => (egui_phosphor::regular::CPU, loc.inspector_trigger_process, t.good),
+                            Some(Trigger::WindowFocus { .. }) => (egui_phosphor::regular::APP_WINDOW, loc.inspector_trigger_window, t.accent_ink),
                             Some(Trigger::Schedule { schedule_type, .. }) => match schedule_type {
-                                ScheduleType::AppStartup => (egui_phosphor::regular::ROCKET_LAUNCH, loc.inspector_schedule_app_start, "LIFECYCLE", t.good),
-                                ScheduleType::AppShutdown => (egui_phosphor::regular::POWER, loc.inspector_schedule_app_close, "LIFECYCLE", t.warn),
-                                ScheduleType::Interval => (egui_phosphor::regular::TIMER, loc.inspector_sched_tab_interval, "INTERVAL", t.accent_ink),
-                                ScheduleType::Daily => (egui_phosphor::regular::CALENDAR, loc.inspector_sched_tab_daily, "DAILY", t.good),
-                                ScheduleType::OneShot => (egui_phosphor::regular::CALENDAR_CHECK, loc.inspector_sched_tab_specific, "EXACT DATE", t.muted),
-                                ScheduleType::Monthly => (egui_phosphor::regular::CALENDAR_BLANK, loc.inspector_sched_tab_monthly, "MONTHLY", t.accent_ink),
+                                ScheduleType::AppStartup => (egui_phosphor::regular::ROCKET_LAUNCH, loc.inspector_schedule_app_start, t.good),
+                                ScheduleType::AppShutdown => (egui_phosphor::regular::POWER, loc.inspector_schedule_app_close, t.warn),
+                                ScheduleType::Interval => (egui_phosphor::regular::TIMER, loc.inspector_sched_tab_interval, t.accent_ink),
+                                ScheduleType::Daily => (egui_phosphor::regular::CALENDAR, loc.inspector_sched_tab_daily, t.good),
+                                ScheduleType::OneShot => (egui_phosphor::regular::CALENDAR_CHECK, loc.inspector_sched_tab_specific, t.muted),
+                                ScheduleType::Monthly => (egui_phosphor::regular::CALENDAR_BLANK, loc.inspector_sched_tab_monthly, t.accent_ink),
                             },
                             Some(Trigger::SystemEvent { event_type, .. }) => match event_type {
-                                SystemEventType::SessionLock => (egui_phosphor::regular::LOCK, loc.inspector_sys_event_lock, "EVENT", t.accent_ink),
-                                SystemEventType::SessionUnlock => (egui_phosphor::regular::LOCK_OPEN, loc.inspector_sys_event_unlock, "EVENT", t.accent_ink),
-                                SystemEventType::SystemSleep => (egui_phosphor::regular::MOON, loc.inspector_sys_event_sleep, "POWER", t.accent_ink),
-                                SystemEventType::SystemResume => (egui_phosphor::regular::SUN, loc.inspector_sys_event_resume, "POWER", t.good),
-                                SystemEventType::PowerSourceAc => (egui_phosphor::regular::PLUG, loc.inspector_sys_event_ac, "POWER", t.good),
-                                SystemEventType::PowerSourceBattery => (egui_phosphor::regular::BATTERY_CHARGING, loc.inspector_sys_event_battery, "POWER", t.warn),
-                                SystemEventType::UserIdle => (egui_phosphor::regular::HOURGLASS, loc.inspector_sys_event_idle, "IDLE", t.muted),
-                                SystemEventType::UserActive => (egui_phosphor::regular::ACTIVITY, loc.inspector_sys_event_active, "IDLE", t.good),
-                                SystemEventType::DeviceConnected => (egui_phosphor::regular::HARD_DRIVES, loc.inspector_sys_event_dev_connected, "DEVICE", t.good),
-                                SystemEventType::DeviceDisconnected => (egui_phosphor::regular::PLUG, loc.inspector_sys_event_dev_disconnected, "DEVICE", t.warn),
-                                SystemEventType::MonitorOn => (egui_phosphor::regular::DESKTOP, loc.inspector_sys_event_mon_on, "DISPLAY", t.good),
-                                SystemEventType::MonitorOff => (egui_phosphor::regular::MOON_STARS, loc.inspector_sys_event_mon_off, "DISPLAY", t.muted),
-                                SystemEventType::NetworkConnected => (egui_phosphor::regular::WIFI_HIGH, loc.inspector_sys_event_net_connected, "NETWORK", t.good),
-                                SystemEventType::NetworkDisconnected => (egui_phosphor::regular::WIFI_SLASH, loc.inspector_sys_event_net_disconnected, "NETWORK", t.bad),
+                                SystemEventType::SessionLock => (egui_phosphor::regular::LOCK, loc.inspector_sys_event_lock, t.accent_ink),
+                                SystemEventType::SessionUnlock => (egui_phosphor::regular::LOCK_OPEN, loc.inspector_sys_event_unlock, t.accent_ink),
+                                SystemEventType::SystemSleep => (egui_phosphor::regular::MOON, loc.inspector_sys_event_sleep, t.accent_ink),
+                                SystemEventType::SystemResume => (egui_phosphor::regular::SUN, loc.inspector_sys_event_resume, t.good),
+                                SystemEventType::PowerSourceAc => (egui_phosphor::regular::PLUG, loc.inspector_sys_event_ac, t.good),
+                                SystemEventType::PowerSourceBattery => (egui_phosphor::regular::BATTERY_CHARGING, loc.inspector_sys_event_battery, t.warn),
+                                SystemEventType::UserIdle => (egui_phosphor::regular::HOURGLASS, loc.inspector_sys_event_idle, t.muted),
+                                SystemEventType::UserActive => (egui_phosphor::regular::ACTIVITY, loc.inspector_sys_event_active, t.good),
+                                SystemEventType::DeviceConnected => (egui_phosphor::regular::HARD_DRIVES, loc.inspector_sys_event_dev_connected, t.good),
+                                SystemEventType::DeviceDisconnected => (egui_phosphor::regular::PLUG, loc.inspector_sys_event_dev_disconnected, t.warn),
+                                SystemEventType::MonitorOn => (egui_phosphor::regular::DESKTOP, loc.inspector_sys_event_mon_on, t.good),
+                                SystemEventType::MonitorOff => (egui_phosphor::regular::MOON_STARS, loc.inspector_sys_event_mon_off, t.muted),
+                                SystemEventType::NetworkConnected => (egui_phosphor::regular::WIFI_HIGH, loc.inspector_sys_event_net_connected, t.good),
+                                SystemEventType::NetworkDisconnected => (egui_phosphor::regular::WIFI_SLASH, loc.inspector_sys_event_net_disconnected, t.bad),
                             },
-                            Some(Trigger::ResourceThreshold { .. }) => (egui_phosphor::regular::CHART_LINE, loc.inspector_trigger_resource, "RESOURCE", t.warn),
-                            Some(Trigger::GlobalHotkey { .. }) => (egui_phosphor::regular::KEYBOARD, loc.inspector_trigger_hotkey, "HOTKEY", t.accent_ink),
-                            Some(Trigger::FileWatcher { .. }) => (egui_phosphor::regular::FILE, loc.inspector_trigger_file, "FILE", t.accent_ink),
-                            Some(Trigger::Webhook { .. }) => (egui_phosphor::regular::GLOBE, loc.inspector_trigger_webhook, "WEBHOOK", t.good),
-                            Some(Trigger::Manual) | None => (egui_phosphor::regular::PLAY_CIRCLE, loc.inspector_manual_title, "MANUAL", t.accent_ink),
+                            Some(Trigger::ResourceThreshold { .. }) => (egui_phosphor::regular::CHART_LINE, loc.inspector_trigger_resource, t.warn),
+                            Some(Trigger::GlobalHotkey { .. }) => (egui_phosphor::regular::KEYBOARD, loc.inspector_trigger_hotkey, t.accent_ink),
+                            Some(Trigger::FileWatcher { .. }) => (egui_phosphor::regular::FILE, loc.inspector_trigger_file, t.accent_ink),
+                            Some(Trigger::Webhook { .. }) => (egui_phosphor::regular::GLOBE, loc.inspector_trigger_webhook, t.good),
+                            Some(Trigger::Manual) | None => (egui_phosphor::regular::PLAY_CIRCLE, loc.inspector_manual_title, t.accent_ink),
                         };
 
                         ui.horizontal(|ui| {
@@ -566,7 +566,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                 egui::RichText::new(glyph)
                                     .family(theme::phosphor())
                                     .size(16.0)
-                                    .color(badge_color),
+                                    .color(glyph_color),
                             );
                             ui.add_space(4.0);
                             ui.label(
@@ -575,8 +575,6 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                     .size(12.5)
                                     .color(t.ink),
                             );
-                            ui.add_space(6.0);
-                            widgets::badge(ui, badge_text, badge_color);
 
                             let exec_opt = state.get_rule_execution_state(rule);
                             let is_running = exec_opt.is_some();
@@ -2082,7 +2080,19 @@ fn render_action_parameter_fields(
                             ui.checkbox(only_if_not_running, loc.inspector_checkbox_only_if_not_running);
                             ui.checkbox(run_as_admin, loc.inspector_checkbox_run_as_admin);
                             if !is_exit_pipeline {
-                                ui.checkbox(close_on_exit, loc.inspector_checkbox_close_on_exit);
+                                let is_process_trigger = state.editing_rule.as_ref().is_some_and(|r| matches!(r.trigger, Some(Trigger::Process { .. })));
+                                if !is_process_trigger {
+                                    *close_on_exit = false;
+                                }
+                                let resp = ui.add_enabled(
+                                    is_process_trigger,
+                                    egui::Checkbox::new(close_on_exit, loc.inspector_checkbox_close_on_exit),
+                                );
+                                if !is_process_trigger {
+                                    resp.on_disabled_hover_text(loc.inspector_companion_disabled_tip);
+                                } else {
+                                    resp.on_hover_text(loc.inspector_checkbox_close_on_exit_tip);
+                                }
                             }
                         });
                     }
@@ -3424,6 +3434,7 @@ fn render_action_parameter_fields(
             operation,
             override_text,
             duration_ms,
+            close_on_exit,
         } => {
             if custom_overlay.is_none() {
                 static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -3584,6 +3595,20 @@ fn render_action_parameter_fields(
                     }
 
                     ui.checkbox(&mut overlay_def.hide_from_capture, loc.overlay_studio_hide_from_capture);
+                    let is_process_trigger = state.editing_rule.as_ref().is_some_and(|r| matches!(r.trigger, Some(Trigger::Process { .. })));
+                    let can_companion = is_process_trigger && !is_exit_pipeline;
+                    if !can_companion {
+                        *close_on_exit = false;
+                    }
+                    let resp = ui.add_enabled(
+                        can_companion,
+                        egui::Checkbox::new(close_on_exit, loc.inspector_overlay_close_on_exit),
+                    );
+                    if !can_companion {
+                        resp.on_disabled_hover_text(loc.inspector_companion_disabled_tip);
+                    } else {
+                        resp.on_hover_text(loc.inspector_overlay_close_on_exit_tip);
+                    }
                 });
             }
         }
@@ -3730,42 +3755,7 @@ fn render_full_width_action_button(
     tip: &str,
     t: &Tokens,
 ) -> bool {
-    ui.add_space(2.0);
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
-    let is_hov = resp.hovered();
-    let p = ui.painter();
-
-    let border = if is_hov {
-        Stroke::new(1.0, t.accent_ink)
-    } else {
-        Stroke::new(1.0, t.muted.gamma_multiply(0.35))
-    };
-    p.rect_stroke(rect, CornerRadius::same(2), border, egui::StrokeKind::Inside);
-
-    let text_color = if is_hov { t.accent_ink } else { t.faint };
-    let plus_galley = p.layout_no_wrap(
-        egui_phosphor::regular::PLUS.to_string(),
-        egui::FontId::new(12.0, theme::phosphor()),
-        text_color,
-    );
-    let label_galley = widgets::caps(ui, label, 10.0, theme::mono(), 0.8, text_color);
-
-    let spacing = 8.0;
-    let plus_w = plus_galley.size().x;
-    let plus_h = plus_galley.size().y;
-    let total_w = plus_w + spacing + label_galley.size().x;
-    let start_x = rect.center().x - total_w * 0.5;
-
-    let plus_pos = pos2(start_x, rect.center().y - plus_h * 0.5);
-    p.galley(plus_pos, plus_galley, text_color);
-
-    let label_pos = pos2(start_x + plus_w + spacing, rect.center().y - label_galley.size().y * 0.5);
-    p.galley_with_override_text_color(label_pos, label_galley, text_color);
-
-    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-    let resp = if !tip.trim().is_empty() { resp.on_hover_text(tip) } else { resp };
-
-    resp.clicked()
+    widgets::full_width_action_button(ui, label, tip, t)
 }
 
 fn render_add_condition_button(

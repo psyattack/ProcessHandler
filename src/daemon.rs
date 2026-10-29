@@ -9,6 +9,7 @@ pub mod overlay_manager;
 pub mod pe_mask;
 pub mod system_events;
 pub mod tray;
+pub mod telemetry;
 pub mod watcher;
 pub mod webhook_server;
 

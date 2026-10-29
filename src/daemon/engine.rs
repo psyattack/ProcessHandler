@@ -19,6 +19,14 @@ pub struct BoundProcess {
 }
 
 #[derive(Debug, Clone)]
+pub struct BoundOverlay {
+    pub rule_id: String,
+    pub primary_process_name: String,
+    pub primary_pid: u32,
+    pub overlay_id: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ActiveExecutionItem {
     pub rule_id: String,
     pub step_index: usize,
@@ -35,6 +43,7 @@ pub enum ActionCompletionEvent {
         message: String,
     },
     AddBoundProcess(BoundProcess),
+    AddBoundOverlay(BoundOverlay),
     RuleExecutionStarted {
         execution_id: u64,
         rule_id: String,
@@ -69,6 +78,7 @@ pub struct DaemonEngine {
     pub logs: Vec<LogItem>,
     pub watcher: ProcessWatcher,
     pub active_bound_processes: Vec<BoundProcess>,
+    pub active_bound_overlays: Vec<BoundOverlay>,
     pub rule_last_triggered: HashMap<String, Instant>,
     pub active_rule_pids: HashMap<String, HashSet<u32>>,
     pub active_executions: HashMap<u64, ActiveExecutionItem>,
@@ -113,6 +123,7 @@ impl DaemonEngine {
             logs: Vec::new(),
             watcher: ProcessWatcher::new(),
             active_bound_processes: Vec::new(),
+            active_bound_overlays: Vec::new(),
             rule_last_triggered: HashMap::new(),
             active_rule_pids: HashMap::new(),
             active_executions: HashMap::new(),
@@ -252,6 +263,8 @@ impl DaemonEngine {
             Self::hide_rule_overlays(rule);
         }
 
+        self.active_bound_overlays.retain(|bo| bo.rule_id != rule_id);
+
         crate::daemon::actions::release_all_simulated_inputs();
     }
 
@@ -263,6 +276,9 @@ impl DaemonEngine {
                 }
                 ActionCompletionEvent::AddBoundProcess(bp) => {
                     self.active_bound_processes.push(bp);
+                }
+                ActionCompletionEvent::AddBoundOverlay(bo) => {
+                    self.active_bound_overlays.push(bo);
                 }
                 ActionCompletionEvent::RuleExecutionStarted { execution_id, rule_id, step_index, total_steps, is_exit } => {
                     self.active_executions.insert(execution_id, ActiveExecutionItem {
@@ -653,6 +669,45 @@ impl DaemonEngine {
                 let ctx = HashMap::new();
                 let _ = ActionRunner::execute(&action, &ctx).await;
             }
+
+            // 1.1. Auto-close any bound overlays that were launched for this process (Companion Mode in Rules)
+            let to_close_overlays: Vec<BoundOverlay> = self
+                .active_bound_overlays
+                .iter()
+                .filter(|bo| {
+                    let is_match = bo.primary_pid == event.pid
+                        || bo.primary_process_name.eq_ignore_ascii_case(&event.process_name);
+                    if !is_match {
+                        return false;
+                    }
+                    if let Some(rule) = rules_map.get(&bo.rule_id) {
+                        if let Some(Trigger::Process { single_instance: true, .. }) = &rule.trigger {
+                            return single_instance_rules_exited.contains(&bo.rule_id);
+                        }
+                    }
+                    true
+                })
+                .cloned()
+                .collect();
+
+            self.active_bound_overlays.retain(|bo| {
+                !to_close_overlays.iter().any(|k| k.rule_id == bo.rule_id && k.overlay_id == bo.overlay_id)
+            });
+
+            for bo in to_close_overlays {
+                self.log(
+                    "ACTION",
+                    "RULE",
+                    &format!(
+                        "Auto-closing bound overlay '{}' (rule: {}) because '{}' terminated",
+                        bo.overlay_id, bo.rule_id, event.process_name
+                    ),
+                );
+                crate::daemon::overlay_manager::hide_overlay(&bo.overlay_id);
+            }
+
+            // 1.2. Also signal overlay_manager to auto-close any standalone overlays with close_with_target == true
+            crate::daemon::overlay_manager::check_process_terminated(&event.process_name);
 
             // 2. Check rules with on_exit_actions
             for rule in &rules {
@@ -1162,6 +1217,15 @@ impl DaemonEngine {
                                     primary_process_name: context_name.clone(),
                                     primary_pid: pid,
                                     target_executable: file_path.clone(),
+                                }));
+                            }
+                            if let Action::Overlay { overlay_id, custom_overlay, close_on_exit: true, .. } = action {
+                                let resolved_id = custom_overlay.as_ref().map(|o| o.id.clone()).unwrap_or_else(|| overlay_id.clone());
+                                let _ = tx.send(ActionCompletionEvent::AddBoundOverlay(BoundOverlay {
+                                    rule_id: rule_id.clone(),
+                                    primary_process_name: context_name.clone(),
+                                    primary_pid: pid,
+                                    overlay_id: resolved_id,
                                 }));
                             }
                         }
@@ -1738,6 +1802,11 @@ impl DaemonEngine {
                 IpcResponse::OverlayPosition(pos)
             }
 
+            IpcRequest::UpdateOverlayPosition { id, x, y } => {
+                crate::daemon::overlay_manager::save_calibrated_position(&id, x, y);
+                IpcResponse::Ok
+            }
+
             IpcRequest::ShutdownDaemon => {
                 crate::daemon::actions::release_all_simulated_inputs();
                 crate::daemon::overlay_manager::hide_all();
@@ -1806,6 +1875,28 @@ impl DaemonEngine {
                         .unwrap_or(0);
                     active_rule_executions.insert(
                         bp.rule_id.clone(),
+                        crate::ipc::ActiveRuleExecutionState {
+                            active_count: 1,
+                            current_step: step_idx,
+                            total_steps: rule.actions.len(),
+                            is_exit: false,
+                        },
+                    );
+                }
+            }
+        }
+
+        // Track active bound overlays waiting for host process exit
+        for bo in &self.active_bound_overlays {
+            if !active_rule_executions.contains_key(&bo.rule_id) {
+                if let Some(rule) = self.config.rules.iter().find(|r| r.id == bo.rule_id) {
+                    let step_idx = rule
+                        .actions
+                        .iter()
+                        .position(|a| matches!(a, Action::Overlay { close_on_exit: true, .. }))
+                        .unwrap_or(0);
+                    active_rule_executions.insert(
+                        bo.rule_id.clone(),
                         crate::ipc::ActiveRuleExecutionState {
                             active_count: 1,
                             current_step: step_idx,
@@ -1896,6 +1987,13 @@ impl DaemonEngine {
 
         let active_test_rule_ids = self.active_test_recurring_rules.keys().cloned().collect();
 
+        crate::daemon::telemetry::update_engine_stats(
+            active_rules,
+            active_rule_executions.len(),
+            None,
+            None,
+        );
+
         DaemonState {
             autorun_enabled,
             uptime_secs: self.start_time.elapsed().as_secs(),
@@ -1931,6 +2029,68 @@ impl DaemonEngine {
 mod tests {
     use super::*;
     use chrono::{Datelike, Timelike};
+
+    #[tokio::test]
+    async fn test_bound_overlay_companion_lifecycle() {
+        let mut config = AppConfig::default();
+        let overlay_id = "companion_overlay_hud".to_string();
+        let rule = Rule {
+            id: "game_with_overlay".into(),
+            name: "Game with Overlay HUD".into(),
+            description: "".into(),
+            is_enabled: true,
+            cooldown_seconds: 0.0,
+            trigger: Some(Trigger::Process {
+                process_name: "mygame.exe".into(),
+                match_mode: ProcessMatchMode::Exact,
+                single_instance: false,
+            }),
+            actions: vec![
+                Action::Overlay {
+                    overlay_id: overlay_id.clone(),
+                    custom_overlay: None,
+                    operation: crate::models::OverlayOperation::Show,
+                    override_text: None,
+                    duration_ms: None,
+                    close_on_exit: true,
+                },
+            ],
+            ..Default::default()
+        };
+        config.rules.push(rule.clone());
+
+        let mut engine = DaemonEngine::new(config);
+
+        // 1. Process starts -> triggers rule execution
+        engine.handle_process_event(ProcessEvent {
+            pid: 4321,
+            process_name: "mygame.exe".into(),
+            is_started: true,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        engine.drain_action_events();
+
+        // Overlay is registered as bound companion
+        assert_eq!(engine.active_bound_overlays.len(), 1);
+        assert_eq!(engine.active_bound_overlays[0].overlay_id, overlay_id);
+        assert_eq!(engine.active_bound_overlays[0].primary_pid, 4321);
+
+        // State reflects companion supervisor execution
+        let state = engine.get_current_state();
+        assert!(state.active_rule_executions.contains_key("game_with_overlay"));
+
+        // 2. Process exits -> auto-closes bound overlay
+        engine.handle_process_event(ProcessEvent {
+            pid: 4321,
+            process_name: "mygame.exe".into(),
+            is_started: false,
+        }).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        engine.drain_action_events();
+
+        assert_eq!(engine.active_bound_overlays.len(), 0, "Bound overlay must be removed after primary process exit");
+        assert!(engine.logs.iter().any(|l| l.message.contains("Auto-closing bound overlay")));
+    }
 
     #[test]
     fn test_log_limit_500() {
@@ -2671,6 +2831,7 @@ mod tests {
                     operation: crate::models::OverlayOperation::Toggle,
                     override_text: None,
                     duration_ms: None,
+                    close_on_exit: false,
                 },
             ],
             on_exit_actions: Vec::new(),
