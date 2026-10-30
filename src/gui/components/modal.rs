@@ -99,7 +99,6 @@ pub struct Modal {
     toolbar_height: Option<f32>,
     footer_height: Option<f32>,
     header_sunken: bool,
-    toolbar_sunken: bool,
     body_sunken: bool,
     footer_sunken: bool,
 }
@@ -122,7 +121,6 @@ impl Modal {
             toolbar_height: None,
             footer_height: None,
             header_sunken: false,
-            toolbar_sunken: false,
             body_sunken: false,
             footer_sunken: false,
         }
@@ -175,12 +173,6 @@ impl Modal {
 
     pub fn header_sunken(mut self, sunken: bool) -> Self {
         self.header_sunken = sunken;
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn toolbar_sunken(mut self, sunken: bool) -> Self {
-        self.toolbar_sunken = sunken;
         self
     }
 
@@ -359,8 +351,7 @@ impl Modal {
 
                     // Toolbar fill
                     if let Some(tb_rect) = toolbar_rect {
-                        let fill = if self.toolbar_sunken { t.sunken } else { t.bg };
-                        p.rect_filled(tb_rect, CornerRadius::ZERO, fill.gamma_multiply(card_alpha));
+                        p.rect_filled(tb_rect, CornerRadius::ZERO, t.bg.gamma_multiply(card_alpha));
                     }
 
                     // Body fill if sunken

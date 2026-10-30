@@ -630,13 +630,13 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Устройство по Умолчанию", "Мгновенное переключение основного аудиовыхода или микрофона по имени устройства.", t);
         doc_table_row(ui, "Window & Display", "Управление окнами (свернуть, прижать, TopMost), выбор целевого монитора, разрешение и Гц.", t);
         doc_table_row(ui, "Tuning & Firewall", "Изменение приоритета процессов, привязка к ядрам CPU (Affinity) и блокировка сетевого трафика в Windows Firewall.", t);
-        doc_table_row(ui, "Очистка RAM (Trim)", "Принудительный сброс страниц физической памяти (Working Set) процесса обратно в операционную систему.", t);
+        doc_table_row(ui, "Очистка RAM (Trim)", "Сброс страниц памяти (Working Set) процесса обратно в систему с поддержкой мягких лимитов и пропуска активного окна.", t);
         doc_table_row(ui, "Discord Rich Presence", "Трансляция активности в Discord: статус игры/приложения, подробности, таймер, изображения и интерактивные кнопки с автосбросом.", t);
         doc_table_row(ui, "Архивация (Archive)", "Упаковка и распаковка файлов и директорий во всех популярных форматах: Zip, 7z, Tar, Tar.gz, Rar.", t);
         doc_table_row(ui, "Файловые Операции", "Создание файлов/папок, копирование, переименование, удаление, запись и дозапись текста с поддержкой токенов контекста.", t);
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Отправка исходящих REST-запросов (GET, POST, PUT, DELETE) с заголовками и телом.", t);
         doc_table_row(ui, "Power & System", "Схемы питания Windows; переход в сон, гибернация, перезагрузка, выключение и блокировка.", t);
-        doc_table_row(ui, "Экранный Оверлей (HUD)", "Визуальный оверлей поверх приложений и игр: прицелы (Crosshair), динамический текст с токенами, бейджи, прогресс-бары, изображения и векторные фигуры. Защита от захвата экрана (OBS/Discord), кликабельные действия и перемещение мышью.", t);
+        doc_table_row(ui, "Экранный Оверлей (HUD)", "Автономный GPU-оверлей поверх окон и игр: прицелы, текст с токенами, интерактивные кнопки/слайдеры, графики, телеметрия (CPU/RAM/сеть/микрофон), таймеры и медиаплеер с защитой от захвата.", t);
         doc_table_row(ui, "Delay & Notification", "Асинхронные паузы между шагами, всплывающие уведомления Windows и воспроизведение звуковых сигналов.", t);
         doc_table_row(ui, "Ветвление (Если / Иначе)", "Динамическая проверка условий на лету с выполнением веток Если (THEN), Иначе Если (ELSE IF) и Иначе (ELSE).", t);
 
@@ -644,12 +644,13 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_callout(
             ui,
             "Overlay Studio и Графические Оверлеи",
-            "• Полнофункциональная Студия: модальный редактор с холстом монитора 1:1, панорамированием, масштабированием и привязкой к сетке.\n\
-             • Элементы HUD: кастомные прицелы (Crosshair с центральной точкой), динамический текст со шрифтами Windows и токенами контекста, бейджи, шкалы прогресса, изображения с фиксацией пропорций, векторные фигуры (прямоугольники, круги, стрелки, линии) с произвольным углом поворота.\n\
-             • Интерактивные клики: привязка действий при нажатии на элементы (закрыть оверлей, запустить или переключить правило).\n\
-             • Защита от захвата (Anti-Capture): режим WDA_EXCLUDEFROMCAPTURE гарантирует полную невидимость оверлея в OBS Studio, Discord стримах, скриншотах и видеозахвате.\n\
-             • Режим сквозного клика (Click-Through): прозрачность для ввода мышью или интерактивное перетаскивание (Draggable) карточки по экрану.\n\
-             • Скриптовый контроль (Lua): прямое управление видимостью оверлеев из Lua-скриптов через ph.overlay_show(id), ph.overlay_hide(id), ph.overlay_toggle(id).",
+            "• Полнофункциональная Студия: модальный редактор с артбордом мониторов, каталогом элементов, панорамированием, масштабированием и историей Undo/Redo.\n\
+             • Интерактивные Элементы: кнопки, тумблеры и слайдеры с привязкой действий (Mute, громкость, управление медиа, прозрачность, закрытие процессов).\n\
+             • Системная Телеметрия: мониторинг CPU, RAM, сетевой скорости, заряда батареи и уровня микрофона в реальном времени.\n\
+             • Графики и Таймеры: графики истории (линейные, с заливкой, гистограммы) и таймеры (часы, секундомер, обратный отсчет, аптайм).\n\
+             • Гейминг и Медиа: кастомные прицелы (Crosshair), визуализаторы нажатий клавиш (WASD, стрелки), медиаплеер и векторные фигуры.\n\
+             • Защита от захвата (Anti-Capture): режим WDA_EXCLUDEFROMCAPTURE гарантирует полную невидимость оверлея в OBS Studio, Discord стримах и скриншотах.\n\
+             • Автономное окно и калибровка: отдельное легковесное окно с DWM-стилизацией, сквозным кликом, хоткеем калибровки F8 и Lua API (ph.overlay_*).",
             t,
             false,
         );
@@ -683,13 +684,13 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Default Audio Device", "Switch default system playback audio output or recording microphone by name.", t);
         doc_table_row(ui, "Window & Display", "Window positioning, TopMost on/off, target monitor index selection, resolution & Hz.", t);
         doc_table_row(ui, "Tuning & Firewall", "Process priority class, CPU core affinity masks, and Windows Firewall traffic blocking.", t);
-        doc_table_row(ui, "Trim RAM (Working Set)", "Forcefully compacts and releases unused process physical memory pages back to the OS.", t);
+        doc_table_row(ui, "Trim RAM (Working Set)", "Releases process working set memory pages back to the OS with configurable soft limits and active window skip safeguards.", t);
         doc_table_row(ui, "Discord Rich Presence", "Broadcast custom Rich Presence to Discord: game activity, state details, timer, image assets, and action buttons with auto-clear.", t);
         doc_table_row(ui, "Archive (Pack/Unpack)", "Compress or extract files and folders in all popular archive formats: Zip, 7z, Tar, Tar.gz, Rar.", t);
         doc_table_row(ui, "File System Operations", "Create files/folders, copy/clone, rename/move, delete, write and append text with context tokens.", t);
         doc_table_row(ui, "HTTP Webhook (Outbound)", "Send outbound HTTP requests (GET, POST, PUT, DELETE) with custom headers and body.", t);
         doc_table_row(ui, "Power & System", "Windows power plans; sleep, hibernate, restart, shutdown, and workstation lock.", t);
-        doc_table_row(ui, "Screen Overlay (HUD)", "GPU-accelerated overlay over apps and games: crosshairs, dynamic text with tokens, badges, progress bars, images, and vector shapes. Anti-capture protection (OBS/Discord stream), clickable actions, and draggable positioning.", t);
+        doc_table_row(ui, "Screen Overlay (HUD)", "Standalone GPU overlay over apps and games: reticles, text with tokens, interactive buttons/sliders, live graphs, telemetry (CPU/RAM/net/mic), timers, and media player with anti-capture protection.", t);
         doc_table_row(ui, "Delay & Notification", "Non-blocking delay pauses in pipeline, Windows desktop toast notifications, and audio alerts.", t);
         doc_table_row(ui, "Branching (If / Else)", "Evaluate conditions dynamically and branch into Then, Else If, and Else sub-action sequences.", t);
 
@@ -697,12 +698,13 @@ fn render_actions_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_callout(
             ui,
             "Overlay Studio & On-Screen HUD",
-            "• Visual Canvas Studio: interactive WYSIWYG modal editor with 1:1 monitor canvas, pan/zoom navigation, and snap-to-grid alignment.\n\
-             • HUD Elements: reticles & crosshairs with center dot, dynamic text supporting system fonts and token interpolation, status badges, progress bars, aspect-ratio locked images, and vector shapes (rectangles, circles, arrows, lines) with 360° rotation.\n\
-             • Interactive On-Click: bind clickable elements to trigger rules, toggle automations, or dismiss the overlay.\n\
-             • Anti-Capture Mode: WDA_EXCLUDEFROMCAPTURE flag keeps the overlay completely invisible to OBS Studio, Discord screen share, Nvidia ShadowPlay, and screenshots.\n\
-             • Click-Through & Draggable: switch between transparent click-through mode for gaming and interactive dragging directly on screen.\n\
-             • Lua Scripting API: dynamically show, hide, or toggle overlays programmatically via ph.overlay_show(id), ph.overlay_hide(id), ph.overlay_toggle(id).",
+            "• Visual Canvas Studio: interactive WYSIWYG modal editor with multi-monitor artboard support, element catalog, pan/zoom canvas, and multi-step Undo/Redo.\n\
+             • Interactive Controls: buttons, toggle switches, and sliders with action bindings (mute, master volume, media controls, opacity, process termination).\n\
+             • Real-Time Telemetry: hardware monitoring for CPU, RAM, network throughput, battery status, and microphone input level.\n\
+             • Graphs & Timers: history charts (line, filled area, histogram) and versatile timers (system clock, stopwatch, countdown, uptime).\n\
+             • Gaming & Media: custom crosshairs, key visualizer layouts (WASD, Arrows, 6-Key), media player widgets, and vector shapes.\n\
+             • Anti-Capture Mode: WDA_EXCLUDEFROMCAPTURE flag keeps the overlay completely invisible to OBS Studio, Discord screen sharing, and screenshot captures.\n\
+             • Standalone Window & Calibration: dedicated lightweight borderless window with DWM styling, click-through mode, F8 calibration, and Lua scripting API (ph.overlay_*).",
             t,
             false,
         );

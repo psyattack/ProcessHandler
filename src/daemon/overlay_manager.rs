@@ -1,17 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::process::{Child, Command};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
 
-use crate::models::{MonitorInfo, OverlayAnchor, OverlayDefinition};
+use crate::models::{MonitorInfo, OverlayDefinition};
+#[cfg(test)]
+use crate::models::OverlayAnchor;
 
 pub struct ActiveOverlayProcess {
     pub id: String,
     pub child: Option<Child>,
     pub close_with_target: bool,
     pub target_process: String,
-    #[allow(dead_code)]
-    pub spawn_time: Instant,
 }
 
 static ACTIVE_PROCESSES: OnceLock<Arc<Mutex<HashMap<String, ActiveOverlayProcess>>>> = OnceLock::new();
@@ -75,7 +74,6 @@ pub fn show_overlay(overlay: &OverlayDefinition, calibration: bool, override_tex
             child,
             close_with_target: overlay.close_with_target,
             target_process: overlay.target_process.clone().unwrap_or_default(),
-            spawn_time: Instant::now(),
         },
     );
 }
@@ -139,7 +137,6 @@ pub fn flash_overlay(overlay: &OverlayDefinition, duration_ms: u32, override_tex
             child,
             close_with_target: overlay.close_with_target,
             target_process: overlay.target_process.clone().unwrap_or_default(),
-            spawn_time: Instant::now(),
         },
     );
 }
@@ -176,7 +173,6 @@ pub fn get_calibrated_position(id: &str) -> Option<(f32, f32)> {
     calibrated_map().lock().ok()?.get(id).copied()
 }
 
-#[allow(dead_code)]
 pub fn save_calibrated_position(id: &str, x: f32, y: f32) {
     if let Ok(mut lock) = calibrated_map().lock() {
         lock.insert(id.to_string(), (x, y));
@@ -212,7 +208,6 @@ pub fn update_overlay_text(id: &str, text: &str) {
                     child,
                     close_with_target: def.close_with_target,
                     target_process: def.target_process.clone().unwrap_or_default(),
-                    spawn_time: Instant::now(),
                 },
             );
         }
@@ -342,7 +337,7 @@ pub fn get_system_monitors() -> Vec<MonitorInfo> {
     }]
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn calculate_overlay_rect(
     overlay: &OverlayDefinition,
     _active_overlays: &HashMap<String, (f32, f32)>,

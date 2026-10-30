@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.6.0](https://github.com/psyattack/ProcessHandler/compare/v2.5.0...v2.6.0) - 2026-10-30
+
+### Added
+- Standalone GPU Overlay Window: Overlays now run in an isolated, high-performance borderless window with hardware acceleration, seamless non-client hit testing, and smooth 60 FPS animations.
+- Element Catalog Modal: Added a categorized in-context modal with instant search for browsing and adding overlay elements across visual, interactive, telemetry, and gaming categories.
+- Interactive HUD Controls: Added clickable buttons, toggle switches, and sliders to overlays for adjusting volume, toggling rules, muting audio, controlling playback, and managing processes.
+- Real-Time Hardware Telemetry: Added on-screen monitoring widgets for system CPU, RAM, network throughput, battery status, and microphone input levels.
+- Live Performance Graphs: Added historical charts supporting line, filled area, and histogram styles for tracking system and process metrics over time.
+- Multi-Mode Timers and Media Widgets: Added digital clocks, stopwatches, countdown timers, uptime counters, and media player controls to on-screen HUDs.
+- Key Visualizer Widgets: Added customizable on-screen keyboard and mouse input visualizers with dedicated layouts for FPS, Action RPG, movement, and text streaming.
+- Multi-Monitor Artboard Support: Overlay Studio now automatically detects all connected monitors, their resolutions, and orientations (landscape or portrait) for precise element placement across displays.
+- Studio Undo and Redo: Added full multi-level history (Ctrl+Z / Ctrl+Y) to Overlay Studio for tracking element additions, moves, and property changes.
+- Companion Overlay Lifecycle: Added an option for overlays to automatically start and close in sync with a target companion application.
+
+### Changed
+- Enhanced Memory Trimming: Added configurable soft working set limits, active foreground window fallback, and a safeguard option to skip trimming the currently focused application.
+- Updated Rule Inspector and Action Previews with refined layouts, inline checkbox controls, and updated action summaries.
+- Expanded the in-app user guide and architectural documentation with comprehensive coverage of Overlay Studio widgets, telemetry, and memory tuning options.
+- Updated English and Russian localization catalogs across all new overlay elements, telemetry widgets, interactive controls, and settings.
+
+<details><summary>Detailed Changelog</summary>
+
+### Added
+- **overlay:** add standalone egui overlay window and interactive studio elements (by @psyattack in 3ec4724)
+- **actions:** enhance memory trimming with soft limits and focus skip (by @psyattack in bc6d316)
+
+</details>
+
+
 ## [2.5.0](https://github.com/psyattack/ProcessHandler/compare/v2.4.0...v2.5.0) - 2026-10-28
 
 ### Added

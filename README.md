@@ -76,7 +76,7 @@ Whether you need to boost game performance by binding companion utilities, safeg
   - *Screen Overlay (HUD)*: GPU-accelerated HUD overlay over apps and games (custom crosshairs with center dot, dynamic text with tokens, badges, progress bars, images, and vector shapes) with click-through, anti-capture streaming protection (`WDA_EXCLUDEFROMCAPTURE`), and interactive on-click triggers.
   - *Process Control*: Launch (custom arguments, working dir, admin, hidden mode), terminate process trees, or restart.
   - *Window Management*: Minimize, maximize, restore, hide, show, close, transparency, always-on-top, and screen positioning.
-  - *Process & Memory Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and forcefully trim process RAM working sets.
+  - *Process & Memory Tuning*: Dynamically adjust CPU priority (Realtime to Idle), set core affinity masks, and trim RAM working sets with configurable soft limits and active window skip safeguards.
   - *Discord Rich Presence*: Broadcast custom game and app status directly to Discord with activity details, timers, custom asset images, interactive buttons, and auto-clear on exit.
   - *Archive Compression & Extraction*: Pack and unpack files or directories across multiple formats (Zip, 7z, Tar, Tar.gz, Rar) with overwrite protection.
   - *Filesystem Operations*: Create files and folders, copy/clone, rename/move, delete, write and append text with dynamic token interpolation.
@@ -211,9 +211,10 @@ ProcessHandler/
 │   │   ├── hotkeys.rs                  # Low-level global hotkey listener & hold-mode engine
 │   │   ├── ipc_server.rs               # Named pipe listener & connection worker
 │   │   ├── lua_runner.rs               # Embedded Lua 5.4 execution runner with custom `ph` API
-│   │   ├── overlay_manager.rs          # Direct3D/Win32 transparent click-through overlay window renderer
+│   │   ├── overlay_manager.rs          # Background overlay process lifecycle & multi-monitor manager
 │   │   ├── pe_mask.rs                  # Windows PE process spoofing & Task Manager masking (RuntimeBroker.exe)
 │   │   ├── system_events.rs            # Win32 idle time & AC/battery power monitor
+│   │   ├── telemetry.rs                # System telemetry provider (CPU, RAM, network, battery, mic)
 │   │   ├── tray.rs                     # Win32 system tray manager, menu & message loop
 │   │   ├── watcher.rs                  # WMI events & Toolhelp32 process snapshotting
 │   │   └── webhook_server.rs           # Local HTTP webhook server (port 48123)
@@ -221,6 +222,7 @@ ProcessHandler/
 │   │   ├── components/                 # UI components
 │   │   │   ├── icons.rs                # Win32 shell icon extractor, image loader & texture cache
 │   │   │   ├── modal.rs                # Unified animated modal window framework
+│   │   │   ├── overlay_renderer.rs     # GPU-accelerated overlay HUD element renderer
 │   │   │   ├── script_highlighter.rs   # PowerShell, Batch & Lua syntax highlighter
 │   │   │   └── widgets.rs              # Custom canvas controls (buttons, inputs, cards, drag handles, glyphs)
 │   │   ├── views/                      # Application screens & panels
@@ -228,17 +230,19 @@ ProcessHandler/
 │   │   │   ├── analytics_view.rs       # Real-time event telemetry stream & KPI metric cards
 │   │   │   ├── changelog_modal.rs      # GitHub release notes & changelog viewer
 │   │   │   ├── condition_catalog_modal.rs # Studio modal for categorized pre-condition browsing & search
+│   │   │   ├── element_catalog_modal.rs # Studio modal for categorized overlay HUD elements & widgets
 │   │   │   ├── guide_modal.rs          # GitBook-style interactive documentation & recipes
 │   │   │   ├── header_bar.rs           # Custom window titlebar & navigation tabs
 │   │   │   ├── inspector.rs            # Rule inspector, trigger & action editor (drag-and-drop, undo/redo)
 │   │   │   ├── macro_modal.rs          # Macro timeline editor & playback studio
-│   │   │   ├── overlay_modal.rs        # Overlay Studio (1:1 canvas, HUD elements, snap-to-grid)
+│   │   │   ├── overlay_modal.rs        # Overlay Studio (WYSIWYG artboard, HUD elements, snap-to-grid)
 │   │   │   ├── process_picker_modal.rs # In-context process picker modal with filter & sorting
 │   │   │   ├── rules_view.rs           # Rule management list & cards
 │   │   │   ├── script_modal.rs         # Expandable script editor modal (PowerShell, CMD, Lua)
 │   │   │   ├── settings_view.rs        # Balanced 2x2 settings (System, Engine, Appearance, Updates)
 │   │   │   └── trigger_catalog_modal.rs # Studio modal for categorized trigger browsing & search
 │   │   ├── macro_recorder.rs           # Win32 low-level keyboard/mouse macro recorder
+│   │   ├── overlay_window.rs           # Standalone borderless GPU-accelerated overlay window
 │   │   ├── state.rs                    # GUI state management & IPC synchronization
 │   │   └── theme.rs                    # Design system tokens (Dark, Light, Chocolate palettes)
 │   ├── i18n/                           # Internationalization & localization

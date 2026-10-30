@@ -50,29 +50,6 @@ pub fn hud(ui: &mut Ui, text: &str, color: Color32) -> Response {
     resp
 }
 
-/// A mono label elided with "…" if wider than `max_width`. Full text on hover.
-#[allow(dead_code)]
-pub fn hud_elided(ui: &mut Ui, text: &str, color: Color32, max_width: f32) -> Response {
-    let format = egui::TextFormat {
-        font_id: egui::FontId::new(theme::HUD_SIZE, theme::mono()),
-        color,
-        extra_letter_spacing: theme::HUD_SPACING,
-        ..Default::default()
-    };
-    let mut job = egui::text::LayoutJob::single_section(text.to_uppercase(), format);
-    job.wrap = egui::text::TextWrapping::truncate_at_width(max_width.min(ui.available_width()).max(0.0));
-    let galley = ui.painter().layout_job(job);
-    let elided = galley.elided;
-    let (rect, resp) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    paint_left(ui, rect, galley, color);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
-    if elided {
-        resp.on_hover_text(text)
-    } else {
-        resp
-    }
-}
-
 /// "01 / AUTOMATIONS": a section eyebrow, the index and separator faint.
 pub fn eyebrow(ui: &mut Ui, index: &str, label: &str) {
     let t = Tokens::get(ui.ctx());
@@ -545,12 +522,6 @@ pub fn glyph_button(ui: &mut Ui, glyph: Glyph, tip: &str) -> Response {
     glyph_button_active(ui, glyph, false, tip)
 }
 
-/// Small outlined square button with a custom square size (e.g. 24.0 or 26.0 px).
-#[allow(dead_code)]
-pub fn glyph_button_size(ui: &mut Ui, glyph: Glyph, size: f32, tip: &str) -> Response {
-    glyph_button_custom(ui, glyph, size, false, tip)
-}
-
 /// Small outlined square button with a drawn glyph; supports active state.
 pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -> Response {
     let size = if ui.spacing().interact_size.y < theme::CONTROL_H {
@@ -562,7 +533,6 @@ pub fn glyph_button_active(ui: &mut Ui, glyph: Glyph, active: bool, tip: &str) -
 }
 
 /// Small outlined square button with custom size and active state.
-#[allow(dead_code)]
 pub fn glyph_button_custom(ui: &mut Ui, glyph: Glyph, size: f32, active: bool, tip: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::click());

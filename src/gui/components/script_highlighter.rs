@@ -20,15 +20,6 @@ impl ScriptLanguage {
             Self::Lua => "LUA 5.4",
         }
     }
-
-    #[allow(dead_code)]
-    pub fn localized_subtitle(&self, loc: &crate::i18n::Strings) -> &'static str {
-        match self {
-            Self::PowerShell => loc.modal_pwsh_subtitle,
-            Self::Batch => loc.modal_cmd_subtitle,
-            Self::Lua => "Embedded Lua Automation Script",
-        }
-    }
 }
 
 const PWSH_KEYWORDS: &[&str] = &[

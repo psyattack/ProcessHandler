@@ -860,7 +860,7 @@ fn record_delay_and_event(rec: &MacroRecorder, event: MacroEvent, allow_delay: b
 }
 
 /// Coalesces contiguous MouseMove sequences into clean, single smooth A -> B trajectory steps.
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn coalesce_mouse_moves(events: &mut Vec<MacroEvent>) {
     if events.len() < 2 {
         return;
@@ -981,7 +981,6 @@ pub fn vk_to_key_name(vk: u32) -> String {
 }
 
 /// Convert egui Key to string representation for internal GUI key capture
-#[allow(dead_code)]
 pub fn egui_key_to_string(key: egui::Key) -> &'static str {
     match key {
         egui::Key::A => "A",

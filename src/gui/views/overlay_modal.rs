@@ -1777,9 +1777,9 @@ fn render_overlay_inspector(
 
                         ui.horizontal(|ui| {
                             let styles = [
-                                (crate::models::GraphStyle::AreaFilled, "Area"),
-                                (crate::models::GraphStyle::Line, "Line"),
-                                (crate::models::GraphStyle::Histogram, "Bars"),
+                                (crate::models::GraphStyle::AreaFilled, loc.overlay_studio_graph_style_area),
+                                (crate::models::GraphStyle::Line, loc.overlay_studio_graph_style_line),
+                                (crate::models::GraphStyle::Histogram, loc.overlay_studio_graph_style_histogram),
                             ];
                             for (s, lbl) in styles {
                                 let is_s = *style == s;
@@ -1927,11 +1927,16 @@ fn render_overlay_inspector(
 
                         ui.horizontal(|ui| {
                             ui.label(RichText::new(loc.overlay_studio_control_kind).size(10.0).family(theme::semibold()).color(t.faint));
-                            for lbl in ["Button", "Toggle", "Slider"] {
-                                let is_sel = cur_kind_name == lbl;
+                            let kinds = [
+                                (loc.overlay_studio_control_btn, "Button"),
+                                (loc.overlay_studio_control_toggle, "Toggle"),
+                                (loc.overlay_studio_control_slider, "Slider"),
+                            ];
+                            for (lbl, kind_id) in kinds {
+                                let is_sel = cur_kind_name == kind_id;
                                 let kind = if is_sel { Kind::Primary } else { Kind::Secondary };
                                 if widgets::button(ui, lbl, kind, 0.0).clicked() && !is_sel {
-                                    *control = match lbl {
+                                    *control = match kind_id {
                                         "Button" => crate::models::InteractiveControlKind::Button {
                                             label: "Action".to_string(),
                                             icon: None,
@@ -1969,7 +1974,7 @@ fn render_overlay_inspector(
                                     ui.label(RichText::new(loc.overlay_studio_control_label).size(10.0).family(theme::semibold()).color(t.faint));
                                     ui.text_edit_singleline(label);
                                 });
-                                ui.checkbox(is_active, "Initial Active State");
+                                ui.checkbox(is_active, loc.overlay_studio_control_initial_state);
                                 render_element_click_action_ui(ui, on_enable, rules_list, idx + 100, t, loc);
                                 render_element_click_action_ui(ui, on_disable, rules_list, idx + 200, t, loc);
                             }
@@ -1981,26 +1986,26 @@ fn render_overlay_inspector(
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(loc.overlay_studio_control_slider_target).size(10.0).family(theme::semibold()).color(t.faint));
                                     let target_lbl = match bind_target {
-                                        crate::models::SliderBindTarget::MasterVolume => "Master Volume",
-                                        crate::models::SliderBindTarget::CustomVariable => "Custom Variable",
-                                        crate::models::SliderBindTarget::OverlayOpacity => "Overlay Opacity",
-                                        crate::models::SliderBindTarget::ProcessVolume => "Process Volume",
+                                        crate::models::SliderBindTarget::MasterVolume => loc.overlay_studio_slider_master_volume,
+                                        crate::models::SliderBindTarget::CustomVariable => loc.overlay_studio_slider_custom_variable,
+                                        crate::models::SliderBindTarget::OverlayOpacity => loc.overlay_studio_slider_overlay_opacity,
+                                        crate::models::SliderBindTarget::ProcessVolume => loc.overlay_studio_slider_process_volume,
                                     };
                                     egui::ComboBox::from_id_salt(ui.id().with(("slider_target", idx)))
                                         .selected_text(target_lbl)
                                         .width(ui.available_width() - 8.0)
                                         .show_ui(ui, |ui| {
-                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::MasterVolume, "Master Volume");
-                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::CustomVariable, "Custom Variable");
-                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::OverlayOpacity, "Overlay Opacity");
-                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::ProcessVolume, "Process Volume");
+                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::MasterVolume, loc.overlay_studio_slider_master_volume);
+                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::CustomVariable, loc.overlay_studio_slider_custom_variable);
+                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::OverlayOpacity, loc.overlay_studio_slider_overlay_opacity);
+                                            ui.selectable_value(bind_target, crate::models::SliderBindTarget::ProcessVolume, loc.overlay_studio_slider_process_volume);
                                         });
                                 });
                                 ui.columns(2, |cols| {
                                     cols[0].add(egui::DragValue::new(min).prefix("Min: "));
                                     cols[1].add(egui::DragValue::new(max).prefix("Max: "));
                                 });
-                                ui.add(egui::Slider::new(value, *min..=*max).text("Value"));
+                                ui.add(egui::Slider::new(value, *min..=*max).text(loc.overlay_studio_control_label));
                             }
                         }
 
@@ -2421,17 +2426,17 @@ fn render_element_click_action_ui(
                 format!("{}: {name}", loc.overlay_studio_on_click_trigger)
             }
             Some(OverlayClickAction::KillProcess { process_name }) => {
-                format!("Kill: {process_name}")
+                format!("{}: {process_name}", loc.overlay_studio_on_click_kill_prefix)
             }
             Some(OverlayClickAction::TrimMemory { process_name }) => {
-                format!("Trim: {process_name}")
+                format!("{}: {process_name}", loc.overlay_studio_on_click_trim_prefix)
             }
-            Some(OverlayClickAction::ToggleMute) => "Toggle Mute".to_string(),
-            Some(OverlayClickAction::MediaPlayPause) => "Play / Pause".to_string(),
-            Some(OverlayClickAction::MediaNext) => "Next Track".to_string(),
-            Some(OverlayClickAction::MediaPrev) => "Prev Track".to_string(),
-            Some(OverlayClickAction::ResetTimer) => "Reset Timer".to_string(),
-            Some(OverlayClickAction::ToggleTimer) => "Toggle Timer".to_string(),
+            Some(OverlayClickAction::ToggleMute) => loc.overlay_studio_on_click_mute.to_string(),
+            Some(OverlayClickAction::MediaPlayPause) => loc.overlay_studio_on_click_play_pause.to_string(),
+            Some(OverlayClickAction::MediaNext) => loc.overlay_studio_on_click_next_track.to_string(),
+            Some(OverlayClickAction::MediaPrev) => loc.overlay_studio_on_click_prev_track.to_string(),
+            Some(OverlayClickAction::ResetTimer) => loc.overlay_studio_on_click_timer_reset.to_string(),
+            Some(OverlayClickAction::ToggleTimer) => loc.overlay_studio_on_click_timer_toggle.to_string(),
         };
 
         egui::ComboBox::from_id_salt(ui.id().with(("elem_onclick", idx)))
@@ -2444,22 +2449,22 @@ fn render_element_click_action_ui(
                 if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::CloseOverlay)), loc.overlay_studio_on_click_close).clicked() {
                     *on_click = Some(OverlayClickAction::CloseOverlay);
                 }
-                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ToggleMute)), "Toggle Mute").clicked() {
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ToggleMute)), loc.overlay_studio_on_click_mute).clicked() {
                     *on_click = Some(OverlayClickAction::ToggleMute);
                 }
-                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaPlayPause)), "Media Play/Pause").clicked() {
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaPlayPause)), loc.overlay_studio_on_click_play_pause).clicked() {
                     *on_click = Some(OverlayClickAction::MediaPlayPause);
                 }
-                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaNext)), "Media Next").clicked() {
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaNext)), loc.overlay_studio_on_click_next_track).clicked() {
                     *on_click = Some(OverlayClickAction::MediaNext);
                 }
-                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaPrev)), "Media Prev").clicked() {
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::MediaPrev)), loc.overlay_studio_on_click_prev_track).clicked() {
                     *on_click = Some(OverlayClickAction::MediaPrev);
                 }
-                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ToggleTimer)), "Timer: Play/Pause").clicked() {
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ToggleTimer)), loc.overlay_studio_on_click_timer_toggle).clicked() {
                     *on_click = Some(OverlayClickAction::ToggleTimer);
                 }
-                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ResetTimer)), "Timer: Reset").clicked() {
+                if ui.selectable_label(matches!(on_click, Some(OverlayClickAction::ResetTimer)), loc.overlay_studio_on_click_timer_reset).clicked() {
                     *on_click = Some(OverlayClickAction::ResetTimer);
                 }
                 if !rules_list.is_empty() {
@@ -2531,25 +2536,6 @@ pub fn resolve_overlay_monitor(
             height: 1080,
             is_primary: true,
         })
-}
-
-#[allow(dead_code)]
-#[cfg(windows)]
-fn get_screen_resolution() -> (f32, f32) {
-    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-    let w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-    if w > 0 && h > 0 {
-        (w as f32, h as f32)
-    } else {
-        (1920.0, 1080.0)
-    }
-}
-
-#[allow(dead_code)]
-#[cfg(not(windows))]
-fn get_screen_resolution() -> (f32, f32) {
-    (1920.0, 1080.0)
 }
 
 pub fn compute_overlay_screen_pos_with_anchor(anchor: OverlayAnchor, overlay: &OverlayDefinition, screen_w: f32, screen_h: f32) -> (f32, f32) {

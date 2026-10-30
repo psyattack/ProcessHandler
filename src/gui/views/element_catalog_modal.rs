@@ -17,7 +17,6 @@ use crate::models::{
 
 struct CatalogItem {
     category_idx: usize, // 1: Visual, 2: Interactive, 3: Telemetry, 4: Gaming & Media
-    #[allow(dead_code)]
     badge: &'static str,
     title: fn(&crate::i18n::Strings) -> &'static str,
     description: fn(&crate::i18n::Strings) -> &'static str,
@@ -571,8 +570,9 @@ pub fn render_element_catalog_modal(ctx: &egui::Context, state: &mut GuiState) {
                                     }
                                     let title_match = (item.title)(loc).to_lowercase().contains(&query);
                                     let desc_match = (item.description)(loc).to_lowercase().contains(&query);
+                                    let badge_match = item.badge.to_lowercase().contains(&query);
                                     let kw_match = item.keywords.iter().any(|kw| kw.to_lowercase().contains(&query));
-                                    title_match || desc_match || kw_match
+                                    title_match || desc_match || badge_match || kw_match
                                 })
                                 .collect();
 
