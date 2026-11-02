@@ -506,6 +506,7 @@ unsafe fn create_pargb_bitmap(width: i32, height: i32, rgba_pixels: &[u8]) -> Op
 
     let dest = std::slice::from_raw_parts_mut(bits_ptr as *mut u8, (width * height * 4) as usize);
 
+    #[allow(clippy::chunks_exact_to_as_chunks)]
     for (src, dst) in rgba_pixels.chunks_exact(4).zip(dest.chunks_exact_mut(4)) {
         let r = src[0] as u32;
         let g = src[1] as u32;

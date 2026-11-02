@@ -1049,6 +1049,8 @@ pub struct Strings {
     pub elem_cat_desc_slider: &'static str,
     pub elem_cat_title_button: &'static str,
     pub elem_cat_desc_button: &'static str,
+    pub elem_cat_title_control: &'static str,
+    pub elem_cat_desc_control: &'static str,
     pub elem_cat_title_graph: &'static str,
     pub elem_cat_desc_graph: &'static str,
     pub elem_cat_title_clock: &'static str,

@@ -11,6 +11,7 @@ pub struct ActiveOverlayProcess {
     pub child: Option<Child>,
     pub close_with_target: bool,
     pub target_process: String,
+    pub fade_out_ms: Option<u32>,
 }
 
 static ACTIVE_PROCESSES: OnceLock<Arc<Mutex<HashMap<String, ActiveOverlayProcess>>>> = OnceLock::new();
@@ -56,6 +57,13 @@ pub fn show_overlay(overlay: &OverlayDefinition, calibration: bool, override_tex
         if let Some(b64_str) = b64 {
             cmd.arg("--overlay-data").arg(b64_str);
         }
+        if !calibration {
+            if let Some(s) = overlay.auto_hide_seconds {
+                if s > 0.0 {
+                    cmd.arg("--duration").arg(((s * 1000.0).round() as u32).to_string());
+                }
+            }
+        }
 
         #[cfg(windows)]
         {
@@ -74,15 +82,92 @@ pub fn show_overlay(overlay: &OverlayDefinition, calibration: bool, override_tex
             child,
             close_with_target: overlay.close_with_target,
             target_process: overlay.target_process.clone().unwrap_or_default(),
+            fade_out_ms: overlay.fade_out_ms,
         },
     );
+}
+
+#[cfg(windows)]
+pub fn find_overlay_hwnd(id: &str, pid: Option<u32>) -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, FindWindowW, GetWindowThreadProcessId};
+    use windows::core::PCWSTR;
+
+    let title_wide: Vec<u16> = format!("Synector Overlay [{id}]\0").encode_utf16().collect();
+    let found = unsafe { FindWindowW(None, PCWSTR(title_wide.as_ptr())) };
+    if let Ok(h) = found {
+        if !h.is_invalid() {
+            return Some(h);
+        }
+    }
+
+    if let Some(target_pid) = pid {
+        struct SearchContext {
+            pid: u32,
+            hwnd: Option<HWND>,
+        }
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+            let ctx = &mut *(lparam.0 as *mut SearchContext);
+            let mut win_pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut win_pid));
+            if win_pid == ctx.pid {
+                ctx.hwnd = Some(hwnd);
+                return windows::core::BOOL(0);
+            }
+            windows::core::BOOL(1)
+        }
+        let mut ctx = SearchContext {
+            pid: target_pid,
+            hwnd: None,
+        };
+        unsafe {
+            let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
+        }
+        return ctx.hwnd;
+    }
+    None
 }
 
 pub fn hide_overlay(id: &str) {
     let mut lock = active_map().lock().unwrap();
     if let Some(mut proc) = lock.remove(id) {
+        let fade_ms = proc.fade_out_ms.unwrap_or(0);
+        let pid = proc.child.as_ref().map(|c| c.id());
+
+        #[cfg(windows)]
+        let signaled = if fade_ms > 0 {
+            if let Some(hwnd) = find_overlay_hwnd(id, pid) {
+                unsafe {
+                    use windows::Win32::Foundation::{LPARAM, WPARAM};
+                    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+                    let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+                }
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        #[cfg(not(windows))]
+        let signaled = false;
+
         if let Some(mut ch) = proc.child.take() {
-            let _ = ch.kill();
+            if signaled && fade_ms > 0 {
+                std::thread::spawn(move || {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(fade_ms as u64 + 400);
+                    while std::time::Instant::now() < deadline {
+                        if let Ok(Some(_)) = ch.try_wait() {
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(25));
+                    }
+                    let _ = ch.kill();
+                });
+            } else {
+                let _ = ch.kill();
+            }
         }
     }
 }
@@ -137,16 +222,18 @@ pub fn flash_overlay(overlay: &OverlayDefinition, duration_ms: u32, override_tex
             child,
             close_with_target: overlay.close_with_target,
             target_process: overlay.target_process.clone().unwrap_or_default(),
+            fade_out_ms: overlay.fade_out_ms,
         },
     );
 }
 
 pub fn hide_all() {
-    let mut lock = active_map().lock().unwrap();
-    for (_, mut proc) in lock.drain() {
-        if let Some(mut ch) = proc.child.take() {
-            let _ = ch.kill();
-        }
+    let to_hide: Vec<String> = {
+        let lock = active_map().lock().unwrap();
+        lock.keys().cloned().collect()
+    };
+    for id in to_hide {
+        hide_overlay(&id);
     }
 }
 
@@ -208,6 +295,7 @@ pub fn update_overlay_text(id: &str, text: &str) {
                     child,
                     close_with_target: def.close_with_target,
                     target_process: def.target_process.clone().unwrap_or_default(),
+                    fade_out_ms: def.fade_out_ms,
                 },
             );
         }
@@ -402,5 +490,33 @@ mod tests {
         assert_eq!(h0, 100);
         assert_eq!(x0, monitors[0].x + 10);
         assert_eq!(y0, monitors[0].y + 20);
+    }
+
+    #[test]
+    fn test_show_overlay_stores_fade_out_and_target_process() {
+        init();
+
+        let mut def = OverlayDefinition::default_new_overlay();
+        def.id = "mgr_test_ov".to_string();
+        def.target_process = Some("game.exe".to_string());
+        def.close_with_target = true;
+        def.fade_out_ms = Some(450);
+
+        show_overlay(&def, false, None);
+
+        let active_ids = get_active_overlay_ids();
+        assert!(active_ids.contains("mgr_test_ov"));
+
+        {
+            let lock = active_map().lock().unwrap();
+            let proc = lock.get("mgr_test_ov").unwrap();
+            assert_eq!(proc.target_process, "game.exe");
+            assert!(proc.close_with_target);
+            assert_eq!(proc.fade_out_ms, Some(450));
+        }
+
+        hide_overlay("mgr_test_ov");
+        let active_ids_after = get_active_overlay_ids();
+        assert!(!active_ids_after.contains("mgr_test_ov"));
     }
 }

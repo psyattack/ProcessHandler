@@ -11,7 +11,7 @@ use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
 use crate::models::{
     CrosshairStyle, GraphMetric, GraphStyle, InteractiveControlKind, KeyVisualizerLayout,
-    OverlayClickAction, OverlayElement, ShapeKind, SliderBindTarget, TelemetryKind, TelemetryStyle,
+    OverlayElement, ShapeKind, TelemetryKind, TelemetryStyle,
     TimerMode,
 };
 
@@ -26,7 +26,7 @@ struct CatalogItem {
     constructor: fn(id_num: usize) -> OverlayElement,
 }
 
-const CATALOG_ITEMS: [CatalogItem; 14] = [
+const CATALOG_ITEMS: [CatalogItem; 10] = [
     // 1. Visual & Display
     CatalogItem {
         category_idx: 1,
@@ -81,52 +81,6 @@ const CATALOG_ITEMS: [CatalogItem; 14] = [
     },
     CatalogItem {
         category_idx: 1,
-        badge: "BADGE",
-        title: |loc| loc.elem_cat_title_badge,
-        description: |loc| loc.elem_cat_desc_badge,
-        glyph: egui_phosphor::regular::TAG,
-        tint: |t| t.good,
-        keywords: &[
-            "badge", "pill", "tag", "chip", "status", "indicator",
-            "бейдж", "метка", "тег", "плашка", "статус",
-        ],
-        constructor: |id_num| OverlayElement::Badge {
-            id: format!("badge_{id_num}"),
-            text: "STATUS: ACTIVE".to_string(),
-            color: [255, 255, 255, 255],
-            bg_color: [20, 110, 190, 220],
-            x: 16.0,
-            y: 16.0,
-            rotation: 0.0,
-            on_click: None,
-        },
-    },
-    CatalogItem {
-        category_idx: 1,
-        badge: "PROGRESS",
-        title: |loc| loc.elem_cat_title_progress,
-        description: |loc| loc.elem_cat_desc_progress,
-        glyph: egui_phosphor::regular::PERCENT,
-        tint: |t| t.warn,
-        keywords: &[
-            "progress", "bar", "meter", "gauge", "fill", "level",
-            "прогресс", "индикатор", "шкала", "уровень", "полоса",
-        ],
-        constructor: |id_num| OverlayElement::ProgressBar {
-            id: format!("progress_{id_num}"),
-            label: "Progress".to_string(),
-            progress: 0.65,
-            fill_color: [59, 130, 246, 255],
-            bg_color: [20, 25, 35, 180],
-            x: 16.0,
-            y: 16.0,
-            width: 140.0,
-            height: 16.0,
-            rotation: 0.0,
-        },
-    },
-    CatalogItem {
-        category_idx: 1,
         badge: "SHAPE",
         title: |loc| loc.elem_cat_title_shape,
         description: |loc| loc.elem_cat_desc_shape,
@@ -158,80 +112,22 @@ const CATALOG_ITEMS: [CatalogItem; 14] = [
     CatalogItem {
         category_idx: 2,
         badge: "CONTROL",
-        title: |loc| loc.elem_cat_title_switch,
-        description: |loc| loc.elem_cat_desc_switch,
-        glyph: egui_phosphor::regular::TOGGLE_RIGHT,
+        title: |loc| loc.elem_cat_title_control,
+        description: |loc| loc.elem_cat_desc_control,
+        glyph: egui_phosphor::regular::SLIDERS,
         tint: |t| t.accent_ink,
         keywords: &[
-            "switch", "toggle", "checkbox", "interactive", "knob",
-            "переключатель", "свитч", "тумблер", "вкл", "выкл",
+            "control", "interactive", "switch", "toggle", "button", "slider", "knob", "checkbox",
+            "click", "mute", "action", "volume", "sound", "track", "press", "trigger", "value",
+            "управление", "контрол", "интерактивный", "кнопка", "переключатель", "тумблер", "слайдер",
+            "ползунок", "клик", "действие", "нажатие", "громкость", "звук", "вкл", "выкл", "значение",
         ],
         constructor: |id_num| OverlayElement::InteractiveControl {
-            id: format!("switch_{id_num}"),
-            control: InteractiveControlKind::ToggleSwitch {
-                label: "Turbo Mode".to_string(),
-                is_active: true,
-                bind_rule_id: None,
-                on_enable: None,
-                on_disable: None,
-            },
-            color: [255, 255, 255, 255],
-            bg_color: [40, 45, 55, 200],
-            active_color: [59, 130, 246, 255],
-            x: 16.0,
-            y: 16.0,
-            width: 120.0,
-            height: 26.0,
-            rotation: 0.0,
-        },
-    },
-    CatalogItem {
-        category_idx: 2,
-        badge: "SLIDER",
-        title: |loc| loc.elem_cat_title_slider,
-        description: |loc| loc.elem_cat_desc_slider,
-        glyph: egui_phosphor::regular::SLIDERS,
-        tint: |t| t.warn,
-        keywords: &[
-            "slider", "volume", "sound", "track", "drag", "value",
-            "ползунок", "слайдер", "громкость", "звук", "значение",
-        ],
-        constructor: |id_num| OverlayElement::InteractiveControl {
-            id: format!("slider_{id_num}"),
-            control: InteractiveControlKind::Slider {
-                label: "Volume".to_string(),
-                min: 0.0,
-                max: 100.0,
-                value: 75.0,
-                bind_target: SliderBindTarget::MasterVolume,
-            },
-            color: [255, 255, 255, 255],
-            bg_color: [35, 40, 50, 200],
-            active_color: [245, 158, 11, 255],
-            x: 16.0,
-            y: 16.0,
-            width: 150.0,
-            height: 32.0,
-            rotation: 0.0,
-        },
-    },
-    CatalogItem {
-        category_idx: 2,
-        badge: "BUTTON",
-        title: |loc| loc.elem_cat_title_button,
-        description: |loc| loc.elem_cat_desc_button,
-        glyph: egui_phosphor::regular::CURSOR_CLICK,
-        tint: |t| t.good,
-        keywords: &[
-            "button", "click", "mute", "action", "press", "trigger",
-            "кнопка", "клик", "действие", "нажатие", "мут",
-        ],
-        constructor: |id_num| OverlayElement::InteractiveControl {
-            id: format!("button_{id_num}"),
+            id: format!("control_{id_num}"),
             control: InteractiveControlKind::Button {
-                label: "Mute Sound".to_string(),
+                label: "Action".to_string(),
                 icon: None,
-                action: Some(OverlayClickAction::ToggleMute),
+                action: None,
             },
             color: [255, 255, 255, 255],
             bg_color: [35, 40, 50, 200],
@@ -709,7 +605,7 @@ mod tests {
 
     #[test]
     fn test_element_catalog_items_construct_and_categories() {
-        assert_eq!(CATALOG_ITEMS.len(), 14);
+        assert_eq!(CATALOG_ITEMS.len(), 10);
         let loc = i18n::get(i18n::Language::English);
 
         for (idx, item) in CATALOG_ITEMS.iter().enumerate() {

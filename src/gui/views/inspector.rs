@@ -3578,6 +3578,23 @@ fn render_action_parameter_fields(
                     }
                 });
 
+                if overlay_def.anchor == crate::models::OverlayAnchor::WindowRelative {
+                    ui.add_space(4.0);
+                    widgets::hud(ui, loc.overlay_studio_target_process_title, t.muted);
+                    let mut proc_txt = overlay_def.target_process.clone().unwrap_or_default();
+                    if ui.add(
+                        egui::TextEdit::singleline(&mut proc_txt)
+                            .hint_text(loc.overlay_studio_hint_process)
+                            .desired_width(ui.available_width())
+                            .min_size(vec2(0.0, theme::CONTROL_H))
+                            .margin(vec2(10.0, 8.0)),
+                    ).changed() {
+                        overlay_def.target_process = if proc_txt.trim().is_empty() { None } else { Some(proc_txt) };
+                    }
+                    ui.checkbox(&mut overlay_def.close_with_target, loc.overlay_studio_close_with_target)
+                        .on_hover_text(loc.overlay_studio_close_with_target_tip);
+                }
+
                 ui.add_space(6.0);
                 widgets::checkbox_group(ui, |ui| {
                     let ct_resp = ui.checkbox(&mut overlay_def.click_through, loc.overlay_studio_click_through);

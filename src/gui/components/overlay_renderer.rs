@@ -142,13 +142,6 @@ pub fn get_element_size(elem: &OverlayElement) -> (f32, f32) {
             let est_h = (*font_size + 6.0).max(18.0);
             (est_w, est_h)
         }
-        OverlayElement::Badge { text, .. } => {
-            let est_w = (text.len() as f32 * 7.5 + 18.0).max(40.0);
-            (est_w, 22.0)
-        }
-        OverlayElement::ProgressBar { width, height, .. } => {
-            (*width, (*height).max(10.0))
-        }
         OverlayElement::Image { width, height, .. } => {
             (*width, *height)
         }
@@ -587,57 +580,6 @@ pub fn render_element(ctx: &mut RenderContext, elem: &mut OverlayElement) {
                         }
                     }
                 }
-            }
-        }
-
-        OverlayElement::Badge {
-            text,
-            color,
-            bg_color,
-            on_click,
-            ..
-        } => {
-            let font = FontId::new((10.5 * zoom).max(7.0), theme::mono_bold());
-            let text_layout = ctx.painter.layout_no_wrap(text.clone(), font.clone(), Color32::WHITE);
-            let pad_x = 8.0 * zoom;
-            let pad_y = 4.0 * zoom;
-            let badge_size = text_layout.size() + vec2(pad_x * 2.0, pad_y * 2.0);
-            let badge_rect = Rect::from_center_size(center, badge_size);
-
-            if bg_color[3] > 0 {
-                p.rect_filled(badge_rect, CornerRadius::same((4.0 * zoom).max(2.0) as u8), apply_opacity(*bg_color, ctx.global_opacity));
-            }
-            p.text(center, Align2::CENTER_CENTER, text, font, apply_opacity(*color, ctx.global_opacity));
-
-            if ctx.is_interactive && ctx.pointer_clicked && on_click.is_some() {
-                if let Some(pos) = local_pointer_pos {
-                    if badge_rect.contains(pos) {
-                        if let Some(act) = on_click {
-                            execute_click_action(act);
-                        }
-                    }
-                }
-            }
-        }
-
-        OverlayElement::ProgressBar {
-            label,
-            progress,
-            fill_color,
-            bg_color,
-            ..
-        } => {
-            let bg_c = apply_opacity(*bg_color, ctx.global_opacity);
-            if bg_c.a() > 0 {
-                p.rect_filled(rect, CornerRadius::same(3), bg_c);
-            }
-            let filled_w = rect.width() * progress.clamp(0.0, 1.0);
-            if filled_w > 0.0 {
-                let fill_rect = Rect::from_min_size(rect.min, vec2(filled_w, rect.height()));
-                p.rect_filled(fill_rect, CornerRadius::same(3), apply_opacity(*fill_color, ctx.global_opacity));
-            }
-            if !label.is_empty() {
-                p.text(center, Align2::CENTER_CENTER, label, FontId::new((10.0 * zoom).max(7.0), theme::semibold()), Color32::WHITE);
             }
         }
 

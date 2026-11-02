@@ -1837,6 +1837,35 @@ impl DaemonEngine {
 
             IpcRequest::UpdateOverlayPosition { id, x, y } => {
                 crate::daemon::overlay_manager::save_calibrated_position(&id, x, y);
+                let monitors = crate::daemon::overlay_manager::get_system_monitors();
+                let mut changed = false;
+                if let Some(ov) = self.config.overlays.iter_mut().find(|o| o.id == id) {
+                    let mon = ov.monitor_index
+                        .and_then(|idx| monitors.iter().find(|m| m.index == idx))
+                        .or_else(|| monitors.iter().find(|m| m.is_primary));
+                    let (mon_x, mon_y) = mon.map(|m| (m.x as f32, m.y as f32)).unwrap_or((0.0, 0.0));
+                    ov.rect.x = x - mon_x;
+                    ov.rect.y = y - mon_y;
+                    changed = true;
+                }
+                for rule in &mut self.config.rules {
+                    for action in &mut rule.actions {
+                        if let Action::Overlay { overlay_id, custom_overlay: Some(ov), .. } = action {
+                            if overlay_id == &id || ov.id == id {
+                                let mon = ov.monitor_index
+                                    .and_then(|idx| monitors.iter().find(|m| m.index == idx))
+                                    .or_else(|| monitors.iter().find(|m| m.is_primary));
+                                let (mon_x, mon_y) = mon.map(|m| (m.x as f32, m.y as f32)).unwrap_or((0.0, 0.0));
+                                ov.rect.x = x - mon_x;
+                                ov.rect.y = y - mon_y;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+                if changed {
+                    let _ = self.config.save_to_file(crate::config::AppConfig::config_path());
+                }
                 IpcResponse::Ok
             }
 

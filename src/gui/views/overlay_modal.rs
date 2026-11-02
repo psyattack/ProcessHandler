@@ -40,14 +40,6 @@ pub fn clamp_elements_to_canvas(overlay: &mut OverlayDefinition) {
 
     for elem in &mut overlay.elements {
         match elem {
-            OverlayElement::ProgressBar { width, height, x, y, .. } => {
-                *width = width.clamp(10.0, canvas_w);
-                *height = height.clamp(4.0, canvas_h);
-                let max_x = (canvas_w - *width).max(0.0);
-                let max_y = (canvas_h - *height).max(0.0);
-                *x = x.clamp(0.0, max_x);
-                *y = y.clamp(0.0, max_y);
-            }
             OverlayElement::Image { width, height, lock_aspect, x, y, .. } => {
                 if *lock_aspect {
                     let w = *width;
@@ -111,14 +103,6 @@ pub fn clamp_elements_to_canvas(overlay: &mut OverlayDefinition) {
                 }
                 let est_w = (char_len * (*font_size * 0.6).max(8.0) + 12.0).max(30.0);
                 let est_h = (*font_size + 6.0).max(18.0);
-                let max_x = (canvas_w - est_w).max(0.0);
-                let max_y = (canvas_h - est_h).max(0.0);
-                *x = x.clamp(0.0, max_x);
-                *y = y.clamp(0.0, max_y);
-            }
-            OverlayElement::Badge { text, x, y, .. } => {
-                let est_w = (text.len() as f32 * 7.5 + 18.0).max(40.0);
-                let est_h = 22.0;
                 let max_x = (canvas_w - est_w).max(0.0);
                 let max_y = (canvas_h - est_h).max(0.0);
                 *x = x.clamp(0.0, max_x);
@@ -1275,8 +1259,6 @@ fn render_overlay_inspector(
                     let (badge_text, badge_color) = match elem {
                         OverlayElement::Crosshair { .. } => ("CROSSHAIR", t.accent_ink),
                         OverlayElement::Text { .. } => ("TEXT", t.ink),
-                        OverlayElement::Badge { .. } => ("BADGE", t.good),
-                        OverlayElement::ProgressBar { .. } => ("PROGRESS", t.warn),
                         OverlayElement::Image { .. } => ("IMAGE", t.faint),
                         OverlayElement::Shape { shape_type, .. } => (
                             match shape_type {
@@ -1426,63 +1408,6 @@ fn render_overlay_inspector(
                         if !overlay.click_through {
                             render_element_click_action_ui(ui, on_click, rules_list, idx, t, loc);
                         }
-                    }
-                    OverlayElement::Badge { text, color, bg_color, x, y, rotation, on_click, .. } => {
-                        ui.add(
-                            egui::TextEdit::singleline(text)
-                                .desired_width(ui.available_width())
-                                .hint_text(loc.overlay_studio_hint_badge)
-                        );
-
-                        ui.columns(2, |cols| {
-                            render_color_chip(&mut cols[0], "TEXT:", color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
-                            render_color_chip(&mut cols[1], "BG:", bg_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
-                        });
-                        if *active_color_target == Some(ColorPickerTarget::ElementPrimary(idx)) {
-                            render_inline_color_editor(ui, color, true, t);
-                        } else if *active_color_target == Some(ColorPickerTarget::ElementSecondary(idx)) {
-                            render_inline_color_editor(ui, bg_color, true, t);
-                        }
-
-                        render_rotation_control(ui, rotation, t, loc);
-
-                        ui.columns(2, |cols| {
-                            cols[0].add(egui::DragValue::new(x).prefix("X: ").suffix(" px"));
-                            cols[1].add(egui::DragValue::new(y).prefix("Y: ").suffix(" px"));
-                        });
-
-                        if !overlay.click_through {
-                            render_element_click_action_ui(ui, on_click, rules_list, idx, t, loc);
-                        }
-                    }
-                    OverlayElement::ProgressBar { progress, fill_color, bg_color, x, y, width, height, rotation, .. } => {
-                        ui.add(
-                            egui::Slider::new(progress, 0.0..=1.0)
-                                .text(loc.overlay_studio_elem_progress_fill)
-                                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
-                        );
-
-                        ui.columns(2, |cols| {
-                            render_color_chip(&mut cols[0], "FILL:", fill_color, ColorPickerTarget::ElementPrimary(idx), active_color_target, t);
-                            render_color_chip(&mut cols[1], "BG:", bg_color, ColorPickerTarget::ElementSecondary(idx), active_color_target, t);
-                        });
-                        if *active_color_target == Some(ColorPickerTarget::ElementPrimary(idx)) {
-                            render_inline_color_editor(ui, fill_color, true, t);
-                        } else if *active_color_target == Some(ColorPickerTarget::ElementSecondary(idx)) {
-                            render_inline_color_editor(ui, bg_color, true, t);
-                        }
-
-                        ui.columns(2, |cols| {
-                            cols[0].add(egui::DragValue::new(width).range(20.0..=1920.0).prefix("Width: ").suffix(" px"));
-                            cols[1].add(egui::DragValue::new(height).range(2.0..=120.0).prefix("Height: ").suffix(" px"));
-                        });
-
-                        render_rotation_control(ui, rotation, t, loc);
-
-                        ui.columns(2, |cols| {
-                            cols[0].add(egui::DragValue::new(x).prefix("X: ").suffix(" px"));
-                            cols[1].add(egui::DragValue::new(y).prefix("Y: ").suffix(" px"));
-                        });
                     }
                     OverlayElement::Image { path, x, y, width, height, opacity, lock_aspect, rotation, on_click, .. } => {
                         ui.horizontal(|ui| {
@@ -2333,8 +2258,6 @@ fn render_overlay_inspector(
                 let (badge_text, _) = match &overlay.elements[session.source_idx] {
                     OverlayElement::Crosshair { .. } => ("CROSSHAIR", t.accent_ink),
                     OverlayElement::Text { .. } => ("TEXT", t.ink),
-                    OverlayElement::Badge { .. } => ("BADGE", t.good),
-                    OverlayElement::ProgressBar { .. } => ("PROGRESS", t.warn),
                     OverlayElement::Image { .. } => ("IMAGE", t.faint),
                     OverlayElement::Shape { shape_type, .. } => (
                         match shape_type {
@@ -3267,8 +3190,6 @@ fn render_overlay_canvas(
                         let (ew, eh) = get_element_size(&studio.overlay.elements[*idx]);
                         match &mut studio.overlay.elements[*idx] {
                             OverlayElement::Text { x, y, .. }
-                            | OverlayElement::Badge { x, y, .. }
-                            | OverlayElement::ProgressBar { x, y, .. }
                             | OverlayElement::Image { x, y, .. }
                             | OverlayElement::Shape { x, y, .. }
                             | OverlayElement::Graph { x, y, .. }
@@ -3314,12 +3235,6 @@ fn render_overlay_canvas(
                             OverlayElement::Text { font_size, .. } => {
                                 let delta = (total_delta.x + total_delta.y) * 0.25;
                                 *font_size = snap(*start_w + delta).clamp(6.0, 72.0);
-                            }
-                            OverlayElement::ProgressBar { width, height, x, y, .. } => {
-                                let max_w = (studio.overlay.rect.width - *x).max(20.0);
-                                let max_h = (studio.overlay.rect.height - *y).max(4.0);
-                                *width = snap(*start_w + total_delta.x).clamp(20.0, max_w);
-                                *height = snap(*start_h + total_delta.y).clamp(4.0, max_h);
                             }
                             OverlayElement::Image { width, height, lock_aspect, x, y, .. } => {
                                 let max_w = (studio.overlay.rect.width - *x).max(8.0);
@@ -3374,7 +3289,6 @@ fn render_overlay_canvas(
                                 let max_s = (studio.overlay.rect.width - *x).min(studio.overlay.rect.height - *y).max(8.0);
                                 *size = snap(*start_w + total_delta.x * 0.5).clamp(4.0, max_s.min(128.0));
                             }
-                            OverlayElement::Badge { .. } => {}
                         }
                         clamp_elements_to_canvas(&mut studio.overlay);
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNwSe);
@@ -3509,8 +3423,6 @@ fn render_overlay_canvas(
                     }
                 }
                 OverlayElement::Text { x, y, .. }
-                | OverlayElement::Badge { x, y, .. }
-                | OverlayElement::ProgressBar { x, y, .. }
                 | OverlayElement::Image { x, y, .. }
                 | OverlayElement::Shape { x, y, .. }
                 | OverlayElement::Graph { x, y, .. }
@@ -3791,13 +3703,13 @@ mod tests {
             on_click: None,
         });
 
-        // 3. Progress bar overflowing canvas
-        overlay.elements.push(OverlayElement::ProgressBar {
-            id: "bar_1".to_string(),
-            label: "Bar".to_string(),
-            progress: 0.5,
-            fill_color: [0, 255, 0, 255],
+        // 3. Interactive control overflowing canvas
+        overlay.elements.push(OverlayElement::InteractiveControl {
+            id: "ctrl_1".to_string(),
+            control: crate::models::InteractiveControlKind::default(),
+            color: [255, 255, 255, 255],
             bg_color: [0, 0, 0, 255],
+            active_color: [0, 255, 0, 255],
             x: 90.0,
             y: 90.0,
             width: 300.0,
@@ -3879,14 +3791,14 @@ mod tests {
             panic!("Expected Image element");
         }
 
-        // Verify Progress Bar: width <= 100, height <= 100, coordinates clamped
-        if let OverlayElement::ProgressBar { width, height, x, y, .. } = &overlay.elements[3] {
+        // Verify InteractiveControl: width <= 100, height <= 100, coordinates clamped
+        if let OverlayElement::InteractiveControl { width, height, x, y, .. } = &overlay.elements[3] {
             assert!(*width <= 100.0);
             assert!(*height <= 100.0);
             assert!(*x >= 0.0 && *x + *width <= 100.0);
             assert!(*y >= 0.0 && *y + *height <= 100.0);
         } else {
-            panic!("Expected ProgressBar element");
+            panic!("Expected InteractiveControl element");
         }
 
         // Verify Text: font_size scaled down so text fits within 100x100

@@ -1394,45 +1394,6 @@ pub enum OverlayElement {
         #[serde(default)]
         rotation: f32,
     },
-    ProgressBar {
-        #[serde(default)]
-        id: String,
-        #[serde(default)]
-        label: String,
-        #[serde(default)]
-        progress: f32,
-        #[serde(default = "default_accent_color")]
-        fill_color: [u8; 4],
-        #[serde(default = "default_dark_color")]
-        bg_color: [u8; 4],
-        #[serde(default)]
-        x: f32,
-        #[serde(default)]
-        y: f32,
-        #[serde(default = "default_progress_width")]
-        width: f32,
-        #[serde(default = "default_progress_height")]
-        height: f32,
-        #[serde(default)]
-        rotation: f32,
-    },
-    Badge {
-        #[serde(default)]
-        id: String,
-        text: String,
-        #[serde(default = "default_accent_color")]
-        color: [u8; 4],
-        #[serde(default = "default_badge_bg")]
-        bg_color: [u8; 4],
-        #[serde(default)]
-        x: f32,
-        #[serde(default)]
-        y: f32,
-        #[serde(default)]
-        rotation: f32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        on_click: Option<OverlayClickAction>,
-    },
     Shape {
         #[serde(default)]
         id: String,
@@ -1634,8 +1595,6 @@ impl OverlayElement {
             | OverlayElement::Crosshair { id, .. }
             | OverlayElement::Image { id, .. }
             | OverlayElement::Shape { id, .. }
-            | OverlayElement::ProgressBar { id, .. }
-            | OverlayElement::Badge { id, .. }
             | OverlayElement::Graph { id, .. }
             | OverlayElement::ClockTimer { id, .. }
             | OverlayElement::InteractiveControl { id, .. }
@@ -1651,8 +1610,6 @@ impl OverlayElement {
             | OverlayElement::Crosshair { id, .. }
             | OverlayElement::Image { id, .. }
             | OverlayElement::Shape { id, .. }
-            | OverlayElement::ProgressBar { id, .. }
-            | OverlayElement::Badge { id, .. }
             | OverlayElement::Graph { id, .. }
             | OverlayElement::ClockTimer { id, .. }
             | OverlayElement::InteractiveControl { id, .. }
@@ -1668,8 +1625,6 @@ impl OverlayElement {
             | OverlayElement::Crosshair { rotation, .. }
             | OverlayElement::Image { rotation, .. }
             | OverlayElement::Shape { rotation, .. }
-            | OverlayElement::ProgressBar { rotation, .. }
-            | OverlayElement::Badge { rotation, .. }
             | OverlayElement::Graph { rotation, .. }
             | OverlayElement::ClockTimer { rotation, .. }
             | OverlayElement::InteractiveControl { rotation, .. }
@@ -1685,8 +1640,6 @@ impl OverlayElement {
             | OverlayElement::Crosshair { rotation, .. }
             | OverlayElement::Image { rotation, .. }
             | OverlayElement::Shape { rotation, .. }
-            | OverlayElement::ProgressBar { rotation, .. }
-            | OverlayElement::Badge { rotation, .. }
             | OverlayElement::Graph { rotation, .. }
             | OverlayElement::ClockTimer { rotation, .. }
             | OverlayElement::InteractiveControl { rotation, .. }
@@ -1702,8 +1655,6 @@ impl OverlayElement {
             | OverlayElement::Crosshair { x, .. }
             | OverlayElement::Image { x, .. }
             | OverlayElement::Shape { x, .. }
-            | OverlayElement::ProgressBar { x, .. }
-            | OverlayElement::Badge { x, .. }
             | OverlayElement::Graph { x, .. }
             | OverlayElement::ClockTimer { x, .. }
             | OverlayElement::InteractiveControl { x, .. }
@@ -1719,8 +1670,6 @@ impl OverlayElement {
             | OverlayElement::Crosshair { y, .. }
             | OverlayElement::Image { y, .. }
             | OverlayElement::Shape { y, .. }
-            | OverlayElement::ProgressBar { y, .. }
-            | OverlayElement::Badge { y, .. }
             | OverlayElement::Graph { y, .. }
             | OverlayElement::ClockTimer { y, .. }
             | OverlayElement::InteractiveControl { y, .. }
@@ -1736,8 +1685,6 @@ impl OverlayElement {
             | OverlayElement::Crosshair { x, .. }
             | OverlayElement::Image { x, .. }
             | OverlayElement::Shape { x, .. }
-            | OverlayElement::ProgressBar { x, .. }
-            | OverlayElement::Badge { x, .. }
             | OverlayElement::Graph { x, .. }
             | OverlayElement::ClockTimer { x, .. }
             | OverlayElement::InteractiveControl { x, .. }
@@ -1753,8 +1700,6 @@ impl OverlayElement {
             | OverlayElement::Crosshair { y, .. }
             | OverlayElement::Image { y, .. }
             | OverlayElement::Shape { y, .. }
-            | OverlayElement::ProgressBar { y, .. }
-            | OverlayElement::Badge { y, .. }
             | OverlayElement::Graph { y, .. }
             | OverlayElement::ClockTimer { y, .. }
             | OverlayElement::InteractiveControl { y, .. }
@@ -1837,12 +1782,6 @@ pub fn default_dark_color() -> [u8; 4] {
 }
 pub fn default_badge_bg() -> [u8; 4] {
     [70, 160, 255, 45]
-}
-pub fn default_progress_width() -> f32 {
-    180.0
-}
-pub fn default_progress_height() -> f32 {
-    8.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -1032,6 +1032,8 @@ pub static STRINGS: Strings = Strings {
     elem_cat_desc_slider: "Интерактивный ползунок громкости или значений",
     elem_cat_title_button: "Кнопка",
     elem_cat_desc_button: "Интерактивная кнопка для звука и действий",
+    elem_cat_title_control: "Элемент управления",
+    elem_cat_desc_control: "Кнопка, переключатель или интерактивный слайдер",
     elem_cat_title_graph: "График истории",
     elem_cat_desc_graph: "Живой график CPU, RAM, сети или FPS",
     elem_cat_title_clock: "Часы и таймер",

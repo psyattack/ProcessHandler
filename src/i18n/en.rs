@@ -1032,6 +1032,8 @@ pub static STRINGS: Strings = Strings {
     elem_cat_desc_slider: "Draggable slider for volume or numerical values",
     elem_cat_title_button: "Button",
     elem_cat_desc_button: "Clickable trigger for mute, media and actions",
+    elem_cat_title_control: "Interactive Control",
+    elem_cat_desc_control: "Button, toggle switch or draggable slider",
     elem_cat_title_graph: "History Graph",
     elem_cat_desc_graph: "Real-time chart for CPU, RAM, Network or FPS",
     elem_cat_title_clock: "Clock & Timer",
