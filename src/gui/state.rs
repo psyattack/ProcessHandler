@@ -67,6 +67,16 @@ pub struct ActionCatalogModalState {
     pub ifelse_target: Option<IfElseCatalogTarget>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConditionCatalogTarget {
+    RulePrecondition,
+    ChangeRulePrecondition(usize),
+    ActionIfElse { action_idx: usize, is_exit: bool },
+    ChangeActionIfElse { action_idx: usize, cond_idx: usize, is_exit: bool },
+    ActionElseIf { action_idx: usize, branch_idx: usize, is_exit: bool },
+    ChangeActionElseIf { action_idx: usize, branch_idx: usize, cond_idx: usize, is_exit: bool },
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TriggerCatalogState {
     pub selected_category: usize,
@@ -77,6 +87,7 @@ pub struct TriggerCatalogState {
 pub struct ConditionCatalogState {
     pub selected_category: usize,
     pub search_query: String,
+    pub target: Option<ConditionCatalogTarget>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -474,10 +485,18 @@ impl GuiState {
         self.close_trigger_catalog();
     }
 
-    pub fn open_condition_catalog(&mut self) {
-        let catalog = ConditionCatalogState::default();
+    pub fn open_condition_catalog_with_target(&mut self, target: ConditionCatalogTarget) {
+        let catalog = ConditionCatalogState {
+            target: Some(target),
+            ..Default::default()
+        };
         self.condition_catalog = Some(catalog.clone());
         self.last_condition_catalog = Some(catalog);
+    }
+
+    #[allow(dead_code)]
+    pub fn open_condition_catalog(&mut self) {
+        self.open_condition_catalog_with_target(ConditionCatalogTarget::RulePrecondition);
     }
 
     pub fn close_condition_catalog(&mut self) {
@@ -494,12 +513,64 @@ impl GuiState {
         self.element_catalog = None;
     }
 
-    pub fn add_condition_from_catalog(&mut self, condition: crate::models::RuleCondition) {
+    pub fn apply_condition_from_catalog(&mut self, condition: crate::models::RuleCondition) {
         self.push_undo_snapshot();
+        let target = self
+            .condition_catalog
+            .as_ref()
+            .and_then(|c| c.target)
+            .unwrap_or(ConditionCatalogTarget::RulePrecondition);
+
         if let Some(rule) = &mut self.editing_rule {
-            rule.conditions.push(crate::models::RuleConditionItem::new(condition));
+            match target {
+                ConditionCatalogTarget::RulePrecondition => {
+                    rule.conditions.push(crate::models::RuleConditionItem::new(condition));
+                }
+                ConditionCatalogTarget::ChangeRulePrecondition(idx) => {
+                    if let Some(item) = rule.conditions.get_mut(idx) {
+                        item.condition = condition;
+                    }
+                }
+                ConditionCatalogTarget::ActionIfElse { action_idx, is_exit } => {
+                    let actions = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { conditions, .. }) = actions.get_mut(action_idx) {
+                        conditions.push(crate::models::RuleConditionItem::new(condition));
+                    }
+                }
+                ConditionCatalogTarget::ChangeActionIfElse { action_idx, cond_idx, is_exit } => {
+                    let actions = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { conditions, .. }) = actions.get_mut(action_idx) {
+                        if let Some(item) = conditions.get_mut(cond_idx) {
+                            item.condition = condition;
+                        }
+                    }
+                }
+                ConditionCatalogTarget::ActionElseIf { action_idx, branch_idx, is_exit } => {
+                    let actions = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { else_if_branches, .. }) = actions.get_mut(action_idx) {
+                        if let Some(branch) = else_if_branches.get_mut(branch_idx) {
+                            branch.conditions.push(crate::models::RuleConditionItem::new(condition));
+                        }
+                    }
+                }
+                ConditionCatalogTarget::ChangeActionElseIf { action_idx, branch_idx, cond_idx, is_exit } => {
+                    let actions = if is_exit { &mut rule.on_exit_actions } else { &mut rule.actions };
+                    if let Some(crate::models::Action::IfElse { else_if_branches, .. }) = actions.get_mut(action_idx) {
+                        if let Some(branch) = else_if_branches.get_mut(branch_idx) {
+                            if let Some(item) = branch.conditions.get_mut(cond_idx) {
+                                item.condition = condition;
+                            }
+                        }
+                    }
+                }
+            }
         }
         self.close_condition_catalog();
+    }
+
+    #[allow(dead_code)]
+    pub fn add_condition_from_catalog(&mut self, condition: crate::models::RuleCondition) {
+        self.apply_condition_from_catalog(condition);
     }
 
     pub fn add_action_from_catalog(
@@ -1320,6 +1391,7 @@ fn apply_process_to_condition(cond: &mut crate::models::RuleCondition, proc_name
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{Action, ProcessMatchMode, Rule, RuleCondition, RuleConditionItem, SystemEventType};
 
     #[test]
     fn test_is_modal_open() {
@@ -1434,6 +1506,111 @@ mod tests {
         assert_eq!(state.editing_rule.as_ref().unwrap().name, "Step 2");
         assert_eq!(state.undo_stack.len(), 2);
         assert_eq!(state.redo_stack.len(), 0);
+    }
+
+    #[test]
+    fn test_condition_catalog_targets_application() {
+        let mut state = GuiState::new();
+        let mut rule = Rule::default();
+        rule.actions.push(Action::IfElse {
+            conditions: vec![RuleConditionItem::new(RuleCondition::default_process())],
+            then_actions: vec![],
+            else_if_branches: vec![crate::models::ElseIfBranch {
+                conditions: vec![RuleConditionItem::new(RuleCondition::default_process())],
+                actions: vec![],
+            }],
+            else_actions: vec![],
+        });
+        state.editing_rule = Some(rule);
+
+        // 1. Add rule precondition
+        state.open_condition_catalog_with_target(ConditionCatalogTarget::RulePrecondition);
+        state.apply_condition_from_catalog(RuleCondition::TimeRange {
+            start_time: "08:00".into(),
+            end_time: "17:00".into(),
+            days_of_week: vec![],
+        });
+        assert_eq!(state.editing_rule.as_ref().unwrap().conditions.len(), 1);
+        assert!(matches!(state.editing_rule.as_ref().unwrap().conditions[0].condition, RuleCondition::TimeRange { .. }));
+
+        // 2. Change rule precondition
+        state.open_condition_catalog_with_target(ConditionCatalogTarget::ChangeRulePrecondition(0));
+        state.apply_condition_from_catalog(RuleCondition::FileWatcher {
+            path: "C:\\test.txt".into(),
+            filter_extension: None,
+            must_exist: true,
+        });
+        assert_eq!(state.editing_rule.as_ref().unwrap().conditions.len(), 1);
+        assert!(matches!(state.editing_rule.as_ref().unwrap().conditions[0].condition, RuleCondition::FileWatcher { .. }));
+
+        // 3. Change primary IfElse condition (card 0)
+        state.open_condition_catalog_with_target(ConditionCatalogTarget::ChangeActionIfElse {
+            action_idx: 0,
+            cond_idx: 0,
+            is_exit: false,
+        });
+        state.apply_condition_from_catalog(RuleCondition::WindowFocused {
+            process_name: "code.exe".into(),
+            match_mode: ProcessMatchMode::Exact,
+            must_be_focused: true,
+        });
+        if let Some(Action::IfElse { conditions, .. }) = state.editing_rule.as_ref().unwrap().actions.first() {
+            assert!(matches!(conditions[0].condition, RuleCondition::WindowFocused { .. }));
+        } else {
+            panic!("Expected IfElse action");
+        }
+
+        // 4. Add condition to primary IfElse
+        state.open_condition_catalog_with_target(ConditionCatalogTarget::ActionIfElse {
+            action_idx: 0,
+            is_exit: false,
+        });
+        state.apply_condition_from_catalog(RuleCondition::TimeRange {
+            start_time: "10:00".into(),
+            end_time: "12:00".into(),
+            days_of_week: vec![],
+        });
+        if let Some(Action::IfElse { conditions, .. }) = state.editing_rule.as_ref().unwrap().actions.first() {
+            assert_eq!(conditions.len(), 2);
+            assert!(matches!(conditions[1].condition, RuleCondition::TimeRange { .. }));
+        } else {
+            panic!("Expected IfElse action");
+        }
+
+        // 5. Change condition in else_if_branches
+        state.open_condition_catalog_with_target(ConditionCatalogTarget::ChangeActionElseIf {
+            action_idx: 0,
+            branch_idx: 0,
+            cond_idx: 0,
+            is_exit: false,
+        });
+        state.apply_condition_from_catalog(RuleCondition::Event {
+            event_type: SystemEventType::PowerSourceBattery,
+            idle_duration_sec: 0,
+        });
+        if let Some(Action::IfElse { else_if_branches, .. }) = state.editing_rule.as_ref().unwrap().actions.first() {
+            assert!(matches!(else_if_branches[0].conditions[0].condition, RuleCondition::Event { .. }));
+        } else {
+            panic!("Expected IfElse action");
+        }
+
+        // 6. Add condition to else_if_branches
+        state.open_condition_catalog_with_target(ConditionCatalogTarget::ActionElseIf {
+            action_idx: 0,
+            branch_idx: 0,
+            is_exit: false,
+        });
+        state.apply_condition_from_catalog(RuleCondition::TimeRange {
+            start_time: "13:00".into(),
+            end_time: "14:00".into(),
+            days_of_week: vec![],
+        });
+        if let Some(Action::IfElse { else_if_branches, .. }) = state.editing_rule.as_ref().unwrap().actions.first() {
+            assert_eq!(else_if_branches[0].conditions.len(), 2);
+            assert!(matches!(else_if_branches[0].conditions[1].condition, RuleCondition::TimeRange { .. }));
+        } else {
+            panic!("Expected IfElse action");
+        }
     }
 }
 

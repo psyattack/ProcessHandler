@@ -6,7 +6,7 @@ use egui::{CornerRadius, pos2, Rect, Ui, vec2};
 use crate::gui::components::widgets::{self, Cell, Glyph, Kind};
 use crate::gui::state::GuiState;
 use crate::gui::theme::{self, Tokens};
-use crate::models::{Action, Rule, Trigger};
+use crate::models::{Action, ConditionOperator, Rule, RuleCondition, Trigger};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 enum RuleFilter {
@@ -419,6 +419,84 @@ fn render_rule_card(
     });
 }
 
+fn format_single_condition_brief(cond: &RuleCondition) -> String {
+    match cond {
+        RuleCondition::ProcessRunning { process_name, must_be_running, .. } => {
+            let name = if process_name.is_empty() { "PROC" } else { process_name.as_str() };
+            if *must_be_running { format!("RUN:{}", name) } else { format!("!RUN:{}", name) }
+        }
+        RuleCondition::WindowFocused { process_name, must_be_focused, .. } => {
+            let name = if process_name.is_empty() { "WINDOW" } else { process_name.as_str() };
+            if *must_be_focused { format!("FOCUS:{}", name) } else { format!("!FOCUS:{}", name) }
+        }
+        RuleCondition::TimeRange { start_time, end_time, .. } => {
+            format!("{}-{}", start_time, end_time)
+        }
+        RuleCondition::Event { event_type, .. } => {
+            format!("EVENT:{:?}", event_type)
+        }
+        RuleCondition::FileWatcher { path, must_exist, .. } => {
+            let fname = std::path::Path::new(path)
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| {
+                    if path.is_empty() { "FILE".to_string() } else { path.clone() }
+                });
+            if *must_exist { format!("FILE:{}", fname) } else { format!("!FILE:{}", fname) }
+        }
+        RuleCondition::ResourceThreshold { process_name, cpu_percent, ram_mb, .. } => {
+            let name = if process_name.is_empty() { "RES" } else { process_name.as_str() };
+            let mut limits = Vec::new();
+            if let Some(c) = cpu_percent { limits.push(format!("CPU>{:.0}%", c)); }
+            if let Some(m) = ram_mb { limits.push(format!("RAM>{}MB", m)); }
+            if limits.is_empty() {
+                format!("RES:{}", name)
+            } else {
+                format!("RES:{}({})", name, limits.join(","))
+            }
+        }
+    }
+}
+
+fn format_single_condition_tooltip(cond: &RuleCondition, idx: usize, loc: &crate::i18n::Strings) -> String {
+    let desc = match cond {
+        RuleCondition::ProcessRunning { process_name, must_be_running, .. } => {
+            let p = if process_name.is_empty() { "?" } else { process_name.as_str() };
+            if *must_be_running {
+                format!("Process '{}' is running", p)
+            } else {
+                format!("Process '{}' is not running", p)
+            }
+        }
+        RuleCondition::WindowFocused { process_name, must_be_focused, .. } => {
+            let p = if process_name.is_empty() { "?" } else { process_name.as_str() };
+            if *must_be_focused {
+                format!("Window '{}' is focused", p)
+            } else {
+                format!("Window '{}' is not focused", p)
+            }
+        }
+        RuleCondition::TimeRange { start_time, end_time, .. } => {
+            format!("Time range {} - {}", start_time, end_time)
+        }
+        RuleCondition::Event { event_type, .. } => {
+            format!("System event: {:?}", event_type)
+        }
+        RuleCondition::FileWatcher { path, must_exist, .. } => {
+            if *must_exist {
+                format!("File '{}' exists", path)
+            } else {
+                format!("File '{}' does not exist", path)
+            }
+        }
+        RuleCondition::ResourceThreshold { process_name, cpu_percent, ram_mb, .. } => {
+            let p = if process_name.is_empty() { "?" } else { process_name.as_str() };
+            format!("Resource threshold on '{}': CPU={:?}, RAM={:?}", p, cpu_percent, ram_mb)
+        }
+    };
+    format!("{} [{}] {}", loc.inspector_conditions_badge, idx, desc)
+}
+
 fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
     match action {
         Action::StartProcess { file_path, .. } => {
@@ -503,35 +581,10 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
             refresh_rate.map(|r| format!("DISPLAY {}{} @ {}Hz", mon_prefix, res, r)).unwrap_or_else(|| format!("DISPLAY {}{}", mon_prefix, res))
         }
         Action::IfElse { conditions, then_actions, else_actions, .. } => {
-            let first_cond = conditions.first().map(|c| &c.condition);
-            let cond_summary = if let Some(cond) = first_cond {
-                match cond {
-                    crate::models::RuleCondition::ProcessRunning { process_name, must_be_running, .. } => {
-                        if *must_be_running { format!("RUN:{}", process_name) } else { format!("!RUN:{}", process_name) }
-                    }
-                    crate::models::RuleCondition::WindowFocused { process_name, must_be_focused, .. } => {
-                        if *must_be_focused { format!("FOCUS:{}", process_name) } else { format!("!FOCUS:{}", process_name) }
-                    }
-                    crate::models::RuleCondition::TimeRange { start_time, end_time, .. } => {
-                        format!("{}-{}", start_time, end_time)
-                    }
-                    crate::models::RuleCondition::Event { event_type, .. } => {
-                        format!("EVENT:{:?}", event_type)
-                    }
-                    crate::models::RuleCondition::FileWatcher { path, must_exist, .. } => {
-                        let fname = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy();
-                        if *must_exist { format!("FILE:{}", fname) } else { format!("!FILE:{}", fname) }
-                    }
-                    crate::models::RuleCondition::ResourceThreshold { process_name, cpu_percent, ram_mb, .. } => {
-                        let mut limits = Vec::new();
-                        if let Some(cpu) = cpu_percent { limits.push(format!("CPU>{:.0}%", cpu)); }
-                        if let Some(ram) = ram_mb { limits.push(format!("RAM>{}MB", ram)); }
-                        format!("RES:{}({})", process_name, limits.join(","))
-                    }
-                }
-            } else {
-                "COND".to_string()
-            };
+            let cond_summary = conditions
+                .first()
+                .map(|c| format_single_condition_brief(&c.condition))
+                .unwrap_or_else(|| "COND".to_string());
             let count_suffix = if conditions.len() > 1 { format!("+{}", conditions.len() - 1) } else { String::new() };
             format!("IF {}{} [{} | {}]", cond_summary, count_suffix, then_actions.len(), else_actions.len())
         }
@@ -673,6 +726,22 @@ fn render_pipeline_summary(
 
         widgets::badge(ui, &trigger_text, t.faint);
 
+        if !rule.conditions.is_empty() {
+            widgets::hud(ui, loc.rules_summary_cond_if, t.faint);
+            for (c_idx, item) in rule.conditions.iter().enumerate() {
+                if c_idx > 0 {
+                    let op_str = match item.operator {
+                        ConditionOperator::And => loc.inspector_cond_op_and,
+                        ConditionOperator::Or => loc.inspector_cond_op_or,
+                    };
+                    widgets::hud(ui, op_str, t.faint);
+                }
+                let label = format_single_condition_brief(&item.condition);
+                let tip = format_single_condition_tooltip(&item.condition, c_idx + 1, loc);
+                widgets::badge(ui, &label, t.faint).on_hover_text(tip);
+            }
+        }
+
         widgets::hud(ui, "➔", t.faint);
 
         // Actions Steps with Active Highlight
@@ -719,4 +788,39 @@ fn render_pipeline_summary(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::{self, Language};
+
+    #[test]
+    fn test_format_single_condition_brief_and_tooltip() {
+        let loc = i18n::get(Language::English);
+
+        // 1. Process running condition
+        let cond1 = RuleCondition::ProcessRunning {
+            process_name: "notepad.exe".into(),
+            match_mode: crate::models::ProcessMatchMode::Exact,
+            must_be_running: true,
+        };
+        let brief1 = format_single_condition_brief(&cond1);
+        assert_eq!(brief1, "RUN:notepad.exe");
+        let tip1 = format_single_condition_tooltip(&cond1, 1, loc);
+        assert!(tip1.contains("notepad.exe"));
+        assert!(tip1.contains("running"));
+
+        // 2. Window focused condition
+        let cond2 = RuleCondition::WindowFocused {
+            process_name: "code.exe".into(),
+            match_mode: crate::models::ProcessMatchMode::Exact,
+            must_be_focused: true,
+        };
+        let brief2 = format_single_condition_brief(&cond2);
+        assert_eq!(brief2, "FOCUS:code.exe");
+        let tip2 = format_single_condition_tooltip(&cond2, 2, loc);
+        assert!(tip2.contains("code.exe"));
+        assert!(tip2.contains("focused"));
+    }
 }

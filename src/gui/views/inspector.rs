@@ -1643,6 +1643,9 @@ fn render_actions_pipeline(
         if let Some(target) = resp.open_catalog_nested {
             state.open_action_catalog_nested(is_exit_pipeline, target);
         }
+        if let Some(target) = resp.open_condition_catalog {
+            state.open_condition_catalog_with_target(target);
+        }
         if let Some(target) = resp.pick_target {
             state.open_process_picker(target);
         }
@@ -1760,6 +1763,7 @@ struct ActionCardResponse {
     pub drag_started: bool,
     pub switch_to_hunter: bool,
     pub open_catalog_nested: Option<crate::gui::state::IfElseCatalogTarget>,
+    pub open_condition_catalog: Option<crate::gui::state::ConditionCatalogTarget>,
     pub pick_target: Option<crate::gui::state::ProcessPickerTarget>,
     pub card_rect: Rect,
     pub tested_overlay_ids: Vec<String>,
@@ -1773,6 +1777,7 @@ struct ActionFieldsResponse {
     pub expand_overlay_action: Option<usize>,
     pub switch_to_hunter: bool,
     pub open_catalog_nested: Option<crate::gui::state::IfElseCatalogTarget>,
+    pub open_condition_catalog: Option<crate::gui::state::ConditionCatalogTarget>,
     pub pick_target: Option<crate::gui::state::ProcessPickerTarget>,
     pub tested_overlay_ids: Vec<String>,
 }
@@ -1987,6 +1992,7 @@ fn render_action_card(
         drag_started,
         switch_to_hunter: fields_resp.switch_to_hunter,
         open_catalog_nested: fields_resp.open_catalog_nested,
+        open_condition_catalog: fields_resp.open_condition_catalog,
         pick_target: fields_resp.pick_target,
         card_rect: card_response.response.rect,
         tested_overlay_ids,
@@ -2769,19 +2775,23 @@ fn render_action_parameter_fields(
                 });
 
                 let mut remove_if_cond_idx = None;
+                let mut change_if_cond_idx = None;
                 let total_if_conds = conditions.len();
                 for (c_idx, c_item) in conditions.iter_mut().enumerate() {
                     if c_idx > 0 {
                         render_condition_operator_connector(ui, &mut c_item.operator, loc, t);
                     }
-                    if render_condition_card(
+                    let can_remove = total_if_conds > 1;
+                    let show_change = true;
+                    let (remove_clicked, change_clicked) = render_condition_card(
                         ui,
                         c_idx,
                         c_item,
                         loc,
                         t,
                         true,
-                        total_if_conds > 1,
+                        can_remove,
+                        show_change,
                         || {
                             resp.pick_target = Some(crate::gui::state::ProcessPickerTarget::ActionCondition {
                                 action_idx: idx,
@@ -2789,8 +2799,12 @@ fn render_action_parameter_fields(
                                 is_exit: is_exit_pipeline,
                             });
                         },
-                    ) && total_if_conds > 1 {
+                    );
+                    if remove_clicked && can_remove {
                         remove_if_cond_idx = Some(c_idx);
+                    }
+                    if change_clicked {
+                        change_if_cond_idx = Some(c_idx);
                     }
                 }
                 if let Some(c_idx) = remove_if_cond_idx {
@@ -2798,9 +2812,19 @@ fn render_action_parameter_fields(
                         conditions.remove(c_idx);
                     }
                 }
+                if let Some(c_idx) = change_if_cond_idx {
+                    resp.open_condition_catalog = Some(crate::gui::state::ConditionCatalogTarget::ChangeActionIfElse {
+                        action_idx: idx,
+                        cond_idx: c_idx,
+                        is_exit: is_exit_pipeline,
+                    });
+                }
 
                 if render_add_condition_button(ui, loc, t) {
-                    conditions.push(RuleConditionItem::new(RuleCondition::default_process()));
+                    resp.open_condition_catalog = Some(crate::gui::state::ConditionCatalogTarget::ActionIfElse {
+                        action_idx: idx,
+                        is_exit: is_exit_pipeline,
+                    });
                 }
 
                 ui.add_space(6.0);
@@ -2847,19 +2871,23 @@ fn render_action_parameter_fields(
                     }
 
                     let mut remove_elif_cond_idx = None;
+                    let mut change_elif_cond_idx = None;
                     let total_elif_conds = branch.conditions.len();
                     for (c_idx, c_item) in branch.conditions.iter_mut().enumerate() {
                         if c_idx > 0 {
                             render_condition_operator_connector(ui, &mut c_item.operator, loc, t);
                         }
-                        if render_condition_card(
+                        let can_remove = total_elif_conds > 1;
+                        let show_change = true;
+                        let (remove_clicked, change_clicked) = render_condition_card(
                             ui,
                             c_idx,
                             c_item,
                             loc,
                             t,
                             true,
-                            total_elif_conds > 1,
+                            can_remove,
+                            show_change,
                             || {
                                 resp.pick_target = Some(crate::gui::state::ProcessPickerTarget::ActionElseIfCondition {
                                     action_idx: idx,
@@ -2868,8 +2896,12 @@ fn render_action_parameter_fields(
                                     is_exit: is_exit_pipeline,
                                 });
                             },
-                        ) && total_elif_conds > 1 {
+                        );
+                        if remove_clicked && can_remove {
                             remove_elif_cond_idx = Some(c_idx);
+                        }
+                        if change_clicked {
+                            change_elif_cond_idx = Some(c_idx);
                         }
                     }
                     if let Some(c_idx) = remove_elif_cond_idx {
@@ -2877,9 +2909,21 @@ fn render_action_parameter_fields(
                             branch.conditions.remove(c_idx);
                         }
                     }
+                    if let Some(c_idx) = change_elif_cond_idx {
+                        resp.open_condition_catalog = Some(crate::gui::state::ConditionCatalogTarget::ChangeActionElseIf {
+                            action_idx: idx,
+                            branch_idx: b_idx,
+                            cond_idx: c_idx,
+                            is_exit: is_exit_pipeline,
+                        });
+                    }
 
                     if render_add_condition_button(ui, loc, t) {
-                        branch.conditions.push(RuleConditionItem::new(RuleCondition::default_process()));
+                        resp.open_condition_catalog = Some(crate::gui::state::ConditionCatalogTarget::ActionElseIf {
+                            action_idx: idx,
+                            branch_idx: b_idx,
+                            is_exit: is_exit_pipeline,
+                        });
                     }
 
                     ui.add_space(6.0);
@@ -3678,9 +3722,11 @@ fn render_condition_card(
     t: &Tokens,
     is_nested: bool,
     can_remove: bool,
+    show_change: bool,
     on_pick_process: impl FnMut(),
-) -> bool {
+) -> (bool, bool) {
     let mut remove_clicked = false;
+    let mut change_clicked = false;
     let kind = ConditionKind::from_condition(&item.condition);
 
     let (fill, stroke) = if is_nested {
@@ -3699,7 +3745,7 @@ fn render_condition_card(
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 8.0;
 
-                // 1. Top Strip: Step index + Badge on left; Close button on right (hidden if cannot be removed)
+                // 1. Top Strip: Step index + Badge on left; Close button and Change button on right
                 ui.horizontal(|ui| {
                     let pfx = format!("{} {:02}", loc.inspector_conditions_badge, idx + 1);
                     widgets::hud(ui, &pfx, t.accent_ink);
@@ -3708,6 +3754,9 @@ fn render_condition_card(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if can_remove && widgets::glyph_button(ui, Glyph::Close, loc.inspector_cond_remove_tip).clicked() {
                             remove_clicked = true;
+                        }
+                        if show_change && widgets::button(ui, loc.inspector_btn_change_condition, Kind::Secondary, 0.0).clicked() {
+                            change_clicked = true;
                         }
                     });
                 });
@@ -3719,7 +3768,7 @@ fn render_condition_card(
             });
         });
 
-    remove_clicked
+    (remove_clicked, change_clicked)
 }
 
 fn render_condition_operator_connector(
@@ -4112,6 +4161,7 @@ fn render_conditions_section(
 ) {
     let loc = state.loc();
     let mut remove_idx = None;
+    let mut change_idx = None;
     let mut pick_cond_idx = None;
 
     for (idx, item) in rule.conditions.iter_mut().enumerate() {
@@ -4119,7 +4169,7 @@ fn render_conditions_section(
             render_condition_operator_connector(ui, &mut item.operator, loc, t);
         }
 
-        if render_condition_card(
+        let (remove_clicked, change_clicked) = render_condition_card(
             ui,
             idx,
             item,
@@ -4127,9 +4177,14 @@ fn render_conditions_section(
             t,
             false,
             true,
+            true,
             || { pick_cond_idx = Some(idx); },
-        ) {
+        );
+        if remove_clicked {
             remove_idx = Some(idx);
+        }
+        if change_clicked {
+            change_idx = Some(idx);
         }
     }
 
@@ -4140,13 +4195,17 @@ fn render_conditions_section(
         }
     }
 
+    if let Some(idx) = change_idx {
+        state.open_condition_catalog_with_target(crate::gui::state::ConditionCatalogTarget::ChangeRulePrecondition(idx));
+    }
+
     if let Some(idx) = pick_cond_idx {
         state.open_process_picker(crate::gui::state::ProcessPickerTarget::Condition(idx));
     }
 
     // 44px Add Condition button at the bottom of the section
     if render_add_condition_button(ui, loc, t) {
-        state.open_condition_catalog();
+        state.open_condition_catalog_with_target(crate::gui::state::ConditionCatalogTarget::RulePrecondition);
     }
 }
 

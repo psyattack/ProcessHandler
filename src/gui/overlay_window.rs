@@ -912,9 +912,13 @@ pub fn run_overlay_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static TEST_OVERLAY_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_overlay_window_fade_in_and_fade_out_initialization() {
+        let _lock = TEST_OVERLAY_LOCK.lock().unwrap();
         let ctx = egui::Context::default();
 
         // 1. Overlay with fade in
@@ -964,6 +968,7 @@ mod tests {
 
     #[test]
     fn test_overlay_window_draggable_runtime_state() {
+        let _lock = TEST_OVERLAY_LOCK.lock().unwrap();
         let ctx = egui::Context::default();
         let mut def = OverlayDefinition::default_new_overlay();
         def.draggable = true;
@@ -977,6 +982,7 @@ mod tests {
 
     #[test]
     fn test_overlay_window_auto_hide_resolution() {
+        let _lock = TEST_OVERLAY_LOCK.lock().unwrap();
         let ctx = egui::Context::default();
 
         // Priority 1: CLI duration_ms

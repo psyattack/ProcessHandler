@@ -465,7 +465,7 @@ pub fn render_condition_catalog_modal(ctx: &egui::Context, state: &mut GuiState)
         });
 
     if let Some(cond) = chosen_condition {
-        state.add_condition_from_catalog(cond);
+        state.apply_condition_from_catalog(cond);
     } else if let Some(res) = modal_res {
         if res.close_requested {
             state.close_condition_catalog();

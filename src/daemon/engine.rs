@@ -379,6 +379,34 @@ impl DaemonEngine {
 
     pub fn log(&mut self, level: &str, category: &str, message: &str) {
         let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
+
+        if let Some(last) = self.logs.last_mut() {
+            if last.level == level && last.category == category {
+                let (is_match, count) = if last.message == message {
+                    (true, 1)
+                } else if let Some(stripped) = last.message.strip_prefix(message) {
+                    if let Some(inner) = stripped.strip_prefix(" (x").and_then(|s| s.strip_suffix(')')) {
+                        if let Ok(n) = inner.parse::<usize>() {
+                            (true, n)
+                        } else {
+                            (false, 1)
+                        }
+                    } else {
+                        (false, 1)
+                    }
+                } else {
+                    (false, 1)
+                };
+
+                if is_match {
+                    let next_count = count + 1;
+                    last.message = format!("{} (x{})", message, next_count);
+                    last.timestamp = timestamp;
+                    return;
+                }
+            }
+        }
+
         while self.logs.len() >= Self::MAX_LOGS {
             // Prioritize preserving RULE and ERROR logs: evict oldest entry that is neither RULE nor ERROR
             if let Some(pos) = self.logs.iter().position(|l| !l.category.eq_ignore_ascii_case("RULE") && !l.level.eq_ignore_ascii_case("ERROR")) {
@@ -871,6 +899,7 @@ impl DaemonEngine {
                         };
 
                         if should_run {
+                            self.rule_last_triggered.insert(rule.id.clone(), now_instant);
                             let _ = self.try_execute_rule(rule, &format!("Schedule Interval {}s", interval), 0).await;
                         }
                     }
@@ -1100,6 +1129,12 @@ impl DaemonEngine {
             }
         }
 
+        if let Some(last) = self.rule_last_triggered.get(&rule.id) {
+            if last.elapsed().as_secs_f64() < rule.cooldown_seconds && context_name != "MANUAL_TEST" {
+                return None;
+            }
+        }
+
         if !rule.conditions.is_empty() && !Self::evaluate_rule_conditions(&rule.conditions) {
             self.log(
                 "WARN",
@@ -1107,12 +1142,6 @@ impl DaemonEngine {
                 &format!("Rule '{}' triggered by {}, but conditions were not met. Skipping.", rule.name, context_name),
             );
             return None;
-        }
-
-        if let Some(last) = self.rule_last_triggered.get(&rule.id) {
-            if last.elapsed().as_secs_f64() < rule.cooldown_seconds && context_name != "MANUAL_TEST" {
-                return None;
-            }
         }
 
         self.rule_last_triggered.insert(rule.id.clone(), Instant::now());
@@ -2166,6 +2195,36 @@ mod tests {
         assert_eq!(engine.logs.len(), 500);
         assert_eq!(engine.logs[0].message, "Log message 101");
         assert_eq!(engine.logs[499].message, "Log message 600");
+    }
+
+    #[test]
+    fn test_log_deduplication_aggregation() {
+        let mut engine = DaemonEngine::new(AppConfig::default());
+        assert_eq!(engine.logs.len(), 0);
+
+        engine.log("WARN", "RULE", "Rule 'Test' conditions were not met");
+        assert_eq!(engine.logs.len(), 1);
+        assert_eq!(engine.logs[0].message, "Rule 'Test' conditions were not met");
+
+        // Consecutive repeat increments to (x2)
+        engine.log("WARN", "RULE", "Rule 'Test' conditions were not met");
+        assert_eq!(engine.logs.len(), 1);
+        assert_eq!(engine.logs[0].message, "Rule 'Test' conditions were not met (x2)");
+
+        // Consecutive repeat increments to (x3)
+        engine.log("WARN", "RULE", "Rule 'Test' conditions were not met");
+        assert_eq!(engine.logs.len(), 1);
+        assert_eq!(engine.logs[0].message, "Rule 'Test' conditions were not met (x3)");
+
+        // Different message creates a new log line
+        engine.log("INFO", "RULE", "Different message");
+        assert_eq!(engine.logs.len(), 2);
+        assert_eq!(engine.logs[1].message, "Different message");
+
+        // Repeat of original message now creates a new entry
+        engine.log("WARN", "RULE", "Rule 'Test' conditions were not met");
+        assert_eq!(engine.logs.len(), 3);
+        assert_eq!(engine.logs[2].message, "Rule 'Test' conditions were not met");
     }
 
     #[test]
