@@ -47,12 +47,6 @@ pub enum AppTheme {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
-    #[serde(default = "default_monitoring_mode")]
-    pub monitoring_mode: String, // "polling" or "wmi"
-
-    #[serde(default = "default_poll_interval")]
-    pub poll_interval_sec: f64,
-
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tray_icon_path: Option<String>,
 
@@ -96,19 +90,9 @@ fn default_check_updates_on_startup() -> bool {
     true
 }
 
-fn default_monitoring_mode() -> String {
-    "wmi".to_string()
-}
-
-fn default_poll_interval() -> f64 {
-    2.0
-}
-
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            monitoring_mode: "wmi".into(),
-            poll_interval_sec: 2.0,
             tray_icon_path: None,
             hide_tray_icon: false,
             mask_daemon_process: false,
@@ -215,6 +199,7 @@ mod tests {
 
     #[test]
     fn test_app_config_autorun_configured_default() {
+        // Backwards compatibility: ensure legacy configs with obsolete monitoring_mode & poll_interval_sec deserialize cleanly
         let json = r#"{"monitoring_mode": "wmi", "poll_interval_sec": 2.0}"#;
         let cfg: AppConfig = serde_json::from_str(json).expect("deserialize");
         assert!(!cfg.autorun_configured);

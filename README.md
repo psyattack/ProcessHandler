@@ -48,7 +48,10 @@
 To install, download the latest release from [**GitHub Releases**](https://github.com/psyattack/Synector/releases) and extract the downloaded archive to a convenient location on your drive.
 
 > [!IMPORTANT]
-> **Administrator Privileges**: Run Synector as administrator to control or send hotkeys and macros to elevated games and applications.
+> **Administrator Privileges**: Synector launches elevated by default (override with `--no-elevate`). Required for:
+> * **Kernel ETW**: Zero-polling, real-time process lifecycle events.
+> * **UIPI Bypass**: Hardware input simulation into elevated games and apps.
+> * **Process Control & Autostart**: Memory/affinity tuning and silent elevated logon via Task Scheduler.
 
 > [!NOTE]
 > Automatically registers for Windows startup on first launch (configurable in Settings).
@@ -126,7 +129,7 @@ Synector/
 │   │   ├── system_events.rs               # Win32 idle time & AC/battery power monitor
 │   │   ├── telemetry.rs                   # System telemetry provider (CPU, RAM, network, battery, mic)
 │   │   ├── tray.rs                        # Win32 system tray manager, menu & message loop
-│   │   ├── watcher.rs                     # WMI events & Toolhelp32 process snapshotting
+│   │   ├── watcher.rs                     # Hybrid process watcher: Kernel ETW (elevated) & Toolhelp32 snapshot polling
 │   │   └── webhook_server.rs              # Local HTTP webhook server (port 48123)
 │   ├── gui/                               # egui desktop user interface
 │   │   ├── components/                    # UI components
@@ -161,7 +164,7 @@ Synector/
 │   ├── ipc/                               # Inter-process communication
 │   │   ├── client.rs                      # Named pipe IPC client
 │   │   └── protocol.rs                    # Request & response message types (Serde)
-│   ├── autorun.rs                         # Windows Registry autorun integration
+│   ├── autorun.rs                         # Windows Task Scheduler autorun integration
 │   ├── config.rs                          # JSON configuration persistence & validation (theme, language, updates)
 │   ├── daemon.rs                          # Daemon entrypoint & service lifecycle
 │   ├── gui.rs                             # GUI entrypoint & eframe application loop

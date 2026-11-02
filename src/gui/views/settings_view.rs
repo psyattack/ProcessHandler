@@ -90,7 +90,6 @@ pub fn render_settings_view(ui: &mut Ui, state: &mut GuiState) {
                     let tab_options = [
                         (SettingsTab::General, widgets::Cell::new(loc.settings_tab_general, "")),
                         (SettingsTab::Appearance, widgets::Cell::new(loc.settings_tab_appearance, "")),
-                        (SettingsTab::Engine, widgets::Cell::new(loc.settings_tab_engine, "")),
                         (SettingsTab::Updates, widgets::Cell::new(loc.settings_tab_updates, "")),
                     ];
                     widgets::cells(ui, &mut state.settings_tab, &tab_options);
@@ -113,8 +112,7 @@ fn render_sidebar(ui: &mut Ui, state: &mut GuiState, loc: &crate::i18n::Strings,
     let tabs = [
         (SettingsTab::General, "01", loc.settings_tab_general),
         (SettingsTab::Appearance, "02", loc.settings_tab_appearance),
-        (SettingsTab::Engine, "03", loc.settings_tab_engine),
-        (SettingsTab::Updates, "04", loc.settings_tab_updates),
+        (SettingsTab::Updates, "03", loc.settings_tab_updates),
     ];
 
     for (tab, idx, label) in tabs {
@@ -191,9 +189,6 @@ fn render_content_panel(
                 }
                 SettingsTab::Appearance => {
                     render_appearance_content(ui, state, cfg, t, loc);
-                }
-                SettingsTab::Engine => {
-                    render_engine_content(ui, cfg, changed, t, loc);
                 }
                 SettingsTab::Updates => {
                     render_updates_content(ui, state, cfg, changed, t, loc);
@@ -505,43 +500,6 @@ fn render_appearance_content(
     });
 }
 
-fn render_engine_content(
-    ui: &mut Ui,
-    cfg: &mut crate::config::AppConfig,
-    changed: &mut bool,
-    t: &Tokens,
-    loc: &crate::i18n::Strings,
-) {
-    // 1. Process Detection Method
-    render_setting_row(ui, loc.settings_engine_mode_title, loc.settings_engine_mode_desc, t, |ui| {
-        let mut mode_idx = if cfg.monitoring_mode.to_lowercase() == "wmi" { 1usize } else { 0usize };
-        let mode_options = [
-            (0usize, widgets::Cell::new(loc.settings_mode_polling, loc.settings_mode_polling_tip)),
-            (1usize, widgets::Cell::new(loc.settings_mode_wmi, loc.settings_mode_wmi_tip)),
-        ];
-
-        if widgets::cells(ui, &mut mode_idx, &mode_options) {
-            cfg.monitoring_mode = if mode_idx == 1 { "wmi".to_string() } else { "polling".to_string() };
-            *changed = true;
-        }
-    });
-
-    // 2. Polling Scan Interval (only if polling mode is active)
-    if cfg.monitoring_mode.to_lowercase() == "polling" {
-        widgets::hrule(ui);
-        render_setting_row(ui, loc.settings_poll_interval_title, loc.settings_poll_interval_desc, t, |ui| {
-            if ui.add(
-                egui::DragValue::new(&mut cfg.poll_interval_sec)
-                    .speed(0.1)
-                    .range(0.5..=10.0)
-                    .suffix(" s"),
-            ).changed() {
-                *changed = true;
-            }
-        });
-    }
-}
-
 fn render_updates_content(
     ui: &mut Ui,
     state: &mut GuiState,
@@ -601,11 +559,10 @@ mod tests {
             analytics: Default::default(),
         });
 
-        // Test rendering across all 4 tabs
+        // Test rendering across all 3 tabs
         let all_tabs = [
             SettingsTab::General,
             SettingsTab::Appearance,
-            SettingsTab::Engine,
             SettingsTab::Updates,
         ];
 

@@ -26,6 +26,7 @@ arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "ico", "bmp", "webp"] }
 mlua = { version = "0.12.2", features = ["lua54", "vendored"] }
 zip = { version = "2.2.2", default-features = false, features = ["deflate"] }
+regex = "1.11"
 
 [build-dependencies]
 winres = "0.1"
@@ -36,6 +37,8 @@ windows = { version = "0.62", features = [
     "Win32_System_Threading",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_Etw",
+    "Win32_System_Time",
     "Win32_System_ProcessStatus",
     "Win32_System_Pipes",
     "Win32_System_Registry",

@@ -112,6 +112,39 @@ pub fn get_current_foreground_process() -> Option<String> {
     None
 }
 
+static REGEX_CACHE: std::sync::LazyLock<std::sync::RwLock<std::collections::HashMap<String, Option<regex::Regex>>>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+
+fn match_cached_regex(pattern: &str, actual: &str) -> bool {
+    if let Ok(cache) = REGEX_CACHE.read() {
+        if let Some(opt_re) = cache.get(pattern) {
+            return match opt_re {
+                Some(re) => re.is_match(actual),
+                None => actual.to_lowercase().contains(&pattern.to_lowercase()),
+            };
+        }
+    }
+
+    let compiled = regex::RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
+        .ok();
+
+    let matched = match &compiled {
+        Some(re) => re.is_match(actual),
+        None => actual.to_lowercase().contains(&pattern.to_lowercase()),
+    };
+
+    if let Ok(mut cache) = REGEX_CACHE.write() {
+        if cache.len() >= 256 {
+            cache.clear();
+        }
+        cache.insert(pattern.to_string(), compiled);
+    }
+
+    matched
+}
+
 impl DaemonEngine {
     pub const MAX_LOGS: usize = 500;
 
@@ -362,12 +395,14 @@ impl DaemonEngine {
         });
     }
 
-    pub async fn tick_process_events(&mut self) {
+    pub async fn tick_process_events(&mut self) -> bool {
         self.drain_action_events();
         let events = self.watcher.poll_changes();
+        let had_events = !events.is_empty();
         for event in events {
             self.handle_process_event(event).await;
         }
+        had_events
     }
 
     pub fn matches_process(pattern: &str, actual: &str, mode: ProcessMatchMode) -> bool {
@@ -389,9 +424,7 @@ impl DaemonEngine {
                     act == pat
                 }
             }
-            ProcessMatchMode::Regex => {
-                actual.to_lowercase().contains(&pattern.to_lowercase())
-            }
+            ProcessMatchMode::Regex => match_cached_regex(pattern, actual),
         }
     }
 
@@ -2119,6 +2152,14 @@ mod tests {
 
         assert!(DaemonEngine::matches_process("chrome", "google-chrome-stable", ProcessMatchMode::Regex));
         assert!(!DaemonEngine::matches_process("firefox", "google-chrome-stable", ProcessMatchMode::Regex));
+        assert!(DaemonEngine::matches_process(r"^notepad\.exe$", "notepad.exe", ProcessMatchMode::Regex));
+        assert!(DaemonEngine::matches_process(r"^NOTEPAD\.EXE$", "notepad.exe", ProcessMatchMode::Regex));
+        assert!(!DaemonEngine::matches_process(r"^notepad\.exe$", "my_notepad.exe", ProcessMatchMode::Regex));
+        assert!(DaemonEngine::matches_process(r"(chrome|edge)\.exe", "edge.exe", ProcessMatchMode::Regex));
+        assert!(DaemonEngine::matches_process(r"game_\d+\.exe", "game_42.exe", ProcessMatchMode::Regex));
+        assert!(!DaemonEngine::matches_process(r"game_\d+\.exe", "game_abc.exe", ProcessMatchMode::Regex));
+        // Graceful handling of invalid regex pattern without panicking (falls back to contains)
+        assert!(DaemonEngine::matches_process("[invalid", "test_[invalid_proc", ProcessMatchMode::Regex));
     }
 
     #[test]

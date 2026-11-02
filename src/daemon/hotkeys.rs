@@ -19,6 +19,7 @@ pub struct MonitoredHotkey {
 }
 
 static MONITORED_HOTKEYS: Mutex<Vec<MonitoredHotkey>> = Mutex::new(Vec::new());
+static HOTKEY_CVAR: std::sync::Condvar = std::sync::Condvar::new();
 static LISTENER_RUNNING: AtomicBool = AtomicBool::new(false);
 
 pub fn is_hotkey_held(rule_id: &str) -> bool {
@@ -65,6 +66,7 @@ impl HotkeyHandle {
 
         if let Ok(mut lock) = MONITORED_HOTKEYS.lock() {
             *lock = list;
+            HOTKEY_CVAR.notify_all();
         }
     }
 }
@@ -95,31 +97,59 @@ fn run_hotkey_poll_loop(event_tx: tokio::sync::mpsc::UnboundedSender<HotkeyEvent
     use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
     while LISTENER_RUNNING.load(Ordering::SeqCst) {
-        if let Ok(mut lock) = MONITORED_HOTKEYS.lock() {
-            for hotkey in lock.iter_mut() {
-                let is_down = !hotkey.vkeys.is_empty() && hotkey.vkeys.iter().all(|&vk| {
-                    unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
-                });
-
-                if hotkey.hold_mode {
-                    if !hotkey.was_pressed && is_down {
-                        hotkey.was_pressed = true;
-                        let _ = event_tx.send(HotkeyEvent::HoldStart(hotkey.rule_id.clone()));
-                    } else if hotkey.was_pressed && !is_down {
-                        hotkey.was_pressed = false;
-                        let _ = event_tx.send(HotkeyEvent::HoldStop(hotkey.rule_id.clone()));
-                    }
-                } else {
-                    if !hotkey.was_pressed && is_down {
-                        hotkey.was_pressed = true;
-                        let _ = event_tx.send(HotkeyEvent::Trigger(hotkey.rule_id.clone()));
-                    } else if hotkey.was_pressed && !is_down {
-                        hotkey.was_pressed = false;
+        let mut to_send = Vec::new();
+        let is_empty = {
+            if let Ok(mut lock) = MONITORED_HOTKEYS.lock() {
+                // If there are no hotkeys to monitor, wait on Condvar instead of spinning at 8ms!
+                while lock.is_empty() && LISTENER_RUNNING.load(Ordering::SeqCst) {
+                    match HOTKEY_CVAR.wait_timeout(lock, std::time::Duration::from_millis(500)) {
+                        Ok((guard, _)) => lock = guard,
+                        Err(poisoned) => {
+                            lock = poisoned.into_inner().0;
+                            break;
+                        }
                     }
                 }
+
+                if !LISTENER_RUNNING.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                for hotkey in lock.iter_mut() {
+                    let is_down = !hotkey.vkeys.is_empty() && hotkey.vkeys.iter().all(|&vk| {
+                        unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
+                    });
+
+                    if hotkey.hold_mode {
+                        if !hotkey.was_pressed && is_down {
+                            hotkey.was_pressed = true;
+                            to_send.push(HotkeyEvent::HoldStart(hotkey.rule_id.clone()));
+                        } else if hotkey.was_pressed && !is_down {
+                            hotkey.was_pressed = false;
+                            to_send.push(HotkeyEvent::HoldStop(hotkey.rule_id.clone()));
+                        }
+                    } else {
+                        if !hotkey.was_pressed && is_down {
+                            hotkey.was_pressed = true;
+                            to_send.push(HotkeyEvent::Trigger(hotkey.rule_id.clone()));
+                        } else if hotkey.was_pressed && !is_down {
+                            hotkey.was_pressed = false;
+                        }
+                    }
+                }
+                lock.is_empty()
+            } else {
+                true
             }
+        };
+
+        for ev in to_send {
+            let _ = event_tx.send(ev);
         }
-        std::thread::sleep(std::time::Duration::from_millis(8));
+
+        if !is_empty {
+            std::thread::sleep(std::time::Duration::from_millis(8));
+        }
     }
 }
 

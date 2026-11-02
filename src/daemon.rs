@@ -207,7 +207,8 @@ pub fn run_daemon() {
         let engine_clone = Arc::clone(&engine);
         rt.block_on(async {
             let mut eng = engine_clone.lock().await;
-            eng.log("INFO", "DAEMON", &format!("Daemon initialized (autorun: {})", autorun_status));
+            let mode = eng.watcher.get_mode_name();
+            eng.log("INFO", "DAEMON", &format!("Daemon initialized (autorun: {}, watcher: {})", autorun_status, mode));
         });
     }
 
@@ -217,14 +218,32 @@ pub fn run_daemon() {
         ipc_server.run().await;
     });
 
-    // Spawn Process Watcher Loop
+    // Spawn Process Watcher Loop (Hybrid: ETW 50ms queue drain under admin; Adaptive 150-300ms snapshot polling; Dormant when no rules)
     let engine_process = Arc::clone(&engine);
     rt.spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(1500));
         loop {
-            interval.tick().await;
-            let mut eng = engine_process.lock().await;
-            eng.tick_process_events().await;
+            let delay_ms = {
+                let mut eng = engine_process.lock().await;
+                let had_events = eng.tick_process_events().await;
+                let has_proc_rules = eng.config.rules.iter().any(|r| {
+                    r.is_enabled && matches!(r.trigger, Some(
+                        crate::models::Trigger::Process { .. }
+                        | crate::models::Trigger::WindowFocus { .. }
+                        | crate::models::Trigger::ResourceThreshold { .. }
+                    ))
+                }) || !eng.active_bound_processes.is_empty();
+
+                if eng.watcher.is_etw_active() {
+                    if has_proc_rules { 50 } else { 500 }
+                } else if had_events {
+                    150
+                } else if has_proc_rules {
+                    300
+                } else {
+                    3000 // Deep sleep when no process rules exist
+                }
+            };
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
         }
     });
 
@@ -245,7 +264,7 @@ pub fn run_daemon() {
         }
     });
 
-    // Spawn Schedule Watcher Loop
+    // Spawn Schedule Watcher Loop (Dormant when no schedule rules exist)
     let engine_sched = Arc::clone(&engine);
     rt.spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -261,11 +280,20 @@ pub fn run_daemon() {
             }
         }
 
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
         loop {
-            interval.tick().await;
-            let mut eng = engine_sched.lock().await;
-            eng.tick_schedule().await;
+            let delay_ms = {
+                let mut eng = engine_sched.lock().await;
+                let has_schedules = eng.config.rules.iter().any(|r| {
+                    r.is_enabled && matches!(r.trigger, Some(crate::models::Trigger::Schedule { .. }))
+                });
+                if has_schedules {
+                    eng.tick_schedule().await;
+                    1000
+                } else {
+                    5000 // Dormant mode: 5s interval when no schedule rules exist
+                }
+            };
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
         }
     });
 
@@ -279,14 +307,13 @@ pub fn run_daemon() {
         server.run().await;
     });
 
-    // Spawn File Watcher Loop
+    // Spawn File Watcher Loop (Dormant when no file watcher rules exist)
     let engine_file = Arc::clone(&engine);
     rt.spawn(async move {
         let mut file_watcher = crate::daemon::file_watcher::FileWatcherService::new(engine_file);
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(1500));
         loop {
-            interval.tick().await;
-            file_watcher.poll_once().await;
+            let delay_ms = file_watcher.poll_once().await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
         }
     });
 

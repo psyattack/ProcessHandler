@@ -160,7 +160,6 @@ pub enum SettingsTab {
     #[default]
     General,
     Appearance,
-    Engine,
     Updates,
 }
 
@@ -561,7 +560,8 @@ impl GuiState {
     pub fn toggle_autorun(&mut self, enable: bool) {
         match IpcClient::call(&IpcRequest::SetAutorun(enable)) {
             Ok(IpcResponse::Ok) => {
-                self.set_toast(if enable { "Autorun enabled in Windows Registry" } else { "Autorun removed from Windows Registry" });
+                let msg = if enable { self.loc().toast_autorun_enabled } else { self.loc().toast_autorun_disabled };
+                self.set_toast(msg);
             }
             Ok(IpcResponse::Error(err)) => {
                 self.set_toast(format!("Autorun error: {err}"));

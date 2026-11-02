@@ -19,11 +19,22 @@ impl FileWatcherService {
         }
     }
 
-    pub async fn poll_once(&mut self) {
-        let (rules, _is_empty) = {
+    pub async fn poll_once(&mut self) -> u64 {
+        let rules = {
             let eng = self.engine.lock().await;
-            (eng.config.rules.clone(), eng.config.rules.is_empty())
+            eng.config.rules.clone()
         };
+
+        let has_file_rules = rules.iter().any(|r| {
+            r.is_enabled && matches!(r.trigger, Some(Trigger::FileWatcher { .. }))
+        });
+
+        if !has_file_rules {
+            if !self.known_dir_states.is_empty() {
+                self.known_dir_states.clear();
+            }
+            return 5000; // Dormant mode: sleep 5s when no file watcher rules exist
+        }
 
         for rule in &rules {
             if !rule.is_enabled {
@@ -83,6 +94,7 @@ impl FileWatcherService {
                 self.known_dir_states.insert(target_path, current_state);
             }
         }
+        1500
     }
 
     async fn trigger_file_event(&self, rule: &crate::models::Rule, event_type: &str, file_path: &Path) {
