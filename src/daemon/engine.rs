@@ -2894,9 +2894,9 @@ mod tests {
     #[test]
     fn test_condition_evaluation_logic() {
         let temp_dir = std::env::temp_dir();
-        let existing_path = temp_dir.join("processhandler_test_cond.tmp");
+        let existing_path = temp_dir.join("synector_test_cond.tmp");
         let _ = std::fs::write(&existing_path, "test");
-        let non_existing_path = temp_dir.join("processhandler_non_existing_file_12345.tmp");
+        let non_existing_path = temp_dir.join("synector_non_existing_file_12345.tmp");
 
         let cond_file_exists = RuleCondition::FileWatcher {
             path: existing_path.to_string_lossy().to_string(),
@@ -2957,7 +2957,7 @@ mod tests {
     #[tokio::test]
     async fn test_preconditions_gate_rule_execution() {
         let temp_dir = std::env::temp_dir();
-        let non_existing_path = temp_dir.join("processhandler_never_exists_abc.tmp");
+        let non_existing_path = temp_dir.join("synector_never_exists_abc.tmp");
 
         let config = AppConfig::default();
         let rule = Rule {

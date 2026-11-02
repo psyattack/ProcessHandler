@@ -247,8 +247,8 @@ pub static STRINGS: Strings = Strings {
     inspector_sys_event_desc_net_connected: "Срабатывает при появлении сетевого подключения.",
     inspector_sys_event_desc_net_disconnected: "Срабатывает при потере связи с сетью.",
 
-    inspector_schedule_app_start_desc: "Правило запускается автоматически при старте ProcessHandler.",
-    inspector_schedule_app_close_desc: "Правило запускается автоматически при выходе из ProcessHandler.",
+    inspector_schedule_app_start_desc: "Правило запускается автоматически при старте Synector.",
+    inspector_schedule_app_close_desc: "Правило запускается автоматически при выходе из Synector.",
     inspector_field_startup_delay: "ЗАДЕРЖКА ЗАПУСКА",
     inspector_field_idle_duration: "ВРЕМЯ БЕЗДЕЙСТВИЯ",
     inspector_schedule_interval: "Интервал повтора",
@@ -286,8 +286,8 @@ pub static STRINGS: Strings = Strings {
     ],
     inspector_cal_day_names: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"],
     inspector_execution_time: "ВРЕМЯ ЗАПУСКА",
-    inspector_badge_app_startup: "Запускается один раз при старте ProcessHandler",
-    inspector_badge_app_shutdown: "Запускается при закрытии ProcessHandler",
+    inspector_badge_app_startup: "Запускается один раз при старте Synector",
+    inspector_badge_app_shutdown: "Запускается при закрытии Synector",
 
     // Inspector Pre-conditions (Section 03)
     inspector_eyebrow_conditions: "ПРЕДВАРИТЕЛЬНЫЕ УСЛОВИЯ",
@@ -403,7 +403,7 @@ pub static STRINGS: Strings = Strings {
     catalog_trigger_webhook_title: "Вебхук",
     catalog_trigger_webhook_desc: "Запуск через локальный сетевой адрес",
     catalog_trigger_lifecycle_title: "Жизненный цикл",
-    catalog_trigger_lifecycle_desc: "Старт или закрытие ProcessHandler",
+    catalog_trigger_lifecycle_desc: "Старт или закрытие Synector",
     catalog_trigger_lock_title: "Блокировка экрана",
     catalog_trigger_lock_desc: "Блокировка или разблокировка сеанса",
     catalog_trigger_sleep_title: "Сон и пробуждение",
@@ -720,7 +720,7 @@ pub static STRINGS: Strings = Strings {
     // Macro Studio
     macro_studio_title: "MACRO STUDIO",
     macro_studio_close_tip: "Закрыть (Esc)",
-    macro_studio_minimize_tip: "Свернуть ProcessHandler (Запись: F9, Тест: F10)",
+    macro_studio_minimize_tip: "Свернуть Synector (Запись: F9, Тест: F10)",
     macro_studio_btn_test_run: "▶ ТЕСТ (F10)",
     macro_studio_btn_stop_test: "⏹ СТОП ТЕСТ (F10)",
     macro_studio_btn_test_run_tip: "Запустить тест макроса на фоновом потоке (F10)",
@@ -970,7 +970,7 @@ pub static STRINGS: Strings = Strings {
     overlay_studio_telemetry_kind: "ТИП ИНДИКАТОРА",
     overlay_studio_telemetry_kind_battery: "Батарея и питание",
     overlay_studio_telemetry_kind_audio: "Аудио и микрофон",
-    overlay_studio_telemetry_kind_engine: "Движок ProcessHandler",
+    overlay_studio_telemetry_kind_engine: "Движок Synector",
     overlay_studio_telemetry_style: "СТИЛЬ ОТОБРАЖЕНИЯ",
     overlay_studio_telemetry_style_badge: "Плашка",
     overlay_studio_telemetry_style_compact: "Компактный",

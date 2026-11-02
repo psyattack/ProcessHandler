@@ -18,7 +18,7 @@ pub fn render_header_bar(ui: &mut Ui, state: &mut GuiState) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.add_space(16.0);
-            widgets::wordmark(ui, "PROCESS", "HANDLER", 16.0, h);
+            widgets::wordmark(ui, "SYN", "ECTOR", 16.0, h);
         });
     });
 

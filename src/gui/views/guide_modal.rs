@@ -338,7 +338,7 @@ fn doc_table_row(ui: &mut Ui, col1: &str, col2: &str, t: &Tokens) {
 fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
     if lang == Language::Russian {
         doc_header(ui, "Концепция и Архитектура Правил", t);
-        doc_paragraph(ui, "ProcessHandler работает на базе детерминированного асинхронного движка событий. Каждое правило (Rule) — это независимый контур автоматизации со своим жизненным циклом.", t);
+        doc_paragraph(ui, "Synector работает на базе детерминированного асинхронного движка событий. Каждое правило (Rule) — это независимый контур автоматизации со своим жизненным циклом.", t);
 
         doc_callout(
             ui,
@@ -366,13 +366,13 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_callout(
             ui,
             "Companion Mode (Сопровождение процесса)",
-            "Если триггером выбран процесс, ProcessHandler переходит в режим компаньона: удерживает контекст PID процесса во время его работы и автоматически вызывает Exit Actions при его завершении.",
+            "Если триггером выбран процесс, Synector переходит в режим компаньона: удерживает контекст PID процесса во время его работы и автоматически вызывает Exit Actions при его завершении.",
             t,
             false,
         );
     } else {
         doc_header(ui, "Concepts & Architecture", t);
-        doc_paragraph(ui, "ProcessHandler operates on a deterministic, asynchronous event loop. Each automation is configured as an autonomous Rule with an isolated lifecycle.", t);
+        doc_paragraph(ui, "Synector operates on a deterministic, asynchronous event loop. Each automation is configured as an autonomous Rule with an isolated lifecycle.", t);
 
         doc_callout(
             ui,
@@ -400,7 +400,7 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_callout(
             ui,
             "Companion Mode",
-            "When configured with a Process trigger, ProcessHandler tracks the lifecycle of the executable, maintaining runtime PID context and triggering Exit Actions upon process exit.",
+            "When configured with a Process trigger, Synector tracks the lifecycle of the executable, maintaining runtime PID context and triggering Exit Actions upon process exit.",
             t,
             false,
         );
@@ -413,7 +413,7 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
 fn render_shortcuts_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
     if lang == Language::Russian {
         doc_header(ui, "Горячие Клавиши и Запись", t);
-        doc_paragraph(ui, "В ProcessHandler встроен мощный движок истории изменений (Undo/Redo), глобальный аппаратный рекордер макросов и интерактивные редакторы.", t);
+        doc_paragraph(ui, "В Synector встроен мощный движок истории изменений (Undo/Redo), глобальный аппаратный рекордер макросов и интерактивные редакторы.", t);
 
         doc_callout(
             ui,
@@ -450,7 +450,7 @@ fn render_shortcuts_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Безопасный Тест (F10)", "Запуск и остановка тестового прогона макроса на изолированном фоновом потоке без вылетов и зависаний", t);
     } else {
         doc_header(ui, "Keyboard Shortcuts & Recording", t);
-        doc_paragraph(ui, "ProcessHandler features deep state history tracking (Undo/Redo), a global hardware macro recorder, and interactive studio editors.", t);
+        doc_paragraph(ui, "Synector features deep state history tracking (Undo/Redo), a global hardware macro recorder, and interactive studio editors.", t);
 
         doc_callout(
             ui,
@@ -547,7 +547,7 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
              • Повторять в цикле (Repeat in loop): при обычном нажатии правило циклически повторяется до повторного нажатия хоткея.\n\
              • Режим Hold mode: правило непрерывно выполняется пока физически зажата клавиша или кнопка мыши, и мгновенно прерывается при ее отпускании.\n\
              • Повтор при удержании (repeat_while_held): циклический повтор пайплайна пока удерживается хоткей, со строгой синхронизацией квоты (max_executions). При отпускании все зажатые макросом кнопки сбрасываются мгновенно.\n\
-             • Права Администратора: для перехвата хоткеев и эмуляции ввода в играх или программах, запущенных с повышенными привилегиями, ProcessHandler также должен быть запущен от имени администратора.",
+             • Права Администратора: для перехвата хоткеев и эмуляции ввода в играх или программах, запущенных с повышенными привилегиями, Synector также должен быть запущен от имени администратора.",
             t,
             false,
         );
@@ -606,7 +606,7 @@ fn render_triggers_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
              • Repeat in Loop: in toggle mode, repeats rule pipeline execution continuously until the hotkey is pressed again.\n\
              • Hold Mode: execution continues while the hotkey or mouse button is physically held down, and automatically terminates on release.\n\
              • Loop While Held: repeat pipeline execution continuously in a loop while held (respects execution quota and releases stuck inputs).\n\
-             • Admin Privileges: to trigger shortcuts or dispatch inputs in elevated games or tools, ProcessHandler must also be run as administrator.",
+             • Admin Privileges: to trigger shortcuts or dispatch inputs in elevated games or tools, Synector must also be run as administrator.",
             t,
             false,
         );
@@ -757,7 +757,7 @@ fn render_tokens_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "{Env:NAME}", "Значение переменной окружения Windows (напр. {Env:USERPROFILE})", t);
     } else {
         doc_header(ui, "Available Tokens & Execution Context", t);
-        doc_paragraph(ui, "You can embed placeholders inside braces {} in any text field. ProcessHandler interpolates them at runtime.", t);
+        doc_paragraph(ui, "You can embed placeholders inside braces {} in any text field. Synector interpolates them at runtime.", t);
 
         doc_section_title(ui, "Process & Window Tokens:", t);
         doc_table_row(ui, "{ProcessName}", "Process executable name (e.g. notepad.exe)", t);

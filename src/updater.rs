@@ -1,7 +1,7 @@
 use std::path::Path;
 use serde::Deserialize;
 
-pub const GITHUB_REPO: &str = "psyattack/ProcessHandler";
+pub const GITHUB_REPO: &str = "psyattack/Synector";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReleaseInfo {
@@ -75,7 +75,7 @@ struct GhAsset {
 pub async fn check_github_release(repo: &str, current_version: &str) -> Result<Option<ReleaseInfo>, String> {
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
     let client = reqwest::Client::builder()
-        .user_agent(concat!("ProcessHandler-Updater/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Synector-Updater/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(12))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
@@ -105,16 +105,16 @@ pub async fn check_github_release(repo: &str, current_version: &str) -> Result<O
         return Ok(None);
     }
 
-    // Find the release asset (prioritizing portable zip archive ProcessHandler-*-Windows-x64.zip)
+    // Find the release asset (prioritizing portable zip archive Synector-*-Windows-x64.zip)
     let asset = release
         .assets
         .iter()
         .find(|a| {
             let name = a.name.to_lowercase();
-            name.ends_with(".zip") && name.contains("processhandler")
+            name.ends_with(".zip") && name.contains("synector")
         })
         .or_else(|| release.assets.iter().find(|a| a.name.to_lowercase().ends_with(".zip")))
-        .or_else(|| release.assets.iter().find(|a| a.name.eq_ignore_ascii_case("ProcessHandler.exe")))
+        .or_else(|| release.assets.iter().find(|a| a.name.eq_ignore_ascii_case("Synector.exe")))
         .or_else(|| release.assets.iter().find(|a| a.name.to_lowercase().ends_with(".exe")))
         .or_else(|| release.assets.first());
 
@@ -200,7 +200,7 @@ pub fn extract_exe_from_zip(zip_path: &Path, target_exe_path: &Path) -> Result<(
         return Err(format!("Failed to unpack zip archive {:?}", zip_path));
     }
 
-    // Recursively locate ProcessHandler.exe or any .exe inside extract_dir
+    // Recursively locate Synector.exe or any .exe inside extract_dir
     fn find_exe(dir: &Path) -> Option<std::path::PathBuf> {
         let entries = std::fs::read_dir(dir).ok()?;
         let mut fallback_exe = None;
@@ -208,7 +208,7 @@ pub fn extract_exe_from_zip(zip_path: &Path, target_exe_path: &Path) -> Result<(
             let path = entry.path();
             if path.is_file() {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if name.eq_ignore_ascii_case("ProcessHandler.exe") {
+                if name.eq_ignore_ascii_case("Synector.exe") {
                     return Some(path);
                 } else if name.to_lowercase().ends_with(".exe") && fallback_exe.is_none() {
                     fallback_exe = Some(path);
@@ -250,7 +250,7 @@ where
     F: Fn(f32) + Send + 'static,
 {
     let client = reqwest::Client::builder()
-        .user_agent(concat!("ProcessHandler-Updater/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Synector-Updater/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
@@ -450,18 +450,18 @@ mod tests {
     fn test_github_release_deserialization() {
         let json = r###"{
             "tag_name": "v1.2.0",
-            "name": "ProcessHandler v1.2.0 - Studio Update",
+            "name": "Synector v1.2.0 - Studio Update",
             "body": "## What's Changed\n* Added auto-updater\n* Improved performance",
-            "html_url": "https://github.com/psyattack/ProcessHandler/releases/tag/v1.2.0",
+            "html_url": "https://github.com/psyattack/Synector/releases/tag/v1.2.0",
             "assets": [
                 {
                     "name": "checksums.txt",
-                    "browser_download_url": "https://github.com/psyattack/ProcessHandler/releases/download/v1.2.0/checksums.txt",
+                    "browser_download_url": "https://github.com/psyattack/Synector/releases/download/v1.2.0/checksums.txt",
                     "size": 128
                 },
                 {
-                    "name": "ProcessHandler-v1.2.0-Windows-x64.zip",
-                    "browser_download_url": "https://github.com/psyattack/ProcessHandler/releases/download/v1.2.0/ProcessHandler-v1.2.0-Windows-x64.zip",
+                    "name": "Synector-v1.2.0-Windows-x64.zip",
+                    "browser_download_url": "https://github.com/psyattack/Synector/releases/download/v1.2.0/Synector-v1.2.0-Windows-x64.zip",
                     "size": 15728640
                 }
             ]
@@ -474,22 +474,22 @@ mod tests {
         let zip_asset = release.assets.iter()
             .find(|a| {
                 let name = a.name.to_lowercase();
-                name.ends_with(".zip") && name.contains("processhandler")
+                name.ends_with(".zip") && name.contains("synector")
             })
-            .expect("should find ProcessHandler zip");
+            .expect("should find Synector zip");
 
-        assert_eq!(zip_asset.name, "ProcessHandler-v1.2.0-Windows-x64.zip");
+        assert_eq!(zip_asset.name, "Synector-v1.2.0-Windows-x64.zip");
         assert_eq!(zip_asset.size, 15728640);
         assert!(is_newer_version("1.0.0", &release.tag_name));
     }
 
     #[test]
     fn test_extract_exe_from_zip() {
-        let temp_dir = std::env::temp_dir().join(format!("ph_test_zip_{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!("synector_test_zip_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let source_exe = temp_dir.join("ProcessHandler.exe");
+        let source_exe = temp_dir.join("Synector.exe");
         std::fs::write(&source_exe, b"MZ_MOCK_EXECUTABLE_BINARY_DATA").unwrap();
 
         let zip_path = temp_dir.join("test_archive.zip");
@@ -511,7 +511,7 @@ mod tests {
         }
 
         if zip_created && zip_path.exists() {
-            let extracted_target = temp_dir.join("Extracted_ProcessHandler.exe");
+            let extracted_target = temp_dir.join("Extracted_Synector.exe");
             let result = extract_exe_from_zip(&zip_path, &extracted_target);
             assert!(result.is_ok(), "Extraction failed: {:?}", result.err());
             assert!(extracted_target.exists());

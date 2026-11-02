@@ -2370,7 +2370,7 @@ fn play_sound_file(path: &str) -> Result<(), String> {
 }
 
 fn set_firewall_rule(proc_name: &str, block: bool) -> Result<(), String> {
-    let rule_name = format!("ProcessHandler_{}", proc_name);
+    let rule_name = format!("Synector_{}", proc_name);
     let exe_path = crate::daemon::watcher::ProcessWatcher::find_exe_path_by_name(proc_name)
         .unwrap_or_else(|| proc_name.to_string());
     let mut cmd = Command::new("netsh");
@@ -2847,7 +2847,7 @@ mod tests {
         let zip_file = temp_dir.join("bundle.zip");
 
         std::fs::create_dir_all(&src_dir).unwrap();
-        std::fs::write(src_dir.join("hello.txt"), b"Hello ProcessHandler Archive").unwrap();
+        std::fs::write(src_dir.join("hello.txt"), b"Hello Synector Archive").unwrap();
 
         let pack_action = crate::models::Action::Archive {
             operation: crate::models::ArchiveOperation::Pack,
@@ -2874,7 +2874,7 @@ mod tests {
         assert!(unpack_res.is_ok(), "Unpack failed: {:?}", unpack_res);
         assert!(extract_dir.join("hello.txt").exists());
         let data = std::fs::read_to_string(extract_dir.join("hello.txt")).unwrap();
-        assert_eq!(data, "Hello ProcessHandler Archive");
+        assert_eq!(data, "Hello Synector Archive");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

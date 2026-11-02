@@ -31,14 +31,14 @@ impl SingleInstanceGuard {
 
     pub fn acquire_gui() -> Option<Self> {
         #[cfg(windows)]
-        return Self::acquire_named("Local\\ProcessHandler_GUI_SingleInstance");
+        return Self::acquire_named("Local\\Synector_GUI_SingleInstance");
         #[cfg(not(windows))]
         Some(Self {})
     }
 
     pub fn acquire_daemon() -> Option<Self> {
         #[cfg(windows)]
-        return Self::acquire_named("Local\\ProcessHandler_Daemon_SingleInstance");
+        return Self::acquire_named("Local\\Synector_Daemon_SingleInstance");
         #[cfg(not(windows))]
         Some(Self {})
     }
@@ -53,14 +53,14 @@ impl Drop for SingleInstanceGuard {
     }
 }
 
-/// Finds the existing ProcessHandler GUI window and restores / brings it to the foreground.
+/// Finds the existing Synector GUI window and restores / brings it to the foreground.
 /// Returns `true` if the window was found and focused, `false` otherwise.
 pub fn focus_existing_gui_window() -> bool {
     #[cfg(windows)]
     {
         for _ in 0..5 {
             unsafe {
-                if let Ok(hwnd) = FindWindowW(None, w!("ProcessHandler")) {
+                if let Ok(hwnd) = FindWindowW(None, w!("Synector")) {
                     if !hwnd.0.is_null() {
                         let _ = ShowWindow(hwnd, SW_RESTORE);
                         let _ = SetForegroundWindow(hwnd);
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_single_instance_named_mutex() {
-        let test_name = format!("Local\\ProcessHandler_Test_{}", std::process::id());
+        let test_name = format!("Local\\Synector_Test_{}", std::process::id());
         let guard1 = SingleInstanceGuard::acquire_named(&test_name);
         assert!(guard1.is_some(), "First acquire should succeed");
 

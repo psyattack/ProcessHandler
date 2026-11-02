@@ -1,25 +1,25 @@
 <p align="center">
-  <img src="assets/app.svg" alt="ProcessHandler Logo" width="120" height="120">
+  <img src="assets/app.svg" alt="Synector Logo" width="120" height="120">
 </p>
 
-<h1 align="center">ProcessHandler</h1>
+<h1 align="center">Synector</h1>
 
 <p align="center">Lightweight, fast, native Windows process automation service and task monitor built in 100% pure Rust.</p>
 
 <p align="center">
-  <a href="https://github.com/psyattack/ProcessHandler/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/psyattack/ProcessHandler"></a>
-  <a href="https://github.com/psyattack/ProcessHandler/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/psyattack/ProcessHandler/total"></a>
+  <a href="https://github.com/psyattack/Synector/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/psyattack/Synector"></a>
+  <a href="https://github.com/psyattack/Synector/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/psyattack/Synector/total"></a>
   <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/psyattack/ProcessHandler/releases/latest">Download</a>
+  <a href="https://github.com/psyattack/Synector/releases/latest">Download</a>
   ·
-  <a href="https://github.com/psyattack/ProcessHandler/issues/new">Issues</a>
+  <a href="https://github.com/psyattack/Synector/issues/new">Issues</a>
 </p>
 
 > [!WARNING]
-> ProcessHandler interacts directly with Windows system processes and administrative APIs. The developers are not liable for any errors, including those caused by the user, as also stated in the license.
+> Synector interacts directly with Windows system processes and administrative APIs. The developers are not liable for any errors, including those caused by the user, as also stated in the license.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/777a1893-7a49-45bf-ad52-84375a5ef808">
@@ -27,7 +27,7 @@
 
 ## Features
 
-**ProcessHandler** is a lightweight, high-performance Windows automation suite and process supervisor built in 100% pure Rust. It decouples background execution from user interaction, giving you full control over your apps, workflows, and system performance with near-zero resource utilization.
+**Synector** is a lightweight, high-performance Windows automation suite and process supervisor built in 100% pure Rust. It decouples background execution from user interaction, giving you full control over your apps, workflows, and system performance with near-zero resource utilization.
 
 * **Dual-Tier Architecture**: A silent, low-overhead system tray daemon executes rules and monitors events 24/7 in the background, while the hardware-accelerated desktop GUI opens only when you need to configure or monitor tasks.
 * **Instant & Reactive**: Built on native Windows event hooks to react instantaneously to process launches, window focus, hardware changes, and hotkeys without battery-draining polling loops.
@@ -45,10 +45,10 @@
 #### Prerequisites
 - **Windows 10 / 11** (x64)
 
-To install, download the latest release from [**GitHub Releases**](https://github.com/psyattack/ProcessHandler/releases) and extract the downloaded archive to a convenient location on your drive.
+To install, download the latest release from [**GitHub Releases**](https://github.com/psyattack/Synector/releases) and extract the downloaded archive to a convenient location on your drive.
 
 > [!IMPORTANT]
-> **Administrator Privileges**: Run ProcessHandler as administrator to control or send hotkeys and macros to elevated games and applications.
+> **Administrator Privileges**: Run Synector as administrator to control or send hotkeys and macros to elevated games and applications.
 
 > [!NOTE]
 > Automatically registers for Windows startup on first launch (configurable in Settings).
@@ -65,8 +65,8 @@ To install, download the latest release from [**GitHub Releases**](https://githu
 
 ```powershell
 # Clone the repository
-git clone https://github.com/psyattack/ProcessHandler.git
-cd ProcessHandler
+git clone https://github.com/psyattack/Synector.git
+cd Synector
 
 # Run in development mode (spawns daemon and opens GUI)
 cargo run
@@ -106,7 +106,7 @@ cargo build --release
 <summary><b>Structure</b></summary>
 
 ```
-ProcessHandler/
+Synector/
 ├── assets/                                # Application assets & branding
 │   ├── fonts/                             # Bundled variable fonts (Archivo, GeistMono, Inter)
 │   ├── app.ico                            # Win32 application icon
@@ -171,15 +171,14 @@ ProcessHandler/
 │   ├── updater.rs                         # GitHub releases auto-update & self-replacement engine
 │   └── main.rs                            # CLI dispatcher (--daemon, --gui, default)
 ├── build.rs                               # Windows resource compilation (icon, manifest)
-├── Cargo.toml                             # Rust manifest & dependencies
-└── LICENSE                                # License
+└── Cargo.toml                             # Rust manifest & dependencies
 ```
 
 </details>
 
 ## Configuration
 
-All files are located in: **`%LOCALAPPDATA%\ProcessHandler\`**
+All files are located in: **`%LOCALAPPDATA%\Synector\`**
 
 ## License
 
@@ -191,4 +190,4 @@ This project is licensed under the [MIT License](LICENSE). Third-party component
 
 ## Support & Contributing
 
-For issues, questions, or feature requests, please open an issue on [**GitHub Issues**](https://github.com/psyattack/ProcessHandler/issues).
+For issues, questions, or feature requests, please open an issue on [**GitHub Issues**](https://github.com/psyattack/Synector/issues).

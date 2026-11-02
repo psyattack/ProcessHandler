@@ -433,7 +433,7 @@ fn run_recorder_hook_loop(recorder: MacroRecorder) {
         let hinstance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)
             .unwrap_or(HMODULE(std::ptr::null_mut()));
 
-        let class_name = w!("ProcessHandler_RawInput_Sink");
+        let class_name = w!("Synector_RawInput_Sink");
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(raw_input_sink_wnd_proc),
@@ -446,7 +446,7 @@ fn run_recorder_hook_loop(recorder: MacroRecorder) {
         let sink_hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class_name,
-            w!("ProcessHandlerRawInputSink"),
+            w!("SynectorRawInputSink"),
             WINDOW_STYLE(0),
             0,
             0,

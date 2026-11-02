@@ -25,12 +25,12 @@ pub fn run_daemon() {
     let _instance_guard = match crate::single_instance::SingleInstanceGuard::acquire_daemon() {
         Some(guard) => guard,
         None => {
-            eprintln!("[DAEMON] Another instance of ProcessHandler daemon is already running.");
+            eprintln!("[DAEMON] Another instance of Synector daemon is already running.");
             return;
         }
     };
 
-    println!("[DAEMON] Initializing ProcessHandler background daemon...");
+    println!("[DAEMON] Initializing Synector background daemon...");
 
     // Pre-initialize overlay manager and install bundled fonts
     overlay_manager::init();

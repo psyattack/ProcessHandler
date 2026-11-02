@@ -129,16 +129,16 @@ impl AppConfig {
     }
     pub fn config_dir() -> PathBuf {
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let dir = PathBuf::from(local).join("ProcessHandler");
+            let dir = PathBuf::from(local).join("Synector");
             let _ = fs::create_dir_all(&dir);
             return dir;
         }
         if let Some(profile) = std::env::var_os("USERPROFILE") {
-            let dir = PathBuf::from(profile).join("AppData").join("Local").join("ProcessHandler");
+            let dir = PathBuf::from(profile).join("AppData").join("Local").join("Synector");
             let _ = fs::create_dir_all(&dir);
             return dir;
         }
-        let dir = PathBuf::from("ProcessHandler");
+        let dir = PathBuf::from("Synector");
         let _ = fs::create_dir_all(&dir);
         dir
     }

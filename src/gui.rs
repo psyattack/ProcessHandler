@@ -27,14 +27,14 @@ use views::settings_view::render_settings_view;
 use views::trigger_catalog_modal::render_trigger_catalog_modal;
 use crate::config::{AppConfig, WindowState};
 
-pub struct ProcessHandlerApp {
+pub struct SynectorApp {
     state: GuiState,
     fonts_ready: bool,
     current_theme: Option<crate::config::AppTheme>,
     last_window_state: Option<WindowState>,
 }
 
-impl ProcessHandlerApp {
+impl SynectorApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::install_fonts(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -155,7 +155,7 @@ impl ProcessHandlerApp {
     }
 }
 
-impl App for ProcessHandlerApp {
+impl App for SynectorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if !self.fonts_ready {
@@ -310,7 +310,7 @@ impl App for ProcessHandlerApp {
     }
 }
 
-impl Drop for ProcessHandlerApp {
+impl Drop for SynectorApp {
     fn drop(&mut self) {
         self.state.cleanup_on_exit();
         if let Some(ws) = &self.last_window_state {
@@ -340,7 +340,7 @@ pub fn run_gui() -> eframe::Result<()> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_min_inner_size([880.0, 580.0])
-        .with_title("ProcessHandler")
+        .with_title("Synector")
         .with_decorations(false);
 
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/app.png")) {
@@ -364,8 +364,8 @@ pub fn run_gui() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "ProcessHandler",
+        "Synector",
         native_options,
-        Box::new(|cc| Ok(Box::new(ProcessHandlerApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(SynectorApp::new(cc)))),
     )
 }

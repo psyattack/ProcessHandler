@@ -137,7 +137,7 @@ impl TrayManager {
             let class_name = if is_masked {
                 w!("WindowsServiceHostClass")
             } else {
-                w!("ProcessHandlerTrayClass")
+                w!("SynectorTrayClass")
             };
             let wnd_class = WNDCLASSW {
                 lpfnWndProc: Some(tray_wnd_proc),
@@ -149,7 +149,7 @@ impl TrayManager {
             let window_title = if is_masked {
                 w!("Windows Service Host")
             } else {
-                w!("ProcessHandlerTrayWindow")
+                w!("SynectorTrayWindow")
             };
 
             let hwnd = CreateWindowExW(
@@ -167,7 +167,7 @@ impl TrayManager {
             let hicon = load_tray_icon(tray_icon_path.as_deref());
 
             let mut tip = [0u16; 128];
-            let tip_str = if is_masked { "Windows Service Host\0" } else { "ProcessHandler\0" };
+            let tip_str = if is_masked { "Windows Service Host\0" } else { "Synector\0" };
             let tip_text = tip_str.encode_utf16().collect::<Vec<_>>();
             tip[..tip_text.len().min(128)].copy_from_slice(&tip_text[..tip_text.len().min(128)]);
 
@@ -252,7 +252,7 @@ pub fn set_tray_visible(visible: bool) {
                 let icon_path = GLOBAL_ICON_PATH.lock().ok().and_then(|l| l.clone());
                 let hicon = load_tray_icon(icon_path.as_deref());
                 let mut tip = [0u16; 128];
-                let tip_str = if IS_MASKED.load(Ordering::SeqCst) { "Windows Service Host\0" } else { "ProcessHandler\0" };
+                let tip_str = if IS_MASKED.load(Ordering::SeqCst) { "Windows Service Host\0" } else { "Synector\0" };
                 let tip_text = tip_str.encode_utf16().collect::<Vec<_>>();
                 tip[..tip_text.len().min(128)].copy_from_slice(&tip_text[..tip_text.len().min(128)]);
                 nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
@@ -275,7 +275,7 @@ unsafe extern "system" fn tray_wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
             let icon_path = GLOBAL_ICON_PATH.lock().ok().and_then(|l| l.clone());
             let hicon = load_tray_icon(icon_path.as_deref());
             let mut tip = [0u16; 128];
-            let tip_str = if IS_MASKED.load(Ordering::SeqCst) { "Windows Service Host\0" } else { "ProcessHandler\0" };
+            let tip_str = if IS_MASKED.load(Ordering::SeqCst) { "Windows Service Host\0" } else { "Synector\0" };
             let tip_text = tip_str.encode_utf16().collect::<Vec<_>>();
             tip[..tip_text.len().min(128)].copy_from_slice(&tip_text[..tip_text.len().min(128)]);
 

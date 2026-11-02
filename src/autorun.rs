@@ -1,4 +1,4 @@
-pub const APP_NAME: &str = "ProcessHandler";
+pub const APP_NAME: &str = "Synector";
 
 #[cfg(windows)]
 pub fn is_autorun_enabled(app_name: &str) -> bool {

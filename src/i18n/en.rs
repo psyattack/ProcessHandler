@@ -247,8 +247,8 @@ pub static STRINGS: Strings = Strings {
     inspector_sys_event_desc_net_connected: "Triggers when network connection is established.",
     inspector_sys_event_desc_net_disconnected: "Triggers when network connection is lost.",
 
-    inspector_schedule_app_start_desc: "Rule executes automatically when ProcessHandler starts.",
-    inspector_schedule_app_close_desc: "Rule executes automatically when ProcessHandler closes.",
+    inspector_schedule_app_start_desc: "Rule executes automatically when Synector starts.",
+    inspector_schedule_app_close_desc: "Rule executes automatically when Synector closes.",
     inspector_field_startup_delay: "STARTUP DELAY",
     inspector_field_idle_duration: "IDLE DURATION",
     inspector_schedule_interval: "Periodic Interval",
@@ -286,8 +286,8 @@ pub static STRINGS: Strings = Strings {
     ],
     inspector_cal_day_names: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"],
     inspector_execution_time: "EXECUTION TIME",
-    inspector_badge_app_startup: "Fires once automatically whenever ProcessHandler starts",
-    inspector_badge_app_shutdown: "Fires when ProcessHandler shuts down",
+    inspector_badge_app_startup: "Fires once automatically whenever Synector starts",
+    inspector_badge_app_shutdown: "Fires when Synector shuts down",
 
     // Inspector Pre-conditions (Section 03)
     inspector_eyebrow_conditions: "PRE-CONDITIONS",
@@ -403,7 +403,7 @@ pub static STRINGS: Strings = Strings {
     catalog_trigger_webhook_title: "HTTP Webhook",
     catalog_trigger_webhook_desc: "Local network endpoint trigger",
     catalog_trigger_lifecycle_title: "App Lifecycle",
-    catalog_trigger_lifecycle_desc: "ProcessHandler startup or shutdown",
+    catalog_trigger_lifecycle_desc: "Synector startup or shutdown",
     catalog_trigger_lock_title: "Workstation Lock",
     catalog_trigger_lock_desc: "Workstation locked or unlocked",
     catalog_trigger_sleep_title: "Sleep & Wake",
@@ -720,7 +720,7 @@ pub static STRINGS: Strings = Strings {
     // Macro Studio
     macro_studio_title: "MACRO STUDIO",
     macro_studio_close_tip: "Close (Esc)",
-    macro_studio_minimize_tip: "Minimize ProcessHandler (Record: F9, Test: F10)",
+    macro_studio_minimize_tip: "Minimize Synector (Record: F9, Test: F10)",
     macro_studio_btn_test_run: "▶ TEST RUN (F10)",
     macro_studio_btn_stop_test: "⏹ STOP TEST (F10)",
     macro_studio_btn_test_run_tip: "Execute macro sequence now on a safe background thread (F10)",
@@ -970,7 +970,7 @@ pub static STRINGS: Strings = Strings {
     overlay_studio_telemetry_kind: "INDICATOR TYPE",
     overlay_studio_telemetry_kind_battery: "Battery & Power",
     overlay_studio_telemetry_kind_audio: "Audio & Microphone",
-    overlay_studio_telemetry_kind_engine: "ProcessHandler Engine",
+    overlay_studio_telemetry_kind_engine: "Synector Engine",
     overlay_studio_telemetry_style: "DISPLAY STYLE",
     overlay_studio_telemetry_style_badge: "Badge",
     overlay_studio_telemetry_style_compact: "Compact",

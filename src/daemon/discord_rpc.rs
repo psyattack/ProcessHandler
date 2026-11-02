@@ -1,4 +1,4 @@
-//! Discord Rich Presence client for ProcessHandler
+//! Discord Rich Presence client for Synector
 //! Communicates via Windows Named Pipe (\\.\pipe\discord-ipc-0..9)
 //! Completely asynchronous, lightweight, zero external Discord dependencies.
 

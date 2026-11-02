@@ -454,7 +454,7 @@ pub fn execute_click_action(action: &OverlayClickAction) {
                     let len = GetWindowTextW(hwnd, &mut title_buf);
                     if len > 0 {
                         let title = String::from_utf16_lossy(&title_buf[..len as usize]);
-                        if title.contains("ProcessHandler Overlay") {
+                        if title.contains("Synector Overlay") {
                             ctx.hwnd = Some(hwnd);
                             return windows::core::BOOL(0);
                         }
@@ -1474,7 +1474,7 @@ mod tests {
         // ASCII short
         assert_eq!(safe_truncate("Hello", 10), "Hello");
         // ASCII long
-        assert_eq!(safe_truncate("Hello, World! ProcessHandler", 12), "Hello, World...");
+        assert_eq!(safe_truncate("Hello, World! Synector", 12), "Hello, World...");
         // Cyrillic (2 bytes per char in UTF-8): must never panic on odd byte index
         let ru_str = "Тест - Тест (Официальный клип)";
         let truncated = safe_truncate(ru_str, 15);

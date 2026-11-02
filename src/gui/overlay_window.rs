@@ -174,7 +174,7 @@ impl OverlayWindowApp {
                 let len = windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(hwnd, &mut title_buf);
                 if len > 0 {
                     let title = String::from_utf16_lossy(&title_buf[..len as usize]);
-                    if title.contains("ProcessHandler Overlay") {
+                    if title.contains("Synector Overlay") {
                         ctx.hwnd = Some(hwnd);
                         return BOOL(0);
                     }
@@ -415,7 +415,7 @@ pub fn run_overlay_window(
     let abs_y = mon_y + rel_y;
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("ProcessHandler Overlay")
+        .with_title("Synector Overlay")
         .with_decorations(false)
         .with_transparent(true)
         .with_always_on_top()
@@ -436,7 +436,7 @@ pub fn run_overlay_window(
     };
 
     eframe::run_native(
-        "ProcessHandler_Overlay",
+        "Synector_Overlay",
         native_options,
         Box::new(move |cc| {
             Ok(Box::new(OverlayWindowApp::new(

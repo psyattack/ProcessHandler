@@ -1,12 +1,12 @@
 [package]
-name = "ProcessHandler"
+name = "Synector"
 version = "2.6.0"
 edition = "2021"
 authors = ["psyattack"]
-description = "ProcessHandler"
+description = "Synector"
 
 [[bin]]
-name = "ProcessHandler"
+name = "Synector"
 path = "src/main.rs"
 
 [dependencies]

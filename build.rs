@@ -3,12 +3,12 @@ fn main() {
     {
         let mut res = winres::WindowsResource::new();
         res.set_icon("assets/app.ico");
-        res.set("ProductName", "ProcessHandler");
-        res.set("FileDescription", "ProcessHandler");
+        res.set("ProductName", "Synector");
+        res.set("FileDescription", "Synector");
         res.set("CompanyName", "psyattack");
         res.set("LegalCopyright", "psyattack");
-        res.set("OriginalFilename", "ProcessHandler.exe");
-        res.set("InternalName", "ProcessHandler");
+        res.set("OriginalFilename", "Synector.exe");
+        res.set("InternalName", "Synector");
         res.set("FileVersion", "2.6.0.0");
         res.set("ProductVersion", "2.6.0.0");
         res.set_version_info(winres::VersionInfo::FILEVERSION, 0x0002000600000000);

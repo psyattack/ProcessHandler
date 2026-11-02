@@ -583,11 +583,11 @@ pub fn format_telemetry_text(kind: TelemetryKind, style: TelemetryStyle, target_
                     format!("{} ONLINE | {} RUN", pulse, engine.active_rules_count)
                 }
                 TelemetryStyle::Badge => {
-                    format!("{} PH ENGINE: ONLINE ({} active) | {}", pulse, engine.active_rules_count, engine.quota_status)
+                    format!("{} SYNECTOR: ONLINE ({} active) | {}", pulse, engine.active_rules_count, engine.quota_status)
                 }
                 TelemetryStyle::Detailed => {
                     let status = if engine.is_daemon_alive { "Online" } else { "Offline" };
-                    format!("ProcessHandler {}: Pulse 1s | Rules: {} | Macros: {} | {}", status, engine.active_rules_count, engine.active_macros_count, engine.quota_status)
+                    format!("Synector {}: Pulse 1s | Rules: {} | Macros: {} | {}", status, engine.active_rules_count, engine.active_macros_count, engine.quota_status)
                 }
             }
         }
@@ -955,7 +955,7 @@ pub fn get_system_media_status() -> SystemMediaStatus {
         let status = context.found.unwrap_or_else(|| SystemMediaStatus {
             is_playing: false,
             title: "No Track Playing".to_string(),
-            artist: "ProcessHandler Media".to_string(),
+            artist: "Synector Media".to_string(),
             player_name: "Media".to_string(),
             progress_pct: 0.0,
         });
@@ -970,7 +970,7 @@ pub fn get_system_media_status() -> SystemMediaStatus {
         SystemMediaStatus {
             is_playing: false,
             title: "No Track Playing".to_string(),
-            artist: "ProcessHandler Media".to_string(),
+            artist: "Synector Media".to_string(),
             player_name: "Media".to_string(),
             progress_pct: 0.0,
         }
