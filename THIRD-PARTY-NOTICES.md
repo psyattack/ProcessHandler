@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-This file contains the licenses and copyright notices for third-party software components, libraries, and assets used by **ProcessHandler**.
+This file contains the licenses and copyright notices for third-party software components, libraries, and assets used by **Synector**.
 
-ProcessHandler is grateful to the open-source community and the authors of the following projects.
+Synector is grateful to the open-source community and the authors of the following projects.
 
 ---
 

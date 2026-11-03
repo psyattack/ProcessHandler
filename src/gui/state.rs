@@ -539,7 +539,7 @@ impl GuiState {
         self.last_condition_catalog = Some(catalog);
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn open_condition_catalog(&mut self) {
         self.open_condition_catalog_with_target(ConditionCatalogTarget::RulePrecondition);
     }
@@ -611,11 +611,6 @@ impl GuiState {
             }
         }
         self.close_condition_catalog();
-    }
-
-    #[allow(dead_code)]
-    pub fn add_condition_from_catalog(&mut self, condition: crate::models::RuleCondition) {
-        self.apply_condition_from_catalog(condition);
     }
 
     pub fn add_action_from_catalog(

@@ -506,13 +506,11 @@ pub fn window_edges(ctx: &egui::Context) {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum Glyph {
     Close,
     Minimize,
     Clone,
     Expand,
-    More,
     Reset,
     Play,
     Stop,
@@ -577,12 +575,6 @@ pub fn glyph_button_custom(ui: &mut Ui, glyph: Glyph, size: f32, active: bool, t
             p.line_segment([m + vec2(-s, s), m + vec2(-s + 3.2, s)], Stroke::new(1.3, c));
             p.line_segment([m + vec2(0.5, -0.5), m + vec2(s - 0.5, -s + 0.5)], Stroke::new(1.3, c));
             p.line_segment([m + vec2(-0.5, 0.5), m + vec2(-s + 0.5, s - 0.5)], Stroke::new(1.3, c));
-        }
-        Glyph::More => {
-            let r = 1.35;
-            p.circle_filled(m + vec2(0.0, -4.5), r, c);
-            p.circle_filled(m, r, c);
-            p.circle_filled(m + vec2(0.0, 4.5), r, c);
         }
         Glyph::Reset => {
             let font_size = (size * 0.48).clamp(12.0, 15.0);

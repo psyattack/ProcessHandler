@@ -617,12 +617,14 @@ fn render_track_row(
                             state.edit_rule(rule.clone());
                         }
 
-                        // Run / Stop (Renamed to RUN)
+                        // Run / Stop
                         let is_stoppable = if is_manual { is_running } else { is_test_running };
                         let (run_glyph, run_tip) = if is_stoppable {
                             (Glyph::Stop, loc.rules_btn_stop)
+                        } else if is_manual {
+                            (Glyph::Play, loc.rules_btn_run_manual)
                         } else {
-                            (Glyph::Play, "RUN")
+                            (Glyph::Play, loc.rules_btn_test_run_tip)
                         };
                         if widgets::glyph_button_custom(ui, run_glyph, 26.0, is_stoppable, run_tip).clicked() {
                             if is_stoppable {
@@ -1020,7 +1022,7 @@ fn format_action_brief(action: &Action, loc: &crate::i18n::Strings) -> String {
             format!("{} {}", loc.summary_action_launch, fname)
         }
         Action::KillProcess { process_name, .. } => {
-            format!("KILL {}", process_name)
+            format!("{} {}", loc.summary_action_kill, process_name)
         }
         Action::AudioControl { target, action_type, volume_level, process_name, left_volume, right_volume } => {
             let target_str = match target {

@@ -251,46 +251,6 @@ impl RuleCondition {
         }
     }
 
-    pub fn default_window() -> Self {
-        Self::WindowFocused {
-            process_name: String::new(),
-            match_mode: ProcessMatchMode::Exact,
-            must_be_focused: true,
-        }
-    }
-
-    pub fn default_time() -> Self {
-        Self::TimeRange {
-            start_time: "09:00".to_string(),
-            end_time: "18:00".to_string(),
-            days_of_week: vec![1, 2, 3, 4, 5],
-        }
-    }
-
-    pub fn default_event() -> Self {
-        Self::Event {
-            event_type: SystemEventType::SessionLock,
-            idle_duration_sec: 300,
-        }
-    }
-
-    pub fn default_resource() -> Self {
-        Self::ResourceThreshold {
-            process_name: String::new(),
-            cpu_percent: Some(80.0),
-            ram_mb: None,
-            duration_sec: 5,
-        }
-    }
-
-    pub fn default_file() -> Self {
-        Self::FileWatcher {
-            path: String::new(),
-            filter_extension: None,
-            must_exist: true,
-        }
-    }
-
     pub fn icon_glyph(&self) -> &'static str {
         match self {
             Self::ProcessRunning { .. } => egui_phosphor::regular::CPU,

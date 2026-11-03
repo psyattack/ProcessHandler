@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.7.0](https://github.com/psyattack/Synector/compare/v2.6.0...v2.7.0) - 2026-11-03
+
+### Added
+- Rule Tagging and Filtering: Organize automation rules with custom colored tags and icons. Tag filter dropdowns allow quickly viewing rules by category, with tag management integrated directly into the Inspector.
+- Drag-and-Drop Card Reordering: Reorder automation rules visually with precision drag handles; custom order is automatically saved and synchronized with the background engine.
+- Multi-Mode Rule Sorting: Sort automations by name (ascending or descending), trigger type, action count, or active/paused status.
+- Quick Card Action Buttons: Execute, stop, edit, clone, share, or delete rules directly from individual rule cards with dedicated action buttons.
+- Kernel ETW Process Monitoring: Subscribes to Windows Kernel Event Tracing (ETW) for instantaneous, zero-polling detection of process launches and terminations when running elevated.
+- Task Scheduler Autostart: Startup registration now uses Windows Task Scheduler with highest privileges, launching Synector automatically on logon without UAC prompts.
+- Smooth Overlay Fade Transitions: On-screen HUD overlays now transition smoothly into and out of view with smootherstep fade animations.
+- Non-Activating HUD Controls: Overlay widgets now process clicks and adjustments without stealing focus from active games or foreground windows.
+- Condition Editing in Branches: Swap and configure condition checks inside If/Else action branches using the Condition Catalog modal.
+- Modern System Tray Styling: Tray context menu is now styled dynamically to match the active visual theme (Dark, Light, or Chocolate) with custom rendered icons.
+
+### Changed
+- Project Rebranding: Renamed the project from ProcessHandler to Synector, updating binaries, named pipes, single-instance mutexes, and documentation.
+- Consolidated Interactive Overlay Controls: Unified buttons, toggle switches, and sliders into a streamlined Interactive Control model in Overlay Studio.
+- Smart Log Deduplication: Central engine now aggregates consecutive duplicate logs into single entries with execution counters to eliminate log flooding.
+- Idle Power Efficiency: Enhanced background engine to remain dormant when inactive, waking instantly on hotkeys or system events with near-zero CPU usage.
+- Per-Monitor V2 DPI Manifest: Embedded application manifest for native high-DPI multi-monitor awareness and seamless scaling on Windows 10 and 11.
+
+### Fixed
+- Fixed interval schedule cooldown checking to verify elapsed intervals before evaluating rule pre-conditions.
+
+<details><summary>Detailed Changelog</summary>
+
+### Added
+- **rules:** add rule tagging, custom sorting, drag-and-drop reordering, and card actions (by @psyattack in 65091a6)
+- **rules:** enhance condition editing, pipeline visualization, and log deduplication (by @psyattack in 9bf82cc)
+- **overlay:** add smooth fade transitions, non-activating clicks, and streamline element models (by @psyattack in 26fcb72)
+- **daemon:** add theme-aware popup styling and custom icons to tray menu (by @psyattack in 6455c7f)
+- **daemon:** implement hybrid kernel ETW, task scheduler autostart, and idle dormancy (by @psyattack in 2c3a7fa)
+
+### Changed
+- rename project from ProcessHandler to Synector (by @psyattack in e557382)
+- **readme:** README and THIRD-PARTY-NOTICES updated (by @psyattack in c9ab8bc)
+
+</details>
+
+
 ## [2.6.0](https://github.com/psyattack/ProcessHandler/compare/v2.5.0...v2.6.0) - 2026-10-30
 
 ### Added

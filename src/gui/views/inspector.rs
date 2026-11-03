@@ -482,7 +482,7 @@ fn render_rule_editor(ui: &mut Ui, state: &mut GuiState, rule: &mut Rule, t: &To
                                     rule.max_executions = if has_quota { Some(10) } else { None };
                                 }
                                 if let Some(limit) = &mut rule.max_executions {
-                                    if widgets::glyph_button(ui, Glyph::Reset, "Reset execution counter").clicked() {
+                                    if widgets::glyph_button(ui, Glyph::Reset, loc.inspector_btn_reset).clicked() {
                                         rule.execution_count = 0;
                                     }
                                     ui.add(egui::DragValue::new(limit).range(1..=100000).suffix(" runs"));
@@ -5365,29 +5365,29 @@ fn render_inspector_tag_section(
                 });
 
                 ui.horizontal(|ui| {
-                    let icons: [(&str, &str); 13] = [
-                        ("", loc.inspector_tags_no_icon),
-                        (egui_phosphor::regular::TAG, "Tag"),
-                        (egui_phosphor::regular::STAR, "Star"),
-                        (egui_phosphor::regular::HEART, "Heart"),
-                        (egui_phosphor::regular::GAME_CONTROLLER, "Game"),
-                        (egui_phosphor::regular::DESKTOP, "Desktop"),
-                        (egui_phosphor::regular::LIGHTNING, "Zap"),
-                        (egui_phosphor::regular::FIRE, "Fire"),
-                        (egui_phosphor::regular::BELL, "Bell"),
-                        (egui_phosphor::regular::SHIELD, "Shield"),
-                        (egui_phosphor::regular::CLOCK, "Clock"),
-                        (egui_phosphor::regular::FOLDER, "Folder"),
-                        (egui_phosphor::regular::GLOBE, "Web"),
+                    let icons: [&str; 13] = [
+                        "",
+                        egui_phosphor::regular::TAG,
+                        egui_phosphor::regular::STAR,
+                        egui_phosphor::regular::HEART,
+                        egui_phosphor::regular::GAME_CONTROLLER,
+                        egui_phosphor::regular::DESKTOP,
+                        egui_phosphor::regular::LIGHTNING,
+                        egui_phosphor::regular::FIRE,
+                        egui_phosphor::regular::BELL,
+                        egui_phosphor::regular::SHIELD,
+                        egui_phosphor::regular::CLOCK,
+                        egui_phosphor::regular::FOLDER,
+                        egui_phosphor::regular::GLOBE,
                     ];
 
-                    for (ico, tip) in icons {
+                    for ico in icons {
                         let is_sel = if ico.is_empty() {
                             state.new_tag_icon.is_none()
                         } else {
                             state.new_tag_icon.as_deref() == Some(ico)
                         };
-                        let (btn_rect, btn_resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                        let (btn_rect, mut btn_resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
                         let hovered = btn_resp.hovered();
                         if is_sel {
                             ui.painter().rect_filled(btn_rect, CornerRadius::same(3), t.sunken);
@@ -5403,6 +5403,7 @@ fn render_inspector_tag_section(
                                 egui::FontId::new(11.0, theme::phosphor()),
                                 if is_sel { t.ink_strong } else { t.muted },
                             );
+                            btn_resp = btn_resp.on_hover_text(loc.inspector_tags_no_icon);
                         } else {
                             ui.painter().text(
                                 btn_rect.center(),
@@ -5412,7 +5413,7 @@ fn render_inspector_tag_section(
                                 if is_sel { t.ink_strong } else { t.muted },
                             );
                         }
-                        if btn_resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        if btn_resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             state.new_tag_icon = if ico.is_empty() { None } else { Some(ico.into()) };
                         }
                     }

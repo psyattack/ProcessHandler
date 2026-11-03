@@ -361,6 +361,7 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "Маскировка (PE Masking)", "Маскировка фонового демона в Диспетчере задач под системную службу (RuntimeBroker.exe).", t);
         doc_table_row(ui, "Test Rule / Step", "Проверка всей цепочки или отдельного шага прямо в редакторе без ожидания триггера.", t);
         doc_table_row(ui, "Backup & Sharing", "Экспорт и импорт правил в формате JSON для резервных копий и переноса настроек.", t);
+        doc_table_row(ui, "Теги и Сортировка", "Цветные теги с иконками, фильтрация списка, автоматическая сортировка и ручное перетаскивание карточек (Drag & Drop).", t);
 
         ui.add_space(2.0);
         doc_callout(
@@ -395,6 +396,7 @@ fn render_architecture_guide(ui: &mut Ui, t: &Tokens, lang: Language) {
         doc_table_row(ui, "PE Masking", "Masks the background daemon process name in Task Manager as a system service (RuntimeBroker.exe).", t);
         doc_table_row(ui, "Test Rule / Step", "Test the full pipeline or single actions directly in the studio without waiting for real triggers.", t);
         doc_table_row(ui, "Backup & Sharing", "Export and import automations as JSON files for easy migration and sharing.", t);
+        doc_table_row(ui, "Tags & Reordering", "Custom colored tags with icons, tag filtering, multi-mode sorting, and precision drag-and-drop rule card reordering.", t);
 
         ui.add_space(2.0);
         doc_callout(
