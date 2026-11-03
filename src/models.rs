@@ -816,6 +816,51 @@ pub enum SystemPowerType {
     Shutdown,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+pub struct RuleTag {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+impl RuleTag {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            color: None,
+            icon: None,
+        }
+    }
+
+    pub fn with_color(mut self, color: impl Into<String>) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+
+    pub fn with_icon(mut self, icon: impl Into<String>) -> Self {
+        self.icon = Some(icon.into());
+        self
+    }
+
+    pub fn parse_color(&self, fallback: egui::Color32) -> egui::Color32 {
+        if let Some(c) = &self.color {
+            let clean = c.trim().trim_start_matches('#');
+            if clean.len() == 6 {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&clean[0..2], 16),
+                    u8::from_str_radix(&clean[2..4], 16),
+                    u8::from_str_radix(&clean[4..6], 16),
+                ) {
+                    return egui::Color32::from_rgb(r, g, b);
+                }
+            }
+        }
+        fallback
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Rule {
     pub id: String,
@@ -846,6 +891,8 @@ pub struct Rule {
     pub auto_process_icon: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_executed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<RuleTag>,
 }
 
 impl Default for Rule {
@@ -866,6 +913,7 @@ impl Default for Rule {
             custom_icon_path: None,
             auto_process_icon: false,
             last_executed_at: None,
+            tags: Vec::new(),
         }
     }
 }
@@ -2014,6 +2062,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_rule_tag_serde_and_color_parsing() {
+        let tag = RuleTag::new("Productivity")
+            .with_color("#10B981")
+            .with_icon("⚡");
+
+        let json = serde_json::to_string(&tag).unwrap();
+        let decoded: RuleTag = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.name, "Productivity");
+        assert_eq!(decoded.color.as_deref(), Some("#10B981"));
+        assert_eq!(decoded.icon.as_deref(), Some("⚡"));
+
+        let color = decoded.parse_color(egui::Color32::WHITE);
+        assert_eq!(color, egui::Color32::from_rgb(0x10, 0xB9, 0x81));
+
+        let invalid_color_tag = RuleTag::new("Bad").with_color("not_a_color");
+        let fallback = egui::Color32::from_rgb(1, 2, 3);
+        assert_eq!(invalid_color_tag.parse_color(fallback), fallback);
+    }
+
+    #[test]
     fn test_generate_clone_name() {
         assert_eq!(generate_clone_name("Discord Mute"), "Discord Mute (Copy)");
         assert_eq!(generate_clone_name("Discord Mute (Copy)"), "Discord Mute (Copy 2)");
@@ -2046,12 +2114,14 @@ mod tests {
             auto_process_icon: true,
             conditions: vec![],
             last_executed_at: None,
+            tags: vec![RuleTag::new("Gaming").with_color("#3B82F6").with_icon("🎮")],
         };
 
         let cloned = original.clone_with_new_id();
         assert_ne!(cloned.id, original.id);
         assert_eq!(cloned.name, "Game Optimizer (Copy)");
         assert_eq!(cloned.description, "Some memo");
+        assert_eq!(cloned.tags, original.tags);
         assert!(!cloned.is_enabled); // Paused on clone
         assert_eq!(cloned.cooldown_seconds, 1.5);
         assert_eq!(cloned.max_executions, Some(10));
@@ -2103,6 +2173,7 @@ mod tests {
             custom_icon_path: None,
             auto_process_icon: false,
             conditions: vec![],
+            tags: vec![],
             last_executed_at: None,
         };
 
@@ -2276,6 +2347,7 @@ mod tests {
                     },
                 ),
             ],
+            tags: vec![],
             last_executed_at: None,
         };
 

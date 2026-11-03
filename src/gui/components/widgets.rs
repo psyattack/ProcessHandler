@@ -506,6 +506,7 @@ pub fn window_edges(ctx: &egui::Context) {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Glyph {
     Close,
     Minimize,
@@ -514,6 +515,10 @@ pub enum Glyph {
     More,
     Reset,
     Play,
+    Stop,
+    Edit,
+    Share,
+    Trash,
     Question,
 }
 
@@ -599,6 +604,46 @@ pub fn glyph_button_custom(ui: &mut Ui, glyph: Glyph, size: f32, active: bool, t
                 c,
             );
         }
+        Glyph::Stop => {
+            let font_size = (size * 0.48).clamp(12.0, 15.0);
+            p.text(
+                m,
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::STOP,
+                egui::FontId::new(font_size, theme::phosphor()),
+                c,
+            );
+        }
+        Glyph::Edit => {
+            let font_size = (size * 0.48).clamp(12.0, 15.0);
+            p.text(
+                m,
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::PENCIL_SIMPLE,
+                egui::FontId::new(font_size, theme::phosphor()),
+                c,
+            );
+        }
+        Glyph::Share => {
+            let font_size = (size * 0.48).clamp(12.0, 15.0);
+            p.text(
+                m,
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::SHARE_NETWORK,
+                egui::FontId::new(font_size, theme::phosphor()),
+                c,
+            );
+        }
+        Glyph::Trash => {
+            let font_size = (size * 0.48).clamp(12.0, 15.0);
+            p.text(
+                m,
+                egui::Align2::CENTER_CENTER,
+                egui_phosphor::regular::TRASH,
+                egui::FontId::new(font_size, theme::phosphor()),
+                c,
+            );
+        }
         Glyph::Question => {
             let font_size = (size * 0.48).clamp(12.0, 15.0);
             p.text(
@@ -621,10 +666,21 @@ pub fn glyph_button_custom(ui: &mut Ui, glyph: Glyph, size: f32, active: bool, t
 
 /// A precision drag handle with 6 studio dots; senses click and drag.
 pub fn drag_handle(ui: &mut Ui, tip: &str) -> Response {
+    drag_handle_custom(ui, theme::CONTROL_H, tip)
+}
+
+/// A precision drag handle with customizable height and 6 studio dots; senses click and drag.
+pub fn drag_handle_custom(ui: &mut Ui, height: f32, tip: &str) -> Response {
+    drag_handle_custom_interactive(ui, height, tip, true)
+}
+
+/// A precision drag handle with customizable height, interactive toggle, and 6 studio dots.
+pub fn drag_handle_custom_interactive(ui: &mut Ui, height: f32, tip: &str, interactive: bool) -> Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(18.0, theme::CONTROL_H), Sense::click_and_drag());
-    let hovered = resp.hovered();
-    let dragged = resp.dragged();
+    let sense = if interactive { Sense::click_and_drag() } else { Sense::hover() };
+    let (rect, resp) = ui.allocate_exact_size(vec2(16.0, height), sense);
+    let hovered = resp.hovered() && interactive;
+    let dragged = resp.dragged() && interactive;
     let p = ui.painter();
     if hovered || dragged {
         p.rect_filled(rect, CornerRadius::ZERO, t.sunken);
@@ -633,8 +689,10 @@ pub fn drag_handle(ui: &mut Ui, tip: &str) -> Response {
         t.accent_ink
     } else if hovered {
         t.ink
-    } else {
+    } else if interactive {
         t.muted.gamma_multiply(0.6)
+    } else {
+        t.faint.gamma_multiply(0.4)
     };
     let m = rect.center();
     let dx = 2.8;
@@ -645,7 +703,13 @@ pub fn drag_handle(ui: &mut Ui, tip: &str) -> Response {
         }
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
-    let cursor = if dragged { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab };
+    let cursor = if !interactive {
+        egui::CursorIcon::NotAllowed
+    } else if dragged {
+        egui::CursorIcon::Grabbing
+    } else {
+        egui::CursorIcon::Grab
+    };
     let resp = if !tip.trim().is_empty() {
         resp.on_hover_text(tip)
     } else {

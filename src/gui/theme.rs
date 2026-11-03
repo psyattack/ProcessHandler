@@ -209,8 +209,13 @@ pub fn install_fonts(ctx: &egui::Context) {
     egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
     fonts.families.insert(phosphor(), vec!["phosphor".into()]);
 
-    let fallback: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    let mono_fallback: Vec<String> = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+    let mut fallback: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    fallback.retain(|f| f != "phosphor");
+    fallback.insert(0, "phosphor".into());
+
+    let mut mono_fallback: Vec<String> = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+    mono_fallback.retain(|f| f != "phosphor");
+    mono_fallback.insert(0, "phosphor".into());
 
     let faces: [Face<'_>; 9] = [
         ("Inter", INTER, &[(*b"wght", 400.0), (*b"opsz", 14.0)], FontFamily::Proportional),

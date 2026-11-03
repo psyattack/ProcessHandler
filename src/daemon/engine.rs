@@ -1747,6 +1747,7 @@ impl DaemonEngine {
                     return IpcResponse::Error("Rule not found".into());
                 };
                 let _ = self.emulate_rule_trigger(&target_rule).await;
+                self.drain_action_events();
                 IpcResponse::Ok
             }
 

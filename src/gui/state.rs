@@ -174,6 +174,17 @@ pub enum SettingsTab {
     Updates,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RuleSortMode {
+    #[default]
+    Default,
+    NameAsc,
+    NameDesc,
+    TriggerType,
+    ActionCount,
+    Status,
+}
+
 pub struct GuiState {
     pub active_view: ActiveView,
     pub search_query: String,
@@ -224,7 +235,13 @@ pub struct GuiState {
     pub redo_stack: Vec<Rule>,
     pub settings_tab: SettingsTab,
     pub active_test_overlays: std::collections::HashSet<String>,
-    pub active_test_runs: std::collections::HashSet<String>,
+    pub active_test_runs: std::collections::HashMap<String, Instant>,
+    pub rule_sort_mode: RuleSortMode,
+    pub selected_tag_filter: Option<String>,
+    pub tag_picker_open: bool,
+    pub new_tag_name: String,
+    pub new_tag_color: Option<String>,
+    pub new_tag_icon: Option<String>,
     update_event_tx: std::sync::mpsc::Sender<crate::updater::UpdateEvent>,
     update_event_rx: std::sync::mpsc::Receiver<crate::updater::UpdateEvent>,
 }
@@ -283,10 +300,38 @@ impl GuiState {
             redo_stack: Vec::new(),
             settings_tab: SettingsTab::General,
             active_test_overlays: std::collections::HashSet::new(),
-            active_test_runs: std::collections::HashSet::new(),
+            active_test_runs: std::collections::HashMap::new(),
+            rule_sort_mode: RuleSortMode::Default,
+            selected_tag_filter: None,
+            tag_picker_open: false,
+            new_tag_name: String::new(),
+            new_tag_color: Some("#3B82F6".into()),
+            new_tag_icon: None,
             update_event_tx,
             update_event_rx,
         }
+    }
+
+    pub fn all_distinct_tags(&self) -> Vec<crate::models::RuleTag> {
+        let mut map: std::collections::BTreeMap<String, crate::models::RuleTag> = std::collections::BTreeMap::new();
+        if let Some(ds) = &self.daemon_state {
+            for r in &ds.config.rules {
+                for t in &r.tags {
+                    map.entry(t.name.clone()).or_insert_with(|| t.clone());
+                }
+            }
+        }
+        if let Some(r) = &self.editing_rule {
+            for t in &r.tags {
+                map.entry(t.name.clone()).or_insert_with(|| t.clone());
+            }
+        }
+        if let Some(r) = &self.builder_draft {
+            for t in &r.tags {
+                map.entry(t.name.clone()).or_insert_with(|| t.clone());
+            }
+        }
+        map.into_values().collect()
     }
 
     pub fn loc(&self) -> &'static crate::i18n::Strings {
@@ -661,8 +706,24 @@ impl GuiState {
 
         match IpcClient::call(&IpcRequest::GetState) {
             Ok(IpcResponse::State(state)) => {
-                self.active_test_runs.retain(|id| state.active_test_rule_ids.contains(id));
-                self.active_test_runs.extend(state.active_test_rule_ids.iter().cloned());
+                let rules_action_counts: std::collections::HashMap<String, usize> = state
+                    .config
+                    .rules
+                    .iter()
+                    .map(|r| (r.id.clone(), r.actions.len()))
+                    .collect();
+
+                self.active_test_runs.retain(|id, started_at| {
+                    if state.active_test_rule_ids.contains(id) {
+                        return true;
+                    }
+                    let num_actions = rules_action_counts.get(id).copied().unwrap_or(1);
+                    let min_dur = std::time::Duration::from_millis(((num_actions * 400).max(900) as u64).min(4000));
+                    started_at.elapsed() < min_dur || state.active_rule_executions.contains_key(id)
+                });
+                for id in &state.active_test_rule_ids {
+                    self.active_test_runs.entry(id.clone()).or_insert_with(Instant::now);
+                }
                 self.daemon_state = Some(state);
                 self.is_daemon_connected = true;
             }
@@ -776,6 +837,7 @@ impl GuiState {
             auto_process_icon: false,
             conditions: Vec::new(),
             last_executed_at: None,
+            tags: Vec::new(),
         }
     }
 
@@ -825,6 +887,10 @@ impl GuiState {
         self.is_creating_new_rule = true;
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.tag_picker_open = false;
+        self.new_tag_name.clear();
+        self.new_tag_color = Some("#3B82F6".into());
+        self.new_tag_icon = None;
         let rule = self.builder_draft.take().unwrap_or_else(|| self.initial_new_rule());
         self.editing_rule = Some(rule);
     }
@@ -874,18 +940,28 @@ impl GuiState {
     }
 
     pub fn get_rule_execution_state(&self, rule: &Rule) -> Option<crate::ipc::ActiveRuleExecutionState> {
-        if self.active_test_runs.contains(&rule.id) {
-            let daemon_exec = self.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied();
-            return Some(daemon_exec.unwrap_or(crate::ipc::ActiveRuleExecutionState {
-                active_count: 1,
-                current_step: 0,
-                total_steps: rule.actions.len().max(1),
-                is_exit: false,
-            }));
+        if let Some(daemon_exec) = self.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied() {
+            return Some(daemon_exec);
         }
 
-        self.daemon_state.as_ref().and_then(|s| s.active_rule_executions.get(&rule.id)).copied().or_else(|| {
-            let has_active_overlay = rule.actions.iter().enumerate().find_map(|(idx, a)| match a {
+        if let Some(started_at) = self.active_test_runs.get(&rule.id) {
+            let total = rule.actions.len().max(1);
+            let elapsed_ms = started_at.elapsed().as_millis() as u64;
+            let step_dur = 400;
+            let current_step = if rule.actions.is_empty() {
+                0
+            } else {
+                ((elapsed_ms / step_dur) as usize).min(rule.actions.len() - 1)
+            };
+            return Some(crate::ipc::ActiveRuleExecutionState {
+                active_count: 1,
+                current_step,
+                total_steps: total,
+                is_exit: false,
+            });
+        }
+
+        let has_active_overlay = rule.actions.iter().enumerate().find_map(|(idx, a)| match a {
                 crate::models::Action::Overlay { overlay_id, custom_overlay, .. } => {
                     let ov_id = custom_overlay.as_ref().map(|o| o.id.as_str()).unwrap_or(overlay_id.as_str());
                     if self.daemon_state.as_ref().is_some_and(|d| d.active_overlay_ids.contains(ov_id))
@@ -898,12 +974,11 @@ impl GuiState {
                 }
                 _ => None,
             });
-            has_active_overlay.map(|step_idx| crate::ipc::ActiveRuleExecutionState {
-                active_count: 1,
-                current_step: step_idx,
-                total_steps: rule.actions.len(),
-                is_exit: false,
-            })
+        has_active_overlay.map(|step_idx| crate::ipc::ActiveRuleExecutionState {
+            active_count: 1,
+            current_step: step_idx,
+            total_steps: rule.actions.len(),
+            is_exit: false,
         })
     }
 
@@ -1096,6 +1171,10 @@ impl GuiState {
         }
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.tag_picker_open = false;
+        self.new_tag_name.clear();
+        self.new_tag_color = Some("#3B82F6".into());
+        self.new_tag_icon = None;
         self.selected_rule_id = Some(rule.id.clone());
         self.editing_rule = Some(rule);
         self.is_creating_new_rule = false;
@@ -1144,6 +1223,7 @@ impl GuiState {
         let _ = IpcClient::call(&IpcRequest::SaveRule(rule));
         self.editing_rule = None;
         self.is_creating_new_rule = false;
+        self.selected_rule_id = None;
         self.builder_draft = None;
         self.set_toast(self.loc().toast_rule_saved);
         self.sync_with_daemon();
@@ -1169,17 +1249,42 @@ impl GuiState {
 
     pub fn clone_rule(&mut self, rule: &Rule) {
         let cloned = rule.clone_with_new_id();
-        let new_id = cloned.id.clone();
         let new_name = cloned.name.clone();
 
         let _ = IpcClient::call(&IpcRequest::SaveRule(cloned.clone()));
-        self.selected_rule_id = Some(new_id);
+        self.selected_rule_id = None;
         if self.editing_rule.is_some() {
             self.editing_rule = Some(cloned);
             self.is_creating_new_rule = false;
         }
         self.set_toast(format!("{}: {}", self.loc().toast_rule_cloned, new_name));
         self.sync_with_daemon();
+    }
+
+    pub fn reorder_rule_by_id(&mut self, src_id: &str, target_id: Option<&str>, insert_after: bool) {
+        if let Some(ds) = &mut self.daemon_state {
+            if let Some(src_pos) = ds.config.rules.iter().position(|r| r.id == src_id) {
+                let rule = ds.config.rules.remove(src_pos);
+                let target_pos = if let Some(tid) = target_id {
+                    ds.config.rules.iter().position(|r| r.id == tid)
+                } else {
+                    None
+                };
+                let insert_idx = match target_pos {
+                    Some(pos) => {
+                        if insert_after {
+                            pos + 1
+                        } else {
+                            pos
+                        }
+                    }
+                    None => ds.config.rules.len(),
+                };
+                let insert_idx = insert_idx.min(ds.config.rules.len());
+                ds.config.rules.insert(insert_idx, rule);
+                let _ = IpcClient::call(&IpcRequest::SaveConfig(ds.config.clone()));
+            }
+        }
     }
 
     pub fn toggle_rule(&mut self, id: &str, enabled: bool) {
@@ -1191,7 +1296,7 @@ impl GuiState {
     }
 
     pub fn test_run_rule(&mut self, id: &str) {
-        self.active_test_runs.insert(id.to_string());
+        self.active_test_runs.insert(id.to_string(), Instant::now());
         if let Some(rule) = self.daemon_state.as_ref().and_then(|s| s.config.rules.iter().find(|r| r.id == id)) {
             for id in Self::extract_rule_overlay_ids(rule) {
                 self.active_test_overlays.insert(id);
@@ -1611,6 +1716,50 @@ mod tests {
         } else {
             panic!("Expected IfElse action");
         }
+    }
+
+    #[test]
+    fn test_reorder_rule_by_id() {
+        let mut state = GuiState::new();
+        let mut r1 = Rule::default();
+        r1.id = "rule-1".into();
+        let mut r2 = Rule::default();
+        r2.id = "rule-2".into();
+        let mut r3 = Rule::default();
+        r3.id = "rule-3".into();
+        let mut r4 = Rule::default();
+        r4.id = "rule-4".into();
+        let mut config = crate::config::AppConfig::default();
+        config.rules = vec![r1, r2, r3, r4];
+        state.daemon_state = Some(DaemonState {
+            autorun_enabled: false,
+            uptime_secs: 0,
+            daemon_memory_bytes: 0,
+            daemon_cpu_usage: 0.0,
+            active_rules_count: 0,
+            total_rules_count: 0,
+            config,
+            logs: vec![],
+            active_rule_executions: std::collections::HashMap::new(),
+            active_overlay_ids: std::collections::HashSet::new(),
+            active_test_rule_ids: std::collections::HashSet::new(),
+            analytics: Default::default(),
+        });
+
+        // Move rule-1 after rule-3
+        state.reorder_rule_by_id("rule-1", Some("rule-3"), true);
+        let ids: Vec<_> = state.daemon_state.as_ref().unwrap().config.rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["rule-2", "rule-3", "rule-1", "rule-4"]);
+
+        // Move rule-4 before rule-2
+        state.reorder_rule_by_id("rule-4", Some("rule-2"), false);
+        let ids: Vec<_> = state.daemon_state.as_ref().unwrap().config.rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["rule-4", "rule-2", "rule-3", "rule-1"]);
+
+        // Move rule-2 to bottom (target None)
+        state.reorder_rule_by_id("rule-2", None, false);
+        let ids: Vec<_> = state.daemon_state.as_ref().unwrap().config.rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["rule-4", "rule-3", "rule-1", "rule-2"]);
     }
 }
 
