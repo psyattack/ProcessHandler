@@ -22,7 +22,7 @@
 > Synector interacts directly with Windows system processes and administrative APIs. The developers are not liable for any errors, including those caused by the user, as also stated in the license.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/777a1893-7a49-45bf-ad52-84375a5ef808">
+  <img src="https://github.com/user-attachments/assets/d81b93e2-cac7-42d2-a23a-596cdb111d51">
 </p>
 
 ## Features
